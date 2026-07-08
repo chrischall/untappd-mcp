@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import { client } from '../../src/client.js';
 import { registerCheckinTools } from '../../src/tools/checkin.js';
+import { registerWishlistTools } from '../../src/tools/wishlist.js';
 import { createTestHarness } from '../helpers.js';
 
 const write = vi.spyOn(client, 'write').mockResolvedValue(undefined as never);
@@ -17,7 +18,10 @@ function parse(result: { content: { text: string }[] }): Record<string, unknown>
 
 describe('write tools (confirm-gated)', () => {
   it('setup', async () => {
-    harness = await createTestHarness((server) => registerCheckinTools(server));
+    harness = await createTestHarness((server) => {
+      registerCheckinTools(server);
+      registerWishlistTools(server);
+    });
   });
 
   it('toast without confirm is a dry run and makes NO network call', async () => {
@@ -67,5 +71,25 @@ describe('write tools (confirm-gated)', () => {
     const r = await harness.callTool('untappd_checkin', { bid: 100, rating: 4.1, confirm: true });
     expect((r as { isError?: boolean }).isError).toBe(true);
     expect(write).not.toHaveBeenCalled();
+  });
+
+  it('wishlist_add without confirm is a dry run', async () => {
+    const r = await harness.callTool('untappd_wishlist_add', { bid: 3839 });
+    expect(parse(r as never).dryRun).toBe(true);
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it('wishlist_add with confirm hits /user/wishlist/add', async () => {
+    write.mockResolvedValueOnce({ result: 'success' });
+    const r = await harness.callTool('untappd_wishlist_add', { bid: 3839, confirm: true });
+    expect(write).toHaveBeenCalledWith('GET', '/user/wishlist/add', { query: { bid: 3839 } });
+    expect(parse(r as never).added).toBe(true);
+  });
+
+  it('wishlist_remove with confirm hits /user/wishlist/delete', async () => {
+    write.mockResolvedValueOnce({ result: 'success' });
+    const r = await harness.callTool('untappd_wishlist_remove', { bid: 3839, confirm: true });
+    expect(write).toHaveBeenCalledWith('GET', '/user/wishlist/delete', { query: { bid: 3839 } });
+    expect(parse(r as never).removed).toBe(true);
   });
 });

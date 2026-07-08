@@ -5,6 +5,7 @@ import { registerVenueTools } from '../src/tools/venue.js';
 import { registerUserTools } from '../src/tools/user.js';
 import { registerFeedTools } from '../src/tools/feed.js';
 import { registerDiscoverTools } from '../src/tools/discover.js';
+import { registerWishlistTools } from '../src/tools/wishlist.js';
 import { registerCheckinTools } from '../src/tools/checkin.js';
 import { registerUtilityTools } from '../src/tools/utilities.js';
 import { createTestHarness } from './helpers.js';
@@ -17,7 +18,7 @@ describe('tool registry', () => {
     if (harness) await harness.close();
   });
 
-  it('includes all 24 expected tools', async () => {
+  it('includes all 26 expected tools', async () => {
     harness = await createTestHarness((server) => {
       registerBeerTools(server);
       registerBreweryTools(server);
@@ -25,6 +26,7 @@ describe('tool registry', () => {
       registerUserTools(server);
       registerFeedTools(server);
       registerDiscoverTools(server);
+      registerWishlistTools(server);
       registerCheckinTools(server);
       registerUtilityTools(server);
     });
@@ -56,10 +58,12 @@ describe('tool registry', () => {
       'untappd_toast',
       'untappd_add_comment',
       'untappd_checkin',
+      'untappd_wishlist_add',
+      'untappd_wishlist_remove',
       'untappd_healthcheck',
     ].sort();
 
     expect(allNames).toEqual(expected);
-    expect(tools).toHaveLength(24);
+    expect(tools).toHaveLength(26);
   });
 });

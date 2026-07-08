@@ -62,7 +62,8 @@ Reads: `untappd_search_beer`, `untappd_beer_info`, `untappd_beer_activity`,
 `untappd_notifications`, `untappd_local_checkins`, `untappd_healthcheck`.
 
 Writes (confirm-gated — return a dry-run preview unless called with
-`confirm: true`): `untappd_toast`, `untappd_add_comment`, `untappd_checkin`.
+`confirm: true`): `untappd_toast`, `untappd_add_comment`, `untappd_checkin`,
+`untappd_wishlist_add`, `untappd_wishlist_remove`.
 
 ## Development
 

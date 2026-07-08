@@ -7,6 +7,7 @@ import { registerVenueTools } from './tools/venue.js';
 import { registerUserTools } from './tools/user.js';
 import { registerFeedTools } from './tools/feed.js';
 import { registerDiscoverTools } from './tools/discover.js';
+import { registerWishlistTools } from './tools/wishlist.js';
 import { registerCheckinTools } from './tools/checkin.js';
 import { registerUtilityTools } from './tools/utilities.js';
 
@@ -27,6 +28,7 @@ await runMcp({
     registerUserTools,
     registerFeedTools,
     registerDiscoverTools,
+    registerWishlistTools,
     registerCheckinTools,
     registerUtilityTools,
   ],
