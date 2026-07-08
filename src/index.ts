@@ -8,6 +8,7 @@ import { registerUserTools } from './tools/user.js';
 import { registerFeedTools } from './tools/feed.js';
 import { registerDiscoverTools } from './tools/discover.js';
 import { registerWishlistTools } from './tools/wishlist.js';
+import { registerFriendActionTools } from './tools/friends.js';
 import { registerCheckinTools } from './tools/checkin.js';
 import { registerUtilityTools } from './tools/utilities.js';
 
@@ -29,6 +30,7 @@ await runMcp({
     registerFeedTools,
     registerDiscoverTools,
     registerWishlistTools,
+    registerFriendActionTools,
     registerCheckinTools,
     registerUtilityTools,
   ],

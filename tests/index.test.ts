@@ -6,6 +6,7 @@ import { registerUserTools } from '../src/tools/user.js';
 import { registerFeedTools } from '../src/tools/feed.js';
 import { registerDiscoverTools } from '../src/tools/discover.js';
 import { registerWishlistTools } from '../src/tools/wishlist.js';
+import { registerFriendActionTools } from '../src/tools/friends.js';
 import { registerCheckinTools } from '../src/tools/checkin.js';
 import { registerUtilityTools } from '../src/tools/utilities.js';
 import { createTestHarness } from './helpers.js';
@@ -18,7 +19,7 @@ describe('tool registry', () => {
     if (harness) await harness.close();
   });
 
-  it('includes all 29 expected tools', async () => {
+  it('includes all 33 expected tools', async () => {
     harness = await createTestHarness((server) => {
       registerBeerTools(server);
       registerBreweryTools(server);
@@ -27,6 +28,7 @@ describe('tool registry', () => {
       registerFeedTools(server);
       registerDiscoverTools(server);
       registerWishlistTools(server);
+      registerFriendActionTools(server);
       registerCheckinTools(server);
       registerUtilityTools(server);
     });
@@ -51,6 +53,10 @@ describe('tool registry', () => {
       'untappd_user_badges',
       'untappd_user_friends',
       'untappd_pending_friends',
+      'untappd_add_friend',
+      'untappd_accept_friend',
+      'untappd_reject_friend',
+      'untappd_remove_friend',
       'untappd_activity_feed',
       'untappd_checkin_info',
       'untappd_trending',
@@ -67,6 +73,6 @@ describe('tool registry', () => {
     ].sort();
 
     expect(allNames).toEqual(expected);
-    expect(tools).toHaveLength(29);
+    expect(tools).toHaveLength(33);
   });
 });
