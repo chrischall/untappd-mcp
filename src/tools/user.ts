@@ -150,7 +150,7 @@ export function registerUserTools(server: McpServer): void {
       description:
         'Get the incoming friend requests waiting on YOUR account — the users who have requested to be your ' +
         'friend. Read-only.',
-      annotations: toolAnnotations({ title: 'Get your pending friend requests', readOnly: true, idempotent: false, openWorld: true }),
+      annotations: toolAnnotations({ title: 'Get your pending friend requests', readOnly: true, idempotent: true, openWorld: true }),
       inputSchema: {
         limit: z.number().int().min(1).max(50).optional().describe('Max requests (1–50, default 25)'),
         offset: z.number().int().min(0).optional().describe('Result offset for paging (default 0)'),
