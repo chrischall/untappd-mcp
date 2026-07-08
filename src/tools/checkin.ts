@@ -78,6 +78,33 @@ export function registerCheckinTools(server: McpServer): void {
   );
 
   server.registerTool(
+    'untappd_delete_comment',
+    {
+      title: 'Delete a comment from an Untappd check-in',
+      description:
+        'Delete one of YOUR comments by its comment id (the id from a check-in\'s comments list). Without ' +
+        'confirm: true it returns a dry-run preview and makes NO network call; with confirm: true it deletes.',
+      annotations: toolAnnotations({ title: 'Delete a comment from an Untappd check-in', readOnly: false, idempotent: true, openWorld: true }),
+      inputSchema: {
+        comment_id: z.number().int().positive().describe('Untappd comment id (from a check-in\'s comments.items)'),
+        confirm: schemaConfirm,
+      },
+    },
+    async ({ comment_id, confirm }) => {
+      if (confirm !== true) {
+        return textResult({
+          dryRun: true,
+          action: 'delete_comment',
+          comment_id,
+          note: 'Dry run — re-run with confirm: true to delete this comment from your Untappd account.',
+        });
+      }
+      const data = await client.write<{ result?: string }>('POST', `/checkin/deletecomment/${comment_id}`);
+      return textResult({ deleted: true, comment_id, result: data?.result });
+    },
+  );
+
+  server.registerTool(
     'untappd_checkin',
     {
       title: 'Check in a beer on Untappd',

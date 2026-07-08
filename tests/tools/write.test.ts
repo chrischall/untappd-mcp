@@ -49,6 +49,19 @@ describe('write tools (confirm-gated)', () => {
     expect(write).toHaveBeenCalledWith('POST', '/checkin/addcomment/42', { form: { comment: 'nice' } });
   });
 
+  it('delete_comment without confirm is a dry run', async () => {
+    const r = await harness.callTool('untappd_delete_comment', { comment_id: 89011936 });
+    expect(parse(r as never).dryRun).toBe(true);
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it('delete_comment with confirm posts to deletecomment', async () => {
+    write.mockResolvedValueOnce({ result: 'success' });
+    const r = await harness.callTool('untappd_delete_comment', { comment_id: 89011936, confirm: true });
+    expect(write).toHaveBeenCalledWith('POST', '/checkin/deletecomment/89011936');
+    expect(parse(r as never).deleted).toBe(true);
+  });
+
   it('checkin without confirm previews the exact form and makes NO network call', async () => {
     const r = await harness.callTool('untappd_checkin', { bid: 100, rating: 4.25, shout: 'great' });
     const out = parse(r as never);
@@ -84,6 +97,12 @@ describe('write tools (confirm-gated)', () => {
     const r = await harness.callTool('untappd_wishlist_add', { bid: 3839, confirm: true });
     expect(write).toHaveBeenCalledWith('GET', '/user/wishlist/add', { query: { bid: 3839 } });
     expect(parse(r as never).added).toBe(true);
+  });
+
+  it('wishlist_remove without confirm is a dry run', async () => {
+    const r = await harness.callTool('untappd_wishlist_remove', { bid: 3839 });
+    expect(parse(r as never).dryRun).toBe(true);
+    expect(write).not.toHaveBeenCalled();
   });
 
   it('wishlist_remove with confirm hits /user/wishlist/delete', async () => {

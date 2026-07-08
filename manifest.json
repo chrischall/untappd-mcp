@@ -84,6 +84,7 @@
     { "name": "untappd_local_checkins", "description": "Get nearby check-ins by lat/lng" },
     { "name": "untappd_toast", "description": "Toast (like) a check-in on your account (confirm-gated)" },
     { "name": "untappd_add_comment", "description": "Comment on a check-in from your account (confirm-gated)" },
+    { "name": "untappd_delete_comment", "description": "Delete one of your comments (confirm-gated)" },
     { "name": "untappd_checkin", "description": "Post a new beer check-in to your feed (confirm-gated)" },
     { "name": "untappd_wishlist_add", "description": "Add a beer to your wishlist (confirm-gated)" },
     { "name": "untappd_wishlist_remove", "description": "Remove a beer from your wishlist (confirm-gated)" },
