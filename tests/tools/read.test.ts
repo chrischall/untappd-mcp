@@ -172,4 +172,25 @@ describe('read tools', () => {
     await harness.callTool('untappd_local_checkins', { lat: 40.7, lng: -74, radius: 10 });
     expect(get).toHaveBeenCalledWith('/thepub/local', { lat: 40.7, lng: -74, limit: undefined, radius: 10 });
   });
+
+  // compact wiring is live for every check-in feed tool (not just search_beer):
+  // a fat checkin must come back slimmed when compact: true.
+  const FEED_COMPACT: [string, Record<string, unknown>][] = [
+    ['untappd_user_checkins', { username: 'someone' }],
+    ['untappd_activity_feed', {}],
+    ['untappd_beer_activity', { bid: 1 }],
+    ['untappd_venue_activity', { venue_id: 1 }],
+    ['untappd_local_checkins', { lat: 1, lng: 2 }],
+  ];
+  for (const [tool, args] of FEED_COMPACT) {
+    it(`${tool} applies the compact projection`, async () => {
+      get.mockResolvedValueOnce({
+        checkins: { items: [{ checkin_id: 7, beer: { bid: 3, beer_name: 'X', beer_style: 'IPA' }, user: { user_name: 'u' } }] },
+      });
+      const r = await harness.callTool(tool, { ...args, compact: true });
+      const item = ((parse(r as never).checkins as { items: Record<string, unknown>[] }).items)[0];
+      expect(item).toMatchObject({ checkin_id: 7, user: 'u', beer: { bid: 3, name: 'X', style: 'IPA' } });
+      expect(item.beer_name).toBeUndefined(); // proves it was projected, not raw
+    });
+  }
 });
