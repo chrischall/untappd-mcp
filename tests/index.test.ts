@@ -18,7 +18,7 @@ describe('tool registry', () => {
     if (harness) await harness.close();
   });
 
-  it('includes all 26 expected tools', async () => {
+  it('includes all 27 expected tools', async () => {
     harness = await createTestHarness((server) => {
       registerBeerTools(server);
       registerBreweryTools(server);
@@ -57,6 +57,7 @@ describe('tool registry', () => {
       'untappd_local_checkins',
       'untappd_toast',
       'untappd_add_comment',
+      'untappd_delete_comment',
       'untappd_checkin',
       'untappd_wishlist_add',
       'untappd_wishlist_remove',
@@ -64,6 +65,6 @@ describe('tool registry', () => {
     ].sort();
 
     expect(allNames).toEqual(expected);
-    expect(tools).toHaveLength(26);
+    expect(tools).toHaveLength(27);
   });
 });
