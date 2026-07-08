@@ -1,9 +1,20 @@
+import { existsSync } from 'node:fs';
+import { extname } from 'node:path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { textResult, toolAnnotations, schemaConfirm } from '@chrischall/mcp-utils';
+import { textResult, toolAnnotations, schemaConfirm, fileBlob, McpToolError, createHelpfulError } from '@chrischall/mcp-utils';
 import { client } from '../client.js';
 
 const CheckinIdSchema = z.number().int().positive().describe('Untappd check-in id');
+
+// The photo upload only round-trips as JPEG in the captured app flow; PNG is
+// accepted by S3 but Untappd stores as jpg, so we keep to the verified formats.
+const PHOTO_CONTENT_TYPES: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png' };
+
+function photoExt(path: string): string {
+  const ext = extname(path).slice(1).toLowerCase();
+  return ext === 'jpeg' ? 'jpg' : ext;
+}
 
 // Untappd ratings are 0–5 in 0.25 increments; 0 (or omitted) means no rating.
 const RatingSchema = z
@@ -105,20 +116,48 @@ export function registerCheckinTools(server: McpServer): void {
   );
 
   server.registerTool(
+    'untappd_delete_checkin',
+    {
+      title: 'Delete an Untappd check-in',
+      description:
+        'Permanently delete one of YOUR check-ins by its id. This is destructive and cannot be undone. Without ' +
+        'confirm: true it returns a dry-run preview and makes NO network call; with confirm: true it deletes.',
+      annotations: toolAnnotations({ title: 'Delete an Untappd check-in', readOnly: false, idempotent: true, openWorld: true }),
+      inputSchema: {
+        checkin_id: CheckinIdSchema,
+        confirm: schemaConfirm,
+      },
+    },
+    async ({ checkin_id, confirm }) => {
+      if (confirm !== true) {
+        return textResult({
+          dryRun: true,
+          action: 'delete_checkin',
+          checkin_id,
+          note: 'Dry run — re-run with confirm: true to PERMANENTLY delete this check-in. This cannot be undone.',
+        });
+      }
+      const data = await client.write<{ result?: string }>('POST', `/checkin/delete/${checkin_id}`);
+      return textResult({ deleted: true, checkin_id, result: data?.result });
+    },
+  );
+
+  server.registerTool(
     'untappd_checkin',
     {
       title: 'Check in a beer on Untappd',
       description:
         'Post a NEW beer check-in to YOUR Untappd account — this publishes to your public feed. Provide the beer id ' +
-        '(bid) from untappd_search_beer; optionally a rating (0–5 in 0.25 steps), a shout (comment), and a venue via ' +
-        'foursquare_id (from a venue result). Without confirm: true it returns a dry-run preview of the exact fields ' +
-        'and makes NO network call; with confirm: true it posts. Photo attachment is not supported.',
+        '(bid) from untappd_search_beer; optionally a rating (0–5 in 0.25 steps), a shout (comment), a venue via ' +
+        'foursquare_id, and a local photo via photo_path (JPEG/PNG). Without confirm: true it returns a dry-run ' +
+        'preview of the exact fields and makes NO network call; with confirm: true it posts.',
       annotations: toolAnnotations({ title: 'Check in a beer on Untappd', readOnly: false, idempotent: false, openWorld: true }),
       inputSchema: {
         bid: z.number().int().positive().describe('Untappd beer id to check in (from untappd_search_beer)'),
         rating: RatingSchema.optional().describe('Rating 0–5 in 0.25 increments (omit for no rating)'),
         shout: z.string().max(2000).optional().describe('Optional shout / comment text for the check-in'),
         foursquare_id: z.string().optional().describe('Optional Foursquare venue id to tag the check-in location'),
+        photo_path: z.string().optional().describe('Optional path to a local JPEG/PNG photo to attach to the check-in'),
         geolat: z.number().optional().describe('Optional latitude of the check-in'),
         geolng: z.number().optional().describe('Optional longitude of the check-in'),
         container_id: z
@@ -129,8 +168,17 @@ export function registerCheckinTools(server: McpServer): void {
         confirm: schemaConfirm,
       },
     },
-    async ({ bid, rating, shout, foursquare_id, geolat, geolng, container_id, confirm }) => {
+    async ({ bid, rating, shout, foursquare_id, photo_path, geolat, geolng, container_id, confirm }) => {
       const { timezone, gmt_offset } = localTimezone();
+      let ext: string | undefined;
+      if (photo_path !== undefined) {
+        ext = photoExt(photo_path);
+        if (!(ext in PHOTO_CONTENT_TYPES)) {
+          throw createHelpfulError(`Unsupported photo type "${ext || '(none)'}".`, {
+            hint: 'Attach a .jpg, .jpeg, or .png file.',
+          });
+        }
+      }
       const form: Record<string, string | number | undefined> = {
         bid,
         rating: rating !== undefined ? rating.toFixed(2) : undefined,
@@ -141,7 +189,8 @@ export function registerCheckinTools(server: McpServer): void {
         container_id,
         timezone,
         gmt_offset,
-        is_photo: 'false',
+        is_photo: photo_path !== undefined ? 'true' : 'false',
+        photo_file_ext: photo_path !== undefined ? ext : undefined,
         platform: 'ios',
       };
       if (confirm !== true) {
@@ -149,11 +198,30 @@ export function registerCheckinTools(server: McpServer): void {
           dryRun: true,
           action: 'checkin',
           form,
+          photo: photo_path !== undefined ? { path: photo_path, note: 'will be uploaded after the check-in is created' } : undefined,
           note: 'Dry run — re-run with confirm: true to POST this check-in to your public Untappd feed.',
         });
       }
-      const data = await client.write<{ checkin_id?: number }>('POST', '/checkin/add', { form });
-      return textResult({ checked_in: true, checkin_id: data?.checkin_id, response: data });
+      // The check-in is created first; the photo (if any) is a follow-up S3
+      // upload keyed to the returned checkin_id, then a uploadComplete call.
+      if (photo_path !== undefined && !existsSync(photo_path)) {
+        throw new McpToolError(`Photo file not found: ${photo_path}`);
+      }
+      const data = await client.write<{
+        checkin_id?: number;
+        photo_upload?: { url?: string; destination_url?: string };
+      }>('POST', '/checkin/add', { form });
+
+      let photo_attached = false;
+      if (photo_path !== undefined && data?.photo_upload?.url && data.checkin_id) {
+        const blob = await fileBlob(photo_path); // file-backed, streamed — not heap-buffered
+        await client.putBinary(data.photo_upload.url, blob, PHOTO_CONTENT_TYPES[ext!]);
+        await client.write('POST', '/photo/uploadComplete', {
+          form: { checkin_id: data.checkin_id, destination_url: data.photo_upload.destination_url },
+        });
+        photo_attached = true;
+      }
+      return textResult({ checked_in: true, checkin_id: data?.checkin_id, photo_attached, response: data });
     },
   );
 }

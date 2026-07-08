@@ -140,7 +140,7 @@ export class UntappdClient {
   private async send(
     method: string,
     url: string,
-    init: { headers: Record<string, string>; body?: string },
+    init: { headers: Record<string, string>; body?: BodyInit },
   ): Promise<Response> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -298,6 +298,19 @@ export class UntappdClient {
     opts: { query?: Query; form?: Record<string, string | number | undefined | null> } = {},
   ): Promise<T> {
     return this.request<T>(method, path, { ...opts, auth: 'bearer' });
+  }
+
+  /**
+   * Raw binary PUT to an arbitrary URL — used for the presigned-S3 photo upload,
+   * whose URL already carries its own auth query params, so NO Untappd token is
+   * attached. `body` should be a file-backed Blob (streamed, not heap-buffered).
+   */
+  async putBinary(url: string, body: Blob, contentType: string): Promise<void> {
+    const res = await this.send('PUT', url, { headers: { 'Content-Type': contentType }, body });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new McpToolError(formatApiError(res.status, 'PUT', url.split('?')[0], text, { service: `${SERVICE} photo upload` }));
+    }
   }
 }
 
