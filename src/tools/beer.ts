@@ -2,8 +2,14 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { textResult, toolAnnotations } from '@chrischall/mcp-utils';
 import { client } from '../client.js';
+import { compactBeerSearch, compactCheckins } from '../compact.js';
 
 const BidSchema = z.number().int().positive().describe('Untappd beer id (bid)');
+
+const CompactCheckins = z
+  .boolean()
+  .optional()
+  .describe('Project each check-in to a slim summary (id, user, beer, rating, comment, venue, toast/comment counts) to save context (default false)');
 
 export function registerBeerTools(server: McpServer): void {
   server.registerTool(
@@ -23,11 +29,15 @@ export function registerBeerTools(server: McpServer): void {
           .enum(['checkin', 'name', 'count'])
           .optional()
           .describe('Sort order: checkin (relevance, default), name, or count'),
+        compact: z
+          .boolean()
+          .optional()
+          .describe('Project each result to a slim summary (bid, name, brewery, style, abv, ibu, counts) to save context (default false)'),
       },
     },
-    async ({ query, limit, offset, sort }) => {
+    async ({ query, limit, offset, sort, compact }) => {
       const data = await client.get('/search/beer', { q: query, limit, offset, sort });
-      return textResult(data);
+      return textResult(compact ? compactBeerSearch(data) : data);
     },
   );
 
@@ -65,11 +75,12 @@ export function registerBeerTools(server: McpServer): void {
         bid: BidSchema,
         limit: z.number().int().min(1).max(50).optional().describe('Max check-ins (1–50, default 25)'),
         max_id: z.number().int().positive().optional().describe('Return check-ins older than this id (for paging)'),
+        compact: CompactCheckins,
       },
     },
-    async ({ bid, limit, max_id }) => {
+    async ({ bid, limit, max_id, compact }) => {
       const data = await client.get(`/beer/checkins/${bid}`, { limit, max_id });
-      return textResult(data);
+      return textResult(compact ? compactCheckins(data) : data);
     },
   );
 }

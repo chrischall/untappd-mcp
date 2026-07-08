@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { textResult, toolAnnotations, createHelpfulError } from '@chrischall/mcp-utils';
 import { client } from '../client.js';
+import { compactCheckins } from '../compact.js';
 
 const UsernameArg = z
   .string()
@@ -52,11 +53,15 @@ export function registerUserTools(server: McpServer): void {
         username: UsernameArg,
         limit: z.number().int().min(1).max(50).optional().describe('Max check-ins (1–50, default 25)'),
         max_id: z.number().int().positive().optional().describe('Return check-ins older than this id (for paging)'),
+        compact: z
+          .boolean()
+          .optional()
+          .describe('Project each check-in to a slim summary to save context (default false)'),
       },
     },
-    async ({ username, limit, max_id }) => {
+    async ({ username, limit, max_id, compact }) => {
       const data = await client.get(`/user/checkins/${resolveUser(username)}`, { limit, max_id });
-      return textResult(data);
+      return textResult(compact ? compactCheckins(data) : data);
     },
   );
 

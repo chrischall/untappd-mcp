@@ -40,6 +40,13 @@ describe('read tools', () => {
     expect(get).toHaveBeenCalledWith('/search/beer', { q: 'pliny', limit: 5, offset: 10, sort: undefined });
   });
 
+  it('search_beer compact projects results to slim summaries', async () => {
+    get.mockResolvedValueOnce({ beers: { items: [{ checkin_count: 5, have_had: false, beer: { bid: 9, beer_name: 'A', beer_style: 'IPA', beer_abv: 6 }, brewery: { brewery_name: 'B' } }] } });
+    const r = await harness.callTool('untappd_search_beer', { query: 'a', compact: true });
+    const item = (parse(r as never).beers as any).items[0];
+    expect(item).toEqual({ bid: 9, name: 'A', style: 'IPA', abv: 6, ibu: undefined, brewery: 'B', checkin_count: 5, have_had: false });
+  });
+
   it('beer_info hits the bid path with compact', async () => {
     get.mockResolvedValueOnce({ beer: { bid: 4499 } });
     const r = await harness.callTool('untappd_beer_info', { bid: 4499, compact: true });
