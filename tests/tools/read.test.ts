@@ -125,6 +125,21 @@ describe('read tools', () => {
     expect(get).toHaveBeenCalledWith('/checkin/view/1583983210');
   });
 
+  it('user_wishlist compact projects to slim beers', async () => {
+    get.mockResolvedValueOnce({ beers: { items: [{ created_at: 'd', beer: { bid: 5, beer_name: 'W', beer_style: 'Lager' }, brewery: { brewery_name: 'Br' } }] } });
+    const r = await harness.callTool('untappd_user_wishlist', { username: 'x', compact: true });
+    const item = (parse(r as never).beers as any).items[0];
+    expect(item).toMatchObject({ bid: 5, name: 'W', added_at: 'd' });
+    expect(item.beer).toBeUndefined();
+  });
+
+  it('user_beers compact projects to slim beers', async () => {
+    get.mockResolvedValueOnce({ beers: { items: [{ count: 2, beer: { bid: 6, beer_name: 'D' }, brewery: { brewery_name: 'Co' } }] } });
+    const r = await harness.callTool('untappd_user_beers', { username: 'x', compact: true });
+    const item = (parse(r as never).beers as any).items[0];
+    expect(item).toMatchObject({ bid: 6, name: 'D', your_count: 2 });
+  });
+
   it('user_venues hits /user/venues with an explicit username', async () => {
     get.mockResolvedValueOnce({ venues: {} });
     await harness.callTool('untappd_user_venues', { username: 'someone', sort: 'checkin' });

@@ -39,11 +39,10 @@ export function compactCheckin(item: unknown): Dict {
   };
 }
 
-/** Slim a single beer-search result item. */
-export function compactBeerResult(item: unknown): Dict {
-  const i = asDict(item) ?? {};
-  const beer = asDict(i.beer) ?? {};
-  const brewery = asDict(i.brewery);
+/** The beer fields common to every beer-list item (search, wishlist, distinct). */
+function beerCore(item: Dict): Dict {
+  const beer = asDict(item.beer) ?? {};
+  const brewery = asDict(item.brewery);
   return {
     bid: beer.bid,
     name: beer.beer_name,
@@ -51,8 +50,30 @@ export function compactBeerResult(item: unknown): Dict {
     abv: beer.beer_abv,
     ibu: beer.beer_ibu,
     brewery: brewery?.brewery_name,
-    checkin_count: i.checkin_count,
-    have_had: i.have_had,
+  };
+}
+
+/** Slim a single beer-search result item. */
+export function compactBeerResult(item: unknown): Dict {
+  const i = asDict(item) ?? {};
+  return { ...beerCore(i), checkin_count: i.checkin_count, have_had: i.have_had };
+}
+
+/** Slim a single wishlist item (adds when it was wishlisted). */
+export function compactWishlistBeer(item: unknown): Dict {
+  const i = asDict(item) ?? {};
+  return { ...beerCore(i), added_at: i.created_at };
+}
+
+/** Slim a single distinct-beers (user/beers) item — your count, ratings, last had. */
+export function compactUserBeer(item: unknown): Dict {
+  const i = asDict(item) ?? {};
+  return {
+    ...beerCore(i),
+    your_count: i.count,
+    your_rating: i.user_auth_rating_score || undefined,
+    global_rating: i.rating_score || undefined,
+    last_had: i.recent_created_at,
   };
 }
 
@@ -74,3 +95,5 @@ export function projectItems(resp: unknown, container: string, mapFn: (item: unk
 
 export const compactCheckins = (resp: unknown): unknown => projectItems(resp, 'checkins', compactCheckin);
 export const compactBeerSearch = (resp: unknown): unknown => projectItems(resp, 'beers', compactBeerResult);
+export const compactWishlist = (resp: unknown): unknown => projectItems(resp, 'beers', compactWishlistBeer);
+export const compactUserBeers = (resp: unknown): unknown => projectItems(resp, 'beers', compactUserBeer);

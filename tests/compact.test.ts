@@ -1,5 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
-import { compactCheckin, compactBeerResult, compactCheckins, compactBeerSearch } from '../src/compact.js';
+import {
+  compactCheckin,
+  compactBeerResult,
+  compactCheckins,
+  compactBeerSearch,
+  compactWishlistBeer,
+  compactUserBeer,
+} from '../src/compact.js';
 
 describe('compact projections', () => {
   it('slims a check-in to the useful fields', () => {
@@ -37,6 +44,16 @@ describe('compact projections', () => {
   it('slims a beer search item', () => {
     const raw = { checkin_count: 100, have_had: false, your_count: 0, beer: { bid: 7, beer_name: 'Stout', beer_style: 'Stout', beer_abv: 5, beer_ibu: 30, beer_description: 'z'.repeat(400) }, brewery: { brewery_name: 'B' } };
     expect(compactBeerResult(raw)).toEqual({ bid: 7, name: 'Stout', style: 'Stout', abv: 5, ibu: 30, brewery: 'B', checkin_count: 100, have_had: false });
+  });
+
+  it('slims a wishlist item (keeps the added-at date)', () => {
+    const raw = { created_at: 'yesterday', beer: { bid: 5, beer_name: 'W', beer_style: 'Lager', beer_abv: 4, beer_description: 'x'.repeat(300) }, brewery: { brewery_name: 'Br' }, friends: { items: [] } };
+    expect(compactWishlistBeer(raw)).toEqual({ bid: 5, name: 'W', style: 'Lager', abv: 4, ibu: undefined, brewery: 'Br', added_at: 'yesterday' });
+  });
+
+  it('slims a distinct-beers item (your count, ratings, last had)', () => {
+    const raw = { count: 3, rating_score: 3.9, user_auth_rating_score: 4.25, recent_created_at: 'last week', first_had: 't', beer: { bid: 8, beer_name: 'D', beer_style: 'Porter', beer_abv: 5.5 }, brewery: { brewery_name: 'Co' } };
+    expect(compactUserBeer(raw)).toEqual({ bid: 8, name: 'D', style: 'Porter', abv: 5.5, ibu: undefined, brewery: 'Co', your_count: 3, your_rating: 4.25, global_rating: 3.9, last_had: 'last week' });
   });
 
   it('projects the checkins.items array in place, keeping pagination', () => {
