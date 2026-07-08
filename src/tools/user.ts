@@ -111,7 +111,7 @@ export function registerUserTools(server: McpServer): void {
         compact: z
           .boolean()
           .optional()
-          .describe('Project each beer to a slim summary (bid, name, brewery, style, abv, your_count, your_rating, global_rating, last_had) to save context (default false)'),
+          .describe('Project each beer to a slim summary (bid, name, brewery, style, abv, ibu, your_count, your_rating, global_rating, last_had) to save context (default false)'),
       },
     },
     async ({ username, limit, offset, sort, compact }) => {
