@@ -2,14 +2,14 @@ import { existsSync } from 'node:fs';
 import { extname } from 'node:path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { textResult, toolAnnotations, schemaConfirm, fileBlob, McpToolError, createHelpfulError } from '@chrischall/mcp-utils';
+import { textResult, toolAnnotations, schemaConfirm, fileBlob, McpToolError, createHelpfulError, messageOf } from '@chrischall/mcp-utils';
 import { client } from '../client.js';
 
 const CheckinIdSchema = z.number().int().positive().describe('Untappd check-in id');
 
-// The photo upload only round-trips as JPEG in the captured app flow; PNG is
-// accepted by S3 but Untappd stores as jpg, so we keep to the verified formats.
-const PHOTO_CONTENT_TYPES: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png' };
+// Keyed by the NORMALISED extension that photoExt() returns (jpeg → jpg), so
+// there is no dead `jpeg` entry.
+const PHOTO_CONTENT_TYPES: Record<string, string> = { jpg: 'image/jpeg', png: 'image/png' };
 
 function photoExt(path: string): string {
   const ext = extname(path).slice(1).toLowerCase();
@@ -202,26 +202,47 @@ export function registerCheckinTools(server: McpServer): void {
           note: 'Dry run — re-run with confirm: true to POST this check-in to your public Untappd feed.',
         });
       }
-      // The check-in is created first; the photo (if any) is a follow-up S3
-      // upload keyed to the returned checkin_id, then a uploadComplete call.
-      if (photo_path !== undefined && !existsSync(photo_path)) {
-        throw new McpToolError(`Photo file not found: ${photo_path}`);
+      // Open the photo BEFORE creating the check-in, so a missing/unreadable
+      // file fails fast without leaving an orphaned photo-less check-in behind.
+      let blob: Blob | undefined;
+      if (photo_path !== undefined) {
+        if (!existsSync(photo_path)) throw new McpToolError(`Photo file not found: ${photo_path}`);
+        blob = await fileBlob(photo_path); // file-backed, streamed — not heap-buffered
       }
+
       const data = await client.write<{
         checkin_id?: number;
         photo_upload?: { url?: string; destination_url?: string };
       }>('POST', '/checkin/add', { form });
 
+      // Photo is a follow-up S3 upload keyed to the returned checkin_id, then an
+      // uploadComplete call. The check-in already exists at this point, so a
+      // photo failure is surfaced explicitly (photo_error) rather than thrown —
+      // never silently dropped.
       let photo_attached = false;
-      if (photo_path !== undefined && data?.photo_upload?.url && data.checkin_id) {
-        const blob = await fileBlob(photo_path); // file-backed, streamed — not heap-buffered
-        await client.putBinary(data.photo_upload.url, blob, PHOTO_CONTENT_TYPES[ext!]);
-        await client.write('POST', '/photo/uploadComplete', {
-          form: { checkin_id: data.checkin_id, destination_url: data.photo_upload.destination_url },
-        });
-        photo_attached = true;
+      let photo_error: string | undefined;
+      if (photo_path !== undefined) {
+        if (data?.photo_upload?.url && data.checkin_id) {
+          try {
+            await client.putBinary(data.photo_upload.url, blob!, PHOTO_CONTENT_TYPES[ext!]);
+            await client.write('POST', '/photo/uploadComplete', {
+              form: { checkin_id: data.checkin_id, destination_url: data.photo_upload.destination_url },
+            });
+            photo_attached = true;
+          } catch (e) {
+            photo_error = `Check-in ${data.checkin_id} was created, but attaching the photo failed: ${messageOf(e)}. Retry attaching, or remove it with untappd_delete_checkin.`;
+          }
+        } else {
+          photo_error = `Check-in ${data?.checkin_id} was created, but Untappd returned no photo upload URL, so no photo was attached.`;
+        }
       }
-      return textResult({ checked_in: true, checkin_id: data?.checkin_id, photo_attached, response: data });
+      return textResult({
+        checked_in: true,
+        checkin_id: data?.checkin_id,
+        photo_attached,
+        ...(photo_error ? { photo_error } : {}),
+        response: data,
+      });
     },
   );
 }
