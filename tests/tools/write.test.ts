@@ -1,3 +1,6 @@
+import { writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import { client } from '../../src/client.js';
 import { registerCheckinTools } from '../../src/tools/checkin.js';
@@ -5,11 +8,19 @@ import { registerWishlistTools } from '../../src/tools/wishlist.js';
 import { createTestHarness } from '../helpers.js';
 
 const write = vi.spyOn(client, 'write').mockResolvedValue(undefined as never);
+const putBinary = vi.spyOn(client, 'putBinary').mockResolvedValue(undefined);
+
+const TMP_JPG = join(tmpdir(), 'untappd-test-photo.jpg');
+writeFileSync(TMP_JPG, Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00]));
 
 let harness: Awaited<ReturnType<typeof createTestHarness>>;
-beforeEach(() => write.mockClear());
+beforeEach(() => {
+  write.mockClear();
+  putBinary.mockClear();
+});
 afterAll(async () => {
   if (harness) await harness.close();
+  rmSync(TMP_JPG, { force: true });
 });
 
 function parse(result: { content: { text: string }[] }): Record<string, unknown> {
@@ -84,6 +95,49 @@ describe('write tools (confirm-gated)', () => {
     const r = await harness.callTool('untappd_checkin', { bid: 100, rating: 4.1, confirm: true });
     expect((r as { isError?: boolean }).isError).toBe(true);
     expect(write).not.toHaveBeenCalled();
+  });
+
+  it('checkin with a photo previews the photo path on dry run (no upload)', async () => {
+    const r = await harness.callTool('untappd_checkin', { bid: 100, photo_path: TMP_JPG });
+    const out = parse(r as never);
+    expect(out.dryRun).toBe(true);
+    expect((out.form as Record<string, unknown>).is_photo).toBe('true');
+    expect((out.form as Record<string, unknown>).photo_file_ext).toBe('jpg');
+    expect(write).not.toHaveBeenCalled();
+    expect(putBinary).not.toHaveBeenCalled();
+  });
+
+  it('checkin rejects an unsupported photo type', async () => {
+    const r = await harness.callTool('untappd_checkin', { bid: 100, photo_path: '/tmp/nope.gif', confirm: true });
+    expect((r as { isError?: boolean }).isError).toBe(true);
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it('checkin with a photo runs the 3-step upload flow', async () => {
+    write
+      .mockResolvedValueOnce({ checkin_id: 777, photo_upload: { url: 'https://s3/put', destination_url: 'https://s3/dest' } })
+      .mockResolvedValueOnce({ result: 'success' }); // uploadComplete
+    const r = await harness.callTool('untappd_checkin', { bid: 100, photo_path: TMP_JPG, confirm: true });
+    // step 1: checkin/add with is_photo=true
+    expect(write).toHaveBeenNthCalledWith(1, 'POST', '/checkin/add', expect.objectContaining({ form: expect.objectContaining({ is_photo: 'true', photo_file_ext: 'jpg' }) }));
+    // step 2: presigned S3 PUT with the JPEG content type
+    expect(putBinary).toHaveBeenCalledWith('https://s3/put', expect.anything(), 'image/jpeg');
+    // step 3: uploadComplete with checkin_id + destination_url
+    expect(write).toHaveBeenNthCalledWith(2, 'POST', '/photo/uploadComplete', { form: { checkin_id: 777, destination_url: 'https://s3/dest' } });
+    expect(parse(r as never).photo_attached).toBe(true);
+  });
+
+  it('delete_checkin without confirm is a dry run', async () => {
+    const r = await harness.callTool('untappd_delete_checkin', { checkin_id: 555 });
+    expect(parse(r as never).dryRun).toBe(true);
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it('delete_checkin with confirm posts to /checkin/delete', async () => {
+    write.mockResolvedValueOnce({ result: 'success' });
+    const r = await harness.callTool('untappd_delete_checkin', { checkin_id: 555, confirm: true });
+    expect(write).toHaveBeenCalledWith('POST', '/checkin/delete/555');
+    expect(parse(r as never).deleted).toBe(true);
   });
 
   it('wishlist_add without confirm is a dry run', async () => {
