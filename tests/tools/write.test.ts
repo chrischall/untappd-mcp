@@ -136,6 +136,18 @@ describe('write tools (confirm-gated)', () => {
     expect(putBinary).not.toHaveBeenCalled();
   });
 
+  it('checkin surfaces photo_error when the S3 upload throws (check-in already created)', async () => {
+    write.mockResolvedValueOnce({ checkin_id: 999, photo_upload: { url: 'https://s3/put', destination_url: 'https://s3/dest' } });
+    putBinary.mockRejectedValueOnce(new Error('S3 fail'));
+    const r = await harness.callTool('untappd_checkin', { bid: 100, photo_path: TMP_JPG, confirm: true });
+    const out = parse(r as never);
+    expect(out.checked_in).toBe(true);
+    expect(out.photo_attached).toBe(false);
+    expect(String(out.photo_error)).toContain('999');
+    // uploadComplete must NOT be called after the upload failed (only checkin/add ran)
+    expect(write).toHaveBeenCalledTimes(1);
+  });
+
   it('delete_checkin without confirm is a dry run', async () => {
     const r = await harness.callTool('untappd_delete_checkin', { checkin_id: 555 });
     expect(parse(r as never).dryRun).toBe(true);
