@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { textResult, toolAnnotations, createHelpfulError } from '@chrischall/mcp-utils';
 import { client } from '../client.js';
-import { compactCheckins } from '../compact.js';
+import { compactCheckins, compactWishlist, compactUserBeers } from '../compact.js';
 
 const UsernameArg = z
   .string()
@@ -80,11 +80,15 @@ export function registerUserTools(server: McpServer): void {
           .enum(['date', 'name', 'brewery', 'style', 'rating', 'abv'])
           .optional()
           .describe('Sort order (default date added, newest first)'),
+        compact: z
+          .boolean()
+          .optional()
+          .describe('Project each beer to a slim summary (bid, name, brewery, style, abv, added_at) to save context (default false)'),
       },
     },
-    async ({ username, limit, offset, sort }) => {
+    async ({ username, limit, offset, sort, compact }) => {
       const data = await client.get(`/user/wishlist/${resolveUser(username)}`, { limit, offset, sort });
-      return textResult(data);
+      return textResult(compact ? compactWishlist(data) : data);
     },
   );
 
@@ -104,11 +108,15 @@ export function registerUserTools(server: McpServer): void {
           .enum(['date', 'checkin', 'highest_rated', 'lowest_rated', 'name', 'this_month', 'highest_abv'])
           .optional()
           .describe('Sort order (default date, most recent first)'),
+        compact: z
+          .boolean()
+          .optional()
+          .describe('Project each beer to a slim summary (bid, name, brewery, your_count, your_rating, last_had) to save context (default false)'),
       },
     },
-    async ({ username, limit, offset, sort }) => {
+    async ({ username, limit, offset, sort, compact }) => {
       const data = await client.get(`/user/beers/${resolveUser(username)}`, { limit, offset, sort });
-      return textResult(data);
+      return textResult(compact ? compactUserBeers(data) : data);
     },
   );
 
