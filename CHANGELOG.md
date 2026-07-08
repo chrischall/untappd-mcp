@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.1.0](https://github.com/chrischall/untappd-mcp/compare/v1.0.0...v1.1.0) (2026-07-08)
+
+
+### Features
+
+* compact projections for wishlist and distinct beers ([#31](https://github.com/chrischall/untappd-mcp/issues/31)) ([c5bce61](https://github.com/chrischall/untappd-mcp/commit/c5bce616e20c1b6f999c493d342c612ad6409210))
+* friend-management writes (add/accept/reject/remove) ([#26](https://github.com/chrischall/untappd-mcp/issues/26)) ([26a5a6b](https://github.com/chrischall/untappd-mcp/commit/26a5a6b6b953cafc52f954626e529ebeb9961b85))
+* opt-in compact projections for fat list responses ([#28](https://github.com/chrischall/untappd-mcp/issues/28)) ([00986dd](https://github.com/chrischall/untappd-mcp/commit/00986ddca9ed759e5e366f8c48b4bf5a8b3798d2))
+* untappd_open_url (resolve + fetch) and reconcile the manifest tool list ([#33](https://github.com/chrischall/untappd-mcp/issues/33)) ([c560e24](https://github.com/chrischall/untappd-mcp/commit/c560e2421f9136b4cf99c825f88faae67b2476ae))
+* untappd_pending_friends (incoming friend requests) ([#23](https://github.com/chrischall/untappd-mcp/issues/23)) ([37b27b6](https://github.com/chrischall/untappd-mcp/commit/37b27b688e5802ab3993149a1a4f03b2a810d087))
+* URL resolver + user venues + Foursquare venue lookup ([#27](https://github.com/chrischall/untappd-mcp/issues/27)) ([d22888e](https://github.com/chrischall/untappd-mcp/commit/d22888e55848399239a1f945d2103df92e3181f5))
+
+
+### Documentation
+
+* complete user_beers compact field list in its description ([#34](https://github.com/chrischall/untappd-mcp/issues/34)) ([baab0a9](https://github.com/chrischall/untappd-mcp/commit/baab0a90ca2cc5bb564c8de5ebecf47d33083aaf))
+
 ## 1.0.0 (2026-07-08)
 
 
