@@ -1,0 +1,16 @@
+{
+  "name": "untappd-mcp",
+  "displayName": "Untappd",
+  "version": "0.0.0",
+  "description": "MCP server for Untappd — search beers/breweries/venues, read check-ins and wishlists, and post check-ins, toasts, and comments",
+  "author": {
+    "name": "Chris Hall",
+    "email": "chris.c.hall@gmail.com"
+  },
+  "homepage": "https://github.com/chrischall/untappd-mcp",
+  "repository": "https://github.com/chrischall/untappd-mcp",
+  "license": "MIT",
+  "keywords": ["untappd", "beer", "breweries", "checkins", "mcp"],
+  "skills": "./SKILL.md",
+  "mcp": "./.mcp.json"
+}

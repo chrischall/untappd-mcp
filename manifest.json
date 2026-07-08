@@ -1,0 +1,90 @@
+{
+  "$schema": "https://raw.githubusercontent.com/anthropics/dxt/main/dist/mcpb-manifest.schema.json",
+  "manifest_version": "0.3",
+  "name": "untappd-mcp",
+  "display_name": "Untappd",
+  "version": "0.0.0",
+  "description": "Search Untappd beers, breweries, and venues; read profiles, check-ins, wishlists, and your friend feed; and post check-ins, toasts, and comments to your account",
+  "author": {
+    "name": "Chris Chall",
+    "email": "chris.c.hall@gmail.com",
+    "url": "https://github.com/chrischall"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chrischall/untappd-mcp"
+  },
+  "homepage": "https://github.com/chrischall/untappd-mcp",
+  "support": "https://github.com/chrischall/untappd-mcp/issues",
+  "license": "MIT",
+  "keywords": ["untappd", "beer", "breweries", "checkins", "beer-ratings"],
+  "server": {
+    "type": "node",
+    "entry_point": "dist/bundle.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/bundle.js"],
+      "env": {
+        "UNTAPPD_USERNAME": "${user_config.untappd_username}",
+        "UNTAPPD_PASSWORD": "${user_config.untappd_password}",
+        "UNTAPPD_CLIENT_ID": "${user_config.untappd_client_id}",
+        "UNTAPPD_CLIENT_SECRET": "${user_config.untappd_client_secret}"
+      }
+    }
+  },
+  "user_config": {
+    "untappd_username": {
+      "type": "string",
+      "title": "Untappd Username",
+      "description": "Your Untappd username (or the email you log in with).",
+      "required": true
+    },
+    "untappd_password": {
+      "type": "string",
+      "title": "Untappd Password",
+      "description": "Your Untappd account password. Used only to log in via the mobile xauth endpoint; never stored server-side.",
+      "required": true,
+      "sensitive": true
+    },
+    "untappd_client_id": {
+      "type": "string",
+      "title": "Untappd Client ID",
+      "description": "The Untappd mobile app client id. See the README for how to obtain it by intercepting the app's traffic.",
+      "required": true,
+      "sensitive": true
+    },
+    "untappd_client_secret": {
+      "type": "string",
+      "title": "Untappd Client Secret",
+      "description": "The Untappd mobile app client secret (obtained the same way as the client id).",
+      "required": true,
+      "sensitive": true
+    }
+  },
+  "tools": [
+    { "name": "untappd_search_beer", "description": "Search Untappd for beers by name" },
+    { "name": "untappd_beer_info", "description": "Get full detail for a beer by its bid" },
+    { "name": "untappd_search_brewery", "description": "Search Untappd for breweries by name" },
+    { "name": "untappd_brewery_info", "description": "Get full detail for a brewery by id" },
+    { "name": "untappd_search_venue", "description": "Search Untappd for venues by name" },
+    { "name": "untappd_venue_info", "description": "Get full detail for a venue by id" },
+    { "name": "untappd_user_info", "description": "Get an Untappd user's profile" },
+    { "name": "untappd_user_checkins", "description": "Get a user's recent check-ins" },
+    { "name": "untappd_user_wishlist", "description": "Get a user's wishlist beers" },
+    { "name": "untappd_user_beers", "description": "Get a user's distinct (unique) beers" },
+    { "name": "untappd_user_badges", "description": "Get a user's earned badges" },
+    { "name": "untappd_user_friends", "description": "Get a user's friend list" },
+    { "name": "untappd_activity_feed", "description": "Get your friend activity feed" },
+    { "name": "untappd_checkin_info", "description": "Get full detail for a single check-in" },
+    { "name": "untappd_toast", "description": "Toast (like) a check-in on your account (confirm-gated)" },
+    { "name": "untappd_add_comment", "description": "Comment on a check-in from your account (confirm-gated)" },
+    { "name": "untappd_checkin", "description": "Post a new beer check-in to your feed (confirm-gated)" },
+    { "name": "untappd_healthcheck", "description": "Verify Untappd connectivity and login" }
+  ],
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "node": ">=22.5"
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "untappd": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/index.js"],
+      "env": {
+        "UNTAPPD_USERNAME": "${UNTAPPD_USERNAME}",
+        "UNTAPPD_PASSWORD": "${UNTAPPD_PASSWORD}",
+        "UNTAPPD_CLIENT_ID": "${UNTAPPD_CLIENT_ID}",
+        "UNTAPPD_CLIENT_SECRET": "${UNTAPPD_CLIENT_SECRET}"
+      }
+    }
+  }
+}

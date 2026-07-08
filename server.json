@@ -1,0 +1,50 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.chrischall/untappd-mcp",
+  "description": "Untappd MCP — search beers/breweries/venues, read check-ins & wishlists, post check-ins",
+  "repository": {
+    "url": "https://github.com/chrischall/untappd-mcp",
+    "source": "github"
+  },
+  "version": "0.0.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "untappd-mcp",
+      "version": "0.0.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "UNTAPPD_USERNAME",
+          "description": "Your Untappd username or login email.",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "UNTAPPD_PASSWORD",
+          "description": "Your Untappd account password (used only for xauth login).",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": true
+        },
+        {
+          "name": "UNTAPPD_CLIENT_ID",
+          "description": "Untappd mobile app client id (obtained by intercepting the app; see README).",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": true
+        },
+        {
+          "name": "UNTAPPD_CLIENT_SECRET",
+          "description": "Untappd mobile app client secret.",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}
