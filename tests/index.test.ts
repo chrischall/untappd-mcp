@@ -18,7 +18,7 @@ describe('tool registry', () => {
     if (harness) await harness.close();
   });
 
-  it('includes all 28 expected tools', async () => {
+  it('includes all 29 expected tools', async () => {
     harness = await createTestHarness((server) => {
       registerBeerTools(server);
       registerBreweryTools(server);
@@ -50,6 +50,7 @@ describe('tool registry', () => {
       'untappd_user_beers',
       'untappd_user_badges',
       'untappd_user_friends',
+      'untappd_pending_friends',
       'untappd_activity_feed',
       'untappd_checkin_info',
       'untappd_trending',
@@ -66,6 +67,6 @@ describe('tool registry', () => {
     ].sort();
 
     expect(allNames).toEqual(expected);
-    expect(tools).toHaveLength(28);
+    expect(tools).toHaveLength(29);
   });
 });

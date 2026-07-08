@@ -57,7 +57,7 @@ Reads: `untappd_search_beer`, `untappd_beer_info`, `untappd_beer_activity`,
 `untappd_search_brewery`, `untappd_brewery_info`, `untappd_brewery_beers`,
 `untappd_search_venue`, `untappd_venue_info`, `untappd_venue_activity`,
 `untappd_user_info`, `untappd_user_checkins`, `untappd_user_wishlist`,
-`untappd_user_beers`, `untappd_user_badges`, `untappd_user_friends`,
+`untappd_user_beers`, `untappd_user_badges`, `untappd_user_friends`, `untappd_pending_friends`,
 `untappd_activity_feed`, `untappd_checkin_info`, `untappd_trending`,
 `untappd_notifications`, `untappd_local_checkins`, `untappd_healthcheck`.
 
