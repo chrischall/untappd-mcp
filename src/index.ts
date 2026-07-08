@@ -6,6 +6,7 @@ import { registerBreweryTools } from './tools/brewery.js';
 import { registerVenueTools } from './tools/venue.js';
 import { registerUserTools } from './tools/user.js';
 import { registerFeedTools } from './tools/feed.js';
+import { registerResolveTools } from './tools/resolve.js';
 import { registerDiscoverTools } from './tools/discover.js';
 import { registerWishlistTools } from './tools/wishlist.js';
 import { registerFriendActionTools } from './tools/friends.js';
@@ -28,6 +29,7 @@ await runMcp({
     registerVenueTools,
     registerUserTools,
     registerFeedTools,
+    registerResolveTools,
     registerDiscoverTools,
     registerWishlistTools,
     registerFriendActionTools,
