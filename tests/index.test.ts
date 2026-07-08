@@ -4,6 +4,7 @@ import { registerBreweryTools } from '../src/tools/brewery.js';
 import { registerVenueTools } from '../src/tools/venue.js';
 import { registerUserTools } from '../src/tools/user.js';
 import { registerFeedTools } from '../src/tools/feed.js';
+import { registerDiscoverTools } from '../src/tools/discover.js';
 import { registerCheckinTools } from '../src/tools/checkin.js';
 import { registerUtilityTools } from '../src/tools/utilities.js';
 import { createTestHarness } from './helpers.js';
@@ -16,13 +17,14 @@ describe('tool registry', () => {
     if (harness) await harness.close();
   });
 
-  it('includes all 18 expected tools', async () => {
+  it('includes all 24 expected tools', async () => {
     harness = await createTestHarness((server) => {
       registerBeerTools(server);
       registerBreweryTools(server);
       registerVenueTools(server);
       registerUserTools(server);
       registerFeedTools(server);
+      registerDiscoverTools(server);
       registerCheckinTools(server);
       registerUtilityTools(server);
     });
@@ -33,10 +35,13 @@ describe('tool registry', () => {
     const expected = [
       'untappd_search_beer',
       'untappd_beer_info',
+      'untappd_beer_activity',
       'untappd_search_brewery',
       'untappd_brewery_info',
+      'untappd_brewery_beers',
       'untappd_search_venue',
       'untappd_venue_info',
+      'untappd_venue_activity',
       'untappd_user_info',
       'untappd_user_checkins',
       'untappd_user_wishlist',
@@ -45,6 +50,9 @@ describe('tool registry', () => {
       'untappd_user_friends',
       'untappd_activity_feed',
       'untappd_checkin_info',
+      'untappd_trending',
+      'untappd_notifications',
+      'untappd_local_checkins',
       'untappd_toast',
       'untappd_add_comment',
       'untappd_checkin',
@@ -52,6 +60,6 @@ describe('tool registry', () => {
     ].sort();
 
     expect(allNames).toEqual(expected);
-    expect(tools).toHaveLength(18);
+    expect(tools).toHaveLength(24);
   });
 });

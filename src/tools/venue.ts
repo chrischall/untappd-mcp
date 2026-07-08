@@ -41,4 +41,24 @@ export function registerVenueTools(server: McpServer): void {
       return textResult(data);
     },
   );
+
+  server.registerTool(
+    'untappd_venue_activity',
+    {
+      title: 'Get recent check-ins at a venue',
+      description:
+        'Get the recent public check-ins at a venue by its id — who was there, what they drank, and their ratings. ' +
+        'Page backwards with max_id (the pagination.max_id from a prior call). Read-only.',
+      annotations: toolAnnotations({ title: 'Get recent check-ins at a venue', readOnly: true, idempotent: false, openWorld: true }),
+      inputSchema: {
+        venue_id: z.number().int().positive().describe('Untappd venue id'),
+        limit: z.number().int().min(1).max(50).optional().describe('Max check-ins (1–50, default 25)'),
+        max_id: z.number().int().positive().optional().describe('Return check-ins older than this id (for paging)'),
+      },
+    },
+    async ({ venue_id, limit, max_id }) => {
+      const data = await client.get(`/venue/checkins/${venue_id}`, { limit, max_id });
+      return textResult(data);
+    },
+  );
 }

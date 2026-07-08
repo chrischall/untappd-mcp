@@ -42,4 +42,28 @@ export function registerBreweryTools(server: McpServer): void {
       return textResult(data);
     },
   );
+
+  server.registerTool(
+    'untappd_brewery_beers',
+    {
+      title: "Get a brewery's beer list",
+      description:
+        'Get the beers a brewery makes, by brewery id, with per-beer rating and check-in counts. Supports sorting ' +
+        'and paging. Get an id from untappd_search_brewery. Read-only.',
+      annotations: toolAnnotations({ title: "Get a brewery's beer list", readOnly: true, idempotent: true, openWorld: true }),
+      inputSchema: {
+        brewery_id: z.number().int().positive().describe('Untappd brewery id'),
+        limit: z.number().int().min(1).max(50).optional().describe('Max beers (1–50, default 25)'),
+        offset: z.number().int().min(0).optional().describe('Result offset for paging (default 0)'),
+        sort: z
+          .enum(['name', 'style', 'abv', 'rating', 'count'])
+          .optional()
+          .describe('Sort order (default by popularity)'),
+      },
+    },
+    async ({ brewery_id, limit, offset, sort }) => {
+      const data = await client.get(`/brewery/beer_list/${brewery_id}`, { limit, offset, sort });
+      return textResult(data);
+    },
+  );
 }
