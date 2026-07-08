@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { textResult, toolAnnotations } from '@chrischall/mcp-utils';
 import { client } from '../client.js';
+import { compactCheckins } from '../compact.js';
 
 export function registerDiscoverTools(server: McpServer): void {
   server.registerTool(
@@ -52,11 +53,15 @@ export function registerDiscoverTools(server: McpServer): void {
         lng: z.number().min(-180).max(180).describe('Longitude of the location'),
         limit: z.number().int().min(1).max(50).optional().describe('Max check-ins (1–50, default 25)'),
         radius: z.number().int().min(1).max(25).optional().describe('Search radius (default per Untappd)'),
+        compact: z
+          .boolean()
+          .optional()
+          .describe('Project each check-in to a slim summary to save context (default false)'),
       },
     },
-    async ({ lat, lng, limit, radius }) => {
+    async ({ lat, lng, limit, radius, compact }) => {
       const data = await client.get('/thepub/local', { lat, lng, limit, radius });
-      return textResult(data);
+      return textResult(compact ? compactCheckins(data) : data);
     },
   );
 }
