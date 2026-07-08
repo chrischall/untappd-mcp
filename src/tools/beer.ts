@@ -52,4 +52,24 @@ export function registerBeerTools(server: McpServer): void {
       return textResult(data);
     },
   );
+
+  server.registerTool(
+    'untappd_beer_activity',
+    {
+      title: 'Get recent check-ins for a beer',
+      description:
+        'Get the recent public check-ins for a beer by its bid — who drank it, their rating, comment, and venue. ' +
+        'Page backwards with max_id (the pagination.max_id from a prior call). Read-only.',
+      annotations: toolAnnotations({ title: 'Get recent check-ins for a beer', readOnly: true, idempotent: false, openWorld: true }),
+      inputSchema: {
+        bid: BidSchema,
+        limit: z.number().int().min(1).max(50).optional().describe('Max check-ins (1–50, default 25)'),
+        max_id: z.number().int().positive().optional().describe('Return check-ins older than this id (for paging)'),
+      },
+    },
+    async ({ bid, limit, max_id }) => {
+      const data = await client.get(`/beer/checkins/${bid}`, { limit, max_id });
+      return textResult(data);
+    },
+  );
 }

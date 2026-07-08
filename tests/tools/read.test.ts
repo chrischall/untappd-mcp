@@ -5,6 +5,7 @@ import { registerBreweryTools } from '../../src/tools/brewery.js';
 import { registerVenueTools } from '../../src/tools/venue.js';
 import { registerUserTools } from '../../src/tools/user.js';
 import { registerFeedTools } from '../../src/tools/feed.js';
+import { registerDiscoverTools } from '../../src/tools/discover.js';
 import { registerUtilityTools } from '../../src/tools/utilities.js';
 import { createTestHarness } from '../helpers.js';
 
@@ -28,6 +29,7 @@ describe('read tools', () => {
       registerVenueTools(server);
       registerUserTools(server);
       registerFeedTools(server);
+      registerDiscoverTools(server);
       registerUtilityTools(server);
     });
   });
@@ -76,10 +78,26 @@ describe('read tools', () => {
   });
 
   it('user tool errors clearly when no username and no configured account', async () => {
-    // In the test env UNTAPPD_USERNAME is unset, so client.loginName is null.
-    const r = await harness.callTool('untappd_user_wishlist', {});
-    expect((r as { isError?: boolean }).isError).toBe(true);
-    expect(get).not.toHaveBeenCalled();
+    // Force "no configured account" regardless of any ambient .env / env var.
+    const loginName = vi.spyOn(client, 'loginName', 'get').mockReturnValue(null);
+    try {
+      const r = await harness.callTool('untappd_user_wishlist', {});
+      expect((r as { isError?: boolean }).isError).toBe(true);
+      expect(get).not.toHaveBeenCalled();
+    } finally {
+      loginName.mockRestore();
+    }
+  });
+
+  it('user tool falls back to the configured account when username is omitted', async () => {
+    const loginName = vi.spyOn(client, 'loginName', 'get').mockReturnValue('me');
+    try {
+      get.mockResolvedValueOnce({ beers: {} });
+      await harness.callTool('untappd_user_wishlist', {});
+      expect(get).toHaveBeenCalledWith('/user/wishlist/me', { limit: undefined, offset: undefined, sort: undefined });
+    } finally {
+      loginName.mockRestore();
+    }
   });
 
   it('activity_feed calls /checkin/recent', async () => {
@@ -92,5 +110,41 @@ describe('read tools', () => {
     get.mockResolvedValueOnce({ checkin: {} });
     await harness.callTool('untappd_checkin_info', { checkin_id: 1583983210 });
     expect(get).toHaveBeenCalledWith('/checkin/view/1583983210');
+  });
+
+  it('beer_activity hits /beer/checkins with paging', async () => {
+    get.mockResolvedValueOnce({ checkins: { items: [] } });
+    await harness.callTool('untappd_beer_activity', { bid: 4499, limit: 5, max_id: 42 });
+    expect(get).toHaveBeenCalledWith('/beer/checkins/4499', { limit: 5, max_id: 42 });
+  });
+
+  it('venue_activity hits /venue/checkins', async () => {
+    get.mockResolvedValueOnce({ checkins: { items: [] } });
+    await harness.callTool('untappd_venue_activity', { venue_id: 100 });
+    expect(get).toHaveBeenCalledWith('/venue/checkins/100', { limit: undefined, max_id: undefined });
+  });
+
+  it('brewery_beers hits /brewery/beer_list', async () => {
+    get.mockResolvedValueOnce({ beers: {} });
+    await harness.callTool('untappd_brewery_beers', { brewery_id: 5143, sort: 'rating' });
+    expect(get).toHaveBeenCalledWith('/brewery/beer_list/5143', { limit: undefined, offset: undefined, sort: 'rating' });
+  });
+
+  it('trending calls /beer/trending', async () => {
+    get.mockResolvedValueOnce({ macro: {}, micro: {} });
+    await harness.callTool('untappd_trending', {});
+    expect(get).toHaveBeenCalledWith('/beer/trending');
+  });
+
+  it('notifications calls /notifications', async () => {
+    get.mockResolvedValueOnce({ notifications: {} });
+    await harness.callTool('untappd_notifications', { limit: 10 });
+    expect(get).toHaveBeenCalledWith('/notifications', { limit: 10, offset: undefined });
+  });
+
+  it('local_checkins passes lat/lng/radius to /thepub/local', async () => {
+    get.mockResolvedValueOnce({ checkins: { items: [] } });
+    await harness.callTool('untappd_local_checkins', { lat: 40.7, lng: -74, radius: 10 });
+    expect(get).toHaveBeenCalledWith('/thepub/local', { lat: 40.7, lng: -74, limit: undefined, radius: 10 });
   });
 });
