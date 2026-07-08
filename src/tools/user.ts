@@ -144,6 +144,30 @@ export function registerUserTools(server: McpServer): void {
   );
 
   server.registerTool(
+    'untappd_user_venues',
+    {
+      title: 'Get venues a user has checked in at',
+      description:
+        "Get the venues a user has checked in at, most recent first, with per-venue check-in counts. Supports " +
+        'sorting and paging. Omit username for your own account. Read-only.',
+      annotations: toolAnnotations({ title: 'Get venues a user has checked in at', readOnly: true, idempotent: true, openWorld: true }),
+      inputSchema: {
+        username: UsernameArg,
+        limit: z.number().int().min(1).max(50).optional().describe('Max venues (1–50, default 25)'),
+        offset: z.number().int().min(0).optional().describe('Result offset for paging (default 0)'),
+        sort: z
+          .enum(['date', 'name', 'checkin', 'highest_rated'])
+          .optional()
+          .describe('Sort order (default most recent)'),
+      },
+    },
+    async ({ username, limit, offset, sort }) => {
+      const data = await client.get(`/user/venues/${resolveUser(username)}`, { limit, offset, sort });
+      return textResult(data);
+    },
+  );
+
+  server.registerTool(
     'untappd_pending_friends',
     {
       title: 'Get your pending friend requests',

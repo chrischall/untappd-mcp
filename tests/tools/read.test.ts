@@ -118,6 +118,18 @@ describe('read tools', () => {
     expect(get).toHaveBeenCalledWith('/checkin/view/1583983210');
   });
 
+  it('user_venues hits /user/venues with an explicit username', async () => {
+    get.mockResolvedValueOnce({ venues: {} });
+    await harness.callTool('untappd_user_venues', { username: 'someone', sort: 'checkin' });
+    expect(get).toHaveBeenCalledWith('/user/venues/someone', { limit: undefined, offset: undefined, sort: 'checkin' });
+  });
+
+  it('venue_by_foursquare hits the foursquare_lookup path (url-encoded)', async () => {
+    get.mockResolvedValueOnce({ venue: {} });
+    await harness.callTool('untappd_venue_by_foursquare', { foursquare_id: 'abc 123' });
+    expect(get).toHaveBeenCalledWith('/venue/foursquare_lookup/abc%20123');
+  });
+
   it('beer_activity hits /beer/checkins with paging', async () => {
     get.mockResolvedValueOnce({ checkins: { items: [] } });
     await harness.callTool('untappd_beer_activity', { bid: 4499, limit: 5, max_id: 42 });

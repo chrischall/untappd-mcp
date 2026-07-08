@@ -43,6 +43,24 @@ export function registerVenueTools(server: McpServer): void {
   );
 
   server.registerTool(
+    'untappd_venue_by_foursquare',
+    {
+      title: 'Look up an Untappd venue by Foursquare id',
+      description:
+        'Resolve a Foursquare venue id to its Untappd venue. Useful to turn a foursquare_id (e.g. from a check-in) ' +
+        'into an Untappd venue you can pass to untappd_venue_info / untappd_venue_activity. Read-only.',
+      annotations: toolAnnotations({ title: 'Look up an Untappd venue by Foursquare id', readOnly: true, idempotent: true, openWorld: true }),
+      inputSchema: {
+        foursquare_id: z.string().min(1).describe('Foursquare venue id'),
+      },
+    },
+    async ({ foursquare_id }) => {
+      const data = await client.get(`/venue/foursquare_lookup/${encodeURIComponent(foursquare_id)}`);
+      return textResult(data);
+    },
+  );
+
+  server.registerTool(
     'untappd_venue_activity',
     {
       title: 'Get recent check-ins at a venue',
