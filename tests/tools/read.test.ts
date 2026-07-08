@@ -100,6 +100,12 @@ describe('read tools', () => {
     }
   });
 
+  it('pending_friends calls /user/pending', async () => {
+    get.mockResolvedValueOnce({ count: 0, items: [] });
+    await harness.callTool('untappd_pending_friends', { limit: 10 });
+    expect(get).toHaveBeenCalledWith('/user/pending', { limit: 10, offset: undefined });
+  });
+
   it('activity_feed calls /checkin/recent', async () => {
     get.mockResolvedValueOnce({ checkins: { items: [] } });
     await harness.callTool('untappd_activity_feed', { limit: 10 });
