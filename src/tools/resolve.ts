@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { textResult, toolAnnotations, createHelpfulError } from '@chrischall/mcp-utils';
+import { client } from '../client.js';
 
 export interface ResolvedUrl {
   type: 'beer' | 'brewery' | 'venue' | 'user' | 'checkin';
@@ -76,6 +77,40 @@ export function registerResolveTools(server: McpServer): void {
         });
       }
       return textResult(resolved);
+    },
+  );
+
+  server.registerTool(
+    'untappd_open_url',
+    {
+      title: 'Open an Untappd URL (resolve + fetch)',
+      description:
+        'Resolve an untappd.com URL AND fetch the entity detail in one call — the convenience combination of ' +
+        'untappd_resolve + the matching info tool. Returns { resolved, detail }. Read-only.',
+      annotations: toolAnnotations({ title: 'Open an Untappd URL', readOnly: true, idempotent: true, openWorld: true }),
+      inputSchema: {
+        url: z.string().min(1).describe('An untappd.com URL to resolve and fetch'),
+      },
+    },
+    async ({ url }) => {
+      const resolved = parseUntappdUrl(url);
+      if (!resolved) {
+        throw createHelpfulError(`Not a recognised Untappd entity URL: ${url}`, {
+          hint: 'Expected an untappd.com link like /b/<slug>/<bid>, /w/<slug>/<id>, /v/<slug>/<id>, or /user/<name>.',
+        });
+      }
+      const path =
+        resolved.type === 'beer'
+          ? `/beer/info/${resolved.id}`
+          : resolved.type === 'brewery'
+            ? `/brewery/info/${resolved.id}`
+            : resolved.type === 'venue'
+              ? `/venue/info/${resolved.id}`
+              : resolved.type === 'checkin'
+                ? `/checkin/view/${resolved.id}`
+                : `/user/info/${encodeURIComponent(resolved.username!)}`;
+      const detail = await client.get(path);
+      return textResult({ resolved, detail });
     },
   );
 }

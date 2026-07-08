@@ -181,6 +181,42 @@
     {
       "name": "untappd_healthcheck",
       "description": "Verify Untappd connectivity and login"
+    },
+    {
+      "name": "untappd_pending_friends",
+      "description": "Get your incoming friend requests"
+    },
+    {
+      "name": "untappd_user_venues",
+      "description": "Get venues a user has checked in at"
+    },
+    {
+      "name": "untappd_venue_by_foursquare",
+      "description": "Look up an Untappd venue by Foursquare id"
+    },
+    {
+      "name": "untappd_resolve",
+      "description": "Resolve an untappd.com URL to its entity + id"
+    },
+    {
+      "name": "untappd_open_url",
+      "description": "Resolve an untappd.com URL and fetch its detail"
+    },
+    {
+      "name": "untappd_add_friend",
+      "description": "Send a friend request (confirm-gated)"
+    },
+    {
+      "name": "untappd_accept_friend",
+      "description": "Accept an incoming friend request (confirm-gated)"
+    },
+    {
+      "name": "untappd_reject_friend",
+      "description": "Reject an incoming friend request (confirm-gated)"
+    },
+    {
+      "name": "untappd_remove_friend",
+      "description": "Remove a friend or cancel a sent request (confirm-gated)"
     }
   ],
   "compatibility": {
