@@ -127,6 +127,15 @@ describe('write tools (confirm-gated)', () => {
     expect(parse(r as never).photo_attached).toBe(true);
   });
 
+  it('checkin surfaces photo_error (not silent) when no upload URL is returned', async () => {
+    write.mockResolvedValueOnce({ checkin_id: 888 }); // no photo_upload in response
+    const r = await harness.callTool('untappd_checkin', { bid: 100, photo_path: TMP_JPG, confirm: true });
+    const out = parse(r as never);
+    expect(out.photo_attached).toBe(false);
+    expect(typeof out.photo_error).toBe('string');
+    expect(putBinary).not.toHaveBeenCalled();
+  });
+
   it('delete_checkin without confirm is a dry run', async () => {
     const r = await harness.callTool('untappd_delete_checkin', { checkin_id: 555 });
     expect(parse(r as never).dryRun).toBe(true);
