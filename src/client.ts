@@ -41,31 +41,19 @@ const DEFAULTS = {
 /** Query params; undefined/null members are dropped by buildQueryString. */
 export type Query = Record<string, string | number | boolean | undefined | null>;
 
-interface Credentials {
-  username: string;
-  password: string;
-  clientId: string;
-  clientSecret: string;
-}
-
 export interface ClientOptions {
   /** Injectable fetch (for tests). Defaults to the global `fetch`. */
   fetchImpl?: typeof fetch;
-  /** Pre-seed the access token (tests) so no xauth login is performed. */
+  /** Pre-seed the access token so no xauth login is performed. */
   token?: string;
-  /** Override credentials (tests) instead of reading the environment. */
-  credentials?: Credentials | null;
-}
-
-function readCredentials(): Credentials | null {
-  const username = readEnvVar('UNTAPPD_USERNAME');
-  const password = readEnvVar('UNTAPPD_PASSWORD');
-  const clientId = readEnvVar('UNTAPPD_CLIENT_ID');
-  const clientSecret = readEnvVar('UNTAPPD_CLIENT_SECRET');
-  if (username && password && clientId && clientSecret) {
-    return { username, password, clientId, clientSecret };
-  }
-  return null;
+  /** App credentials (xauth + write-path query). Default to env. */
+  clientId?: string;
+  clientSecret?: string;
+  /** User login (xauth only). Default to env. */
+  username?: string;
+  password?: string;
+  /** Default username for user-scoped tools; defaults to `username`. */
+  loginName?: string;
 }
 
 function missingCredsError(): McpToolError {
@@ -84,8 +72,11 @@ function missingCredsError(): McpToolError {
 
 export class UntappdClient {
   private readonly fetchImpl: typeof fetch;
-  private readonly creds: Credentials | null;
-  private readonly configError: McpToolError | null;
+  private readonly clientId: string | null;
+  private readonly clientSecret: string | null;
+  private readonly username: string | null;
+  private readonly password: string | null;
+  private readonly _loginName: string | null;
   private readonly utv = readEnvVar('UNTAPPD_UTV') ?? DEFAULTS.utv;
   private readonly deviceUdid = readEnvVar('UNTAPPD_DEVICE_ID') ?? DEFAULTS.deviceUdid;
   private readonly userAgent = readEnvVar('UNTAPPD_USER_AGENT') ?? DEFAULTS.userAgent;
@@ -101,29 +92,36 @@ export class UntappdClient {
   constructor(opts: ClientOptions = {}) {
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.token = opts.token ?? null;
-    const creds = opts.credentials !== undefined ? opts.credentials : readCredentials();
-    if (creds) {
-      this.creds = creds;
-      this.configError = null;
-    } else {
-      this.creds = null;
-      this.configError = missingCredsError();
-    }
+    this.clientId = opts.clientId ?? readEnvVar('UNTAPPD_CLIENT_ID') ?? null;
+    this.clientSecret = opts.clientSecret ?? readEnvVar('UNTAPPD_CLIENT_SECRET') ?? null;
+    this.username = opts.username ?? readEnvVar('UNTAPPD_USERNAME') ?? null;
+    this.password = opts.password ?? readEnvVar('UNTAPPD_PASSWORD') ?? null;
+    this._loginName = opts.loginName ?? this.username;
   }
 
-  /** Whether credentials are configured (used by the healthcheck tool). */
+  /** True when enough is configured to make authenticated calls. */
   get configured(): boolean {
-    return this.configError === null;
+    // A pre-seeded token needs only app creds (for writes); otherwise a full login is required.
+    if (this.token) return Boolean(this.clientId && this.clientSecret);
+    return Boolean(this.clientId && this.clientSecret && this.username && this.password);
   }
 
   /** The configured login name — the default `username` for user-scoped tools. */
   get loginName(): string | null {
-    return this.creds?.username ?? null;
+    return this._loginName;
   }
 
-  private requireCreds(): Credentials {
-    if (this.configError) throw this.configError;
-    return this.creds!;
+  private requireAppCreds(): { clientId: string; clientSecret: string } {
+    if (!this.clientId || !this.clientSecret) {
+      throw missingCredsError();
+    }
+    return { clientId: this.clientId, clientSecret: this.clientSecret };
+  }
+
+  private requireLogin(): { username: string; password: string; clientId: string; clientSecret: string } {
+    const app = this.requireAppCreds();
+    if (!this.username || !this.password) throw missingCredsError();
+    return { ...app, username: this.username, password: this.password };
   }
 
   private baseHeaders(): Record<string, string> {
@@ -174,7 +172,7 @@ export class UntappdClient {
   }
 
   private async login(): Promise<string> {
-    const c = this.requireCreds();
+    const c = this.requireLogin();
     const qs = buildQueryString({ client_id: c.clientId, client_secret: c.clientSecret, utv: this.utv });
     const form = new URLSearchParams({
       user_name: c.username,
@@ -257,7 +255,7 @@ export class UntappdClient {
     // requests the app itself makes.
     let query: Query;
     if (opts.auth === 'bearer') {
-      const c = this.requireCreds();
+      const c = this.requireAppCreds();
       headers['Authorization'] = `Bearer ${token}`;
       query = { ...opts.query, client_id: c.clientId, client_secret: c.clientSecret, utv: this.utv };
     } else {
