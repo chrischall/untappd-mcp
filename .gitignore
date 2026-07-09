@@ -9,3 +9,4 @@ coverage/
 *.mcpb
 *.log
 .DS_Store
+.superpowers/
