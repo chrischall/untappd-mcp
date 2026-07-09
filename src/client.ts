@@ -11,11 +11,15 @@ import {
   UnreachableError,
 } from '@chrischall/mcp-utils';
 
-// Load .env for local dev; silently skip if dotenv is unavailable (e.g. the
-// mcpb bundle). `loadDotenvSafely` swallows a missing dotenv module and never
-// lets .env override a host-provided value.
-const __dirname = dirname(fileURLToPath(import.meta.url));
-await loadDotenvSafely({ path: join(__dirname, '..', '.env'), override: false });
+// Load .env for local (Node) dev; silently skip if dotenv is unavailable (e.g.
+// the mcpb bundle). `loadDotenvSafely` swallows a missing dotenv module and
+// never lets .env override a host-provided value. Guard on `import.meta.url`:
+// in a non-Node runtime (Cloudflare Workers) it is undefined and there is no
+// local .env — secrets arrive via the platform's env bindings instead.
+if (import.meta.url) {
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  await loadDotenvSafely({ path: join(__dirname, '..', '.env'), override: false });
+}
 
 const BASE_URL = 'https://api.untappd.com/v4';
 const SERVICE = 'Untappd';

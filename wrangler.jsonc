@@ -8,7 +8,9 @@
     "bindings": [{ "name": "MCP_OBJECT", "class_name": "UntappdMcpAgent" }]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UntappdMcpAgent"] }],
-  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "placeholder-set-in-deploy" }],
+  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "09c7c901f46b4162a4a64aea22a06948" }],
+  "routes": [{ "pattern": "connector.untappd.nullnet.app", "custom_domain": true }],
+  "workers_dev": true,
   "observability": {
     "enabled": true
   }
