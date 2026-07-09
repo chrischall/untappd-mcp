@@ -1,0 +1,57 @@
+import { describe, it, expect } from 'vitest';
+import { renderLoginPage } from '../src/login-page.js';
+import type { ConnectorAuth } from '../src/types.js';
+
+const auth: ConnectorAuth<{ token: string }> = {
+  service: 'Untappd',
+  fields: [
+    { name: 'username', label: 'Username' },
+    { name: 'password', label: 'Password', type: 'password' },
+  ],
+  login: async () => ({ token: 'TOK' }),
+  privacyNote: 'We never store your password.',
+};
+
+describe('renderLoginPage', () => {
+  it('renders an input for each field', () => {
+    const html = renderLoginPage(auth);
+    expect(html).toContain('name="username"');
+    expect(html).toContain('name="password"');
+  });
+
+  it('marks password fields with type="password"', () => {
+    const html = renderLoginPage(auth);
+    expect(html).toMatch(/name="password"[^>]*type="password"|type="password"[^>]*name="password"/);
+  });
+
+  it('defaults non-password fields to type="text"', () => {
+    const html = renderLoginPage(auth);
+    expect(html).toMatch(/name="username"[^>]*type="text"|type="text"[^>]*name="username"/);
+  });
+
+  it('shows the service name', () => {
+    const html = renderLoginPage(auth);
+    expect(html).toContain('Untappd');
+  });
+
+  it('shows the privacy note', () => {
+    const html = renderLoginPage(auth);
+    expect(html).toContain('We never store your password.');
+  });
+
+  it('shows the error text when passed', () => {
+    const html = renderLoginPage(auth, { error: 'login failed' });
+    expect(html).toContain('login failed');
+  });
+
+  it('omits any error markup when no error is passed', () => {
+    const html = renderLoginPage(auth);
+    expect(html).not.toContain('role="alert"');
+  });
+
+  it('carries the oauthReq through a hidden field', () => {
+    const html = renderLoginPage(auth, { oauthReq: { clientId: 'c' } });
+    const expected = btoa(JSON.stringify({ clientId: 'c' }));
+    expect(html).toContain(`name="oauthReq" value="${expected}"`);
+  });
+});

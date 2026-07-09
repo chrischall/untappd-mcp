@@ -56,6 +56,109 @@ export interface ClientOptions {
   loginName?: string;
 }
 
+// One HTTP attempt with a hard timeout, shared by the instance `send()` method
+// and the standalone `xauthLogin()` helper below. Network/timeout failures
+// become an UnreachableError; HTTP status handling is left to the caller.
+async function sendRequest(
+  fetchImpl: typeof fetch,
+  method: string,
+  url: string,
+  init: { headers: Record<string, string>; body?: BodyInit },
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetchImpl(url, {
+      method,
+      headers: init.headers,
+      ...(init.body !== undefined ? { body: init.body } : {}),
+      signal: controller.signal,
+    });
+  } catch {
+    throw new UnreachableError(SERVICE);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function xauthHeaders(userAgent: string): Record<string, string> {
+  return {
+    'User-Agent': userAgent,
+    Accept: 'application/json',
+    'x-untappd-app': 'ios',
+    'x-untappd-app-version': DEFAULTS.appVersion,
+  };
+}
+
+export interface XauthCredentials {
+  username: string;
+  password: string;
+  clientId: string;
+  clientSecret: string;
+}
+
+export interface XauthOptions {
+  /** Injectable fetch (for tests). Defaults to the global `fetch`. */
+  fetchImpl?: typeof fetch;
+  utv?: string;
+  deviceUdid?: string;
+  userAgent?: string;
+}
+
+/**
+ * Performs the one-shot Untappd xauth login POST (username/password →
+ * access token). Standalone so it can be reused both by `UntappdClient`'s
+ * own on-demand login and by the Cloudflare-connector login flow
+ * (`src/untappd-auth.ts`), which authenticates a user before a client even
+ * exists — without duplicating the request/parsing logic.
+ */
+export async function xauthLogin(creds: XauthCredentials, opts: XauthOptions = {}): Promise<string> {
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const utv = opts.utv ?? readEnvVar('UNTAPPD_UTV') ?? DEFAULTS.utv;
+  const deviceUdid = opts.deviceUdid ?? readEnvVar('UNTAPPD_DEVICE_ID') ?? DEFAULTS.deviceUdid;
+  const userAgent = opts.userAgent ?? readEnvVar('UNTAPPD_USER_AGENT') ?? DEFAULTS.userAgent;
+
+  const qs = buildQueryString({ client_id: creds.clientId, client_secret: creds.clientSecret, utv });
+  const form = new URLSearchParams({
+    user_name: creds.username,
+    user_password: creds.password,
+    device_udid: deviceUdid,
+    device_name: DEFAULTS.deviceName,
+    device_version: DEFAULTS.deviceVersion,
+    device_platform: DEFAULTS.devicePlatform,
+    app_version: DEFAULTS.appVersion,
+    multi_account: 'true',
+  });
+  const res = await sendRequest(fetchImpl, 'POST', `${BASE_URL}/xauth${qs}`, {
+    headers: { ...xauthHeaders(userAgent), 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: form.toString(),
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    if (res.status === 401 || res.status === 400) {
+      throw createHelpfulError(`Untappd login failed (${res.status}).`, {
+        hint: 'Check UNTAPPD_USERNAME / UNTAPPD_PASSWORD, and that UNTAPPD_CLIENT_ID / UNTAPPD_CLIENT_SECRET are the mobile app credentials.',
+      });
+    }
+    throw new McpToolError(formatApiError(res.status, 'POST', '/xauth', text, { service: SERVICE }));
+  }
+  let data: { response?: { access_token?: string; two_factor_enabled?: boolean } } | undefined;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new McpToolError('Untappd login returned a non-JSON response.');
+  }
+  const token = data?.response?.access_token;
+  if (!token) {
+    throw createHelpfulError('Untappd login did not return an access token.', {
+      hint: data?.response?.two_factor_enabled
+        ? 'This account has two-factor authentication enabled, which xauth login cannot satisfy.'
+        : 'The credentials may be incorrect.',
+    });
+  }
+  return token;
+}
+
 function missingCredsError(): McpToolError {
   const missing = (
     ['UNTAPPD_USERNAME', 'UNTAPPD_PASSWORD', 'UNTAPPD_CLIENT_ID', 'UNTAPPD_CLIENT_SECRET'] as const
@@ -133,27 +236,14 @@ export class UntappdClient {
     };
   }
 
-  // One HTTP attempt with a hard timeout. Network/timeout failures become an
-  // UnreachableError; HTTP status handling is left to the caller.
+  // One HTTP attempt with a hard timeout, delegating to the module-level
+  // helper shared with `xauthLogin()`.
   private async send(
     method: string,
     url: string,
     init: { headers: Record<string, string>; body?: BodyInit },
   ): Promise<Response> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-    try {
-      return await this.fetchImpl(url, {
-        method,
-        headers: init.headers,
-        ...(init.body !== undefined ? { body: init.body } : {}),
-        signal: controller.signal,
-      });
-    } catch {
-      throw new UnreachableError(SERVICE);
-    } finally {
-      clearTimeout(timer);
-    }
+    return sendRequest(this.fetchImpl, method, url, init);
   }
 
   /**
@@ -173,44 +263,12 @@ export class UntappdClient {
 
   private async login(): Promise<string> {
     const c = this.requireLogin();
-    const qs = buildQueryString({ client_id: c.clientId, client_secret: c.clientSecret, utv: this.utv });
-    const form = new URLSearchParams({
-      user_name: c.username,
-      user_password: c.password,
-      device_udid: this.deviceUdid,
-      device_name: DEFAULTS.deviceName,
-      device_version: DEFAULTS.deviceVersion,
-      device_platform: DEFAULTS.devicePlatform,
-      app_version: DEFAULTS.appVersion,
-      multi_account: 'true',
+    const token = await xauthLogin(c, {
+      fetchImpl: this.fetchImpl,
+      utv: this.utv,
+      deviceUdid: this.deviceUdid,
+      userAgent: this.userAgent,
     });
-    const res = await this.send('POST', `${BASE_URL}/xauth${qs}`, {
-      headers: { ...this.baseHeaders(), 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: form.toString(),
-    });
-    const text = await res.text();
-    if (!res.ok) {
-      if (res.status === 401 || res.status === 400) {
-        throw createHelpfulError(`Untappd login failed (${res.status}).`, {
-          hint: 'Check UNTAPPD_USERNAME / UNTAPPD_PASSWORD, and that UNTAPPD_CLIENT_ID / UNTAPPD_CLIENT_SECRET are the mobile app credentials.',
-        });
-      }
-      throw new McpToolError(formatApiError(res.status, 'POST', '/xauth', text, { service: SERVICE }));
-    }
-    let data: { response?: { access_token?: string; two_factor_enabled?: boolean } } | undefined;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      throw new McpToolError('Untappd login returned a non-JSON response.');
-    }
-    const token = data?.response?.access_token;
-    if (!token) {
-      throw createHelpfulError('Untappd login did not return an access token.', {
-        hint: data?.response?.two_factor_enabled
-          ? 'This account has two-factor authentication enabled, which xauth login cannot satisfy.'
-          : 'The credentials may be incorrect.',
-      });
-    }
     this.token = token;
     return token;
   }

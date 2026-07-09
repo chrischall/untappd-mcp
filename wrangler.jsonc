@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "untappd-connector",
+  "main": "src/worker.ts",
+  "compatibility_date": "2025-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [{ "name": "MCP_OBJECT", "class_name": "UntappdMcpAgent" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UntappdMcpAgent"] }],
+  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "placeholder-set-in-deploy" }],
+  "observability": {
+    "enabled": true
+  }
+}
