@@ -43,7 +43,6 @@
     "worker:test": "vitest run --config vitest.workers.config.ts"
   },
   "dependencies": {
-    "@chrischall/mcp-connector": "file:./packages/mcp-connector",
     "@chrischall/mcp-utils": "^0.12.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "ai": "^7.0.19",
@@ -51,6 +50,7 @@
     "zod": "^4.4.2"
   },
   "devDependencies": {
+    "@chrischall/mcp-connector": "file:./packages/mcp-connector",
     "@cloudflare/vitest-pool-workers": "^0.18.4",
     "@cloudflare/workers-types": "^5.20260708.1",
     "@types/node": "^26.1.1",
