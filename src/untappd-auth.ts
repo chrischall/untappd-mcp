@@ -21,6 +21,7 @@ export interface UntappdProps {
  */
 export const untappdAuth: ConnectorAuth<UntappdProps> = {
   service: 'Untappd',
+  accent: '#FFC000',
   privacyNote:
     'Your password signs you in once and is not stored — only an access token is kept to make requests on your behalf.',
   fields: [
