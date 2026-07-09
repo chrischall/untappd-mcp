@@ -3,4 +3,4 @@
 // json's `extra-files`), and `versionSyncTest` guards that it stays equal to
 // package.json. Import VERSION wherever the version is needed rather than
 // re-declaring it.
-export const VERSION = '1.1.0'; // x-release-please-version
+export const VERSION = '1.2.0'; // x-release-please-version
