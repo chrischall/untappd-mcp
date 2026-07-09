@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "untappd-connector",
+  "main": "src/worker.ts",
+  "compatibility_date": "2025-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // `@chrischall/mcp-connector`'s `agents` dependency lazily `import("ai")` in
+  // a shared chunk for unrelated AI-chat client helpers we never call (see
+  // src/stubs/ai-stub.ts) — alias it to an inert stub so esbuild can resolve
+  // the specifier without pulling in the real Vercel AI SDK as a dependency.
+  "alias": { "ai": "./src/stubs/ai-stub.ts" },
+  "durable_objects": {
+    "bindings": [{ "name": "MCP_OBJECT", "class_name": "UntappdMcpAgent" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UntappdMcpAgent"] }],
+  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "placeholder-set-in-deploy" }],
+  "observability": {
+    "enabled": true
+  }
+}

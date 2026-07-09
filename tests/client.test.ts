@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { UntappdClient } from '../src/client.js';
+import { UntappdClient, xauthLogin } from '../src/client.js';
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -133,5 +133,30 @@ describe('UntappdClient', () => {
     await client.get('/user/info/chris');
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toContain('access_token=TOK');
+  });
+});
+
+describe('xauthLogin (standalone helper used by the Cloudflare connector login)', () => {
+  it('performs the xauth POST and returns the access token', async () => {
+    const { impl, calls } = mockFetch([xauth()]);
+    const token = await xauthLogin(
+      { username: 'chris', password: 'pw', clientId: 'CID', clientSecret: 'CSEC' },
+      { fetchImpl: impl },
+    );
+    expect(token).toBe('TOK123');
+    expect(calls).toHaveLength(1);
+    expect(calls[0].method).toBe('POST');
+    expect(calls[0].url).toContain('/v4/xauth');
+    expect(calls[0].url).toContain('client_id=CID');
+    expect(calls[0].url).toContain('client_secret=CSEC');
+    expect(calls[0].body).toContain('user_name=chris');
+    expect(calls[0].body).toContain('user_password=pw');
+  });
+
+  it('throws a helpful error on bad credentials (401)', async () => {
+    const { impl } = mockFetch([json({}, 401)]);
+    await expect(
+      xauthLogin({ username: 'chris', password: 'wrong', clientId: 'CID', clientSecret: 'CSEC' }, { fetchImpl: impl }),
+    ).rejects.toThrow(/login failed/i);
   });
 });
