@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
-import { client } from '../../src/client.js';
+import { UntappdClient } from '../../src/client.js';
 import { registerFriendActionTools } from '../../src/tools/friends.js';
 import { createTestHarness } from '../helpers.js';
 
+const client = new UntappdClient();
 const write = vi.spyOn(client, 'write').mockResolvedValue(undefined as never);
 
 let harness: Awaited<ReturnType<typeof createTestHarness>>;
@@ -24,7 +25,7 @@ const CASES: [string, string][] = [
 
 describe('friend action tools (confirm-gated)', () => {
   it('setup', async () => {
-    harness = await createTestHarness((server) => registerFriendActionTools(server));
+    harness = await createTestHarness((server) => registerFriendActionTools(server, client));
   });
 
   for (const [tool, path] of CASES) {

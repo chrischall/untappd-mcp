@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
-import { client } from '../../src/client.js';
+import { UntappdClient } from '../../src/client.js';
 import { registerBeerTools } from '../../src/tools/beer.js';
 import { registerBreweryTools } from '../../src/tools/brewery.js';
 import { registerVenueTools } from '../../src/tools/venue.js';
@@ -9,6 +9,7 @@ import { registerDiscoverTools } from '../../src/tools/discover.js';
 import { registerUtilityTools } from '../../src/tools/utilities.js';
 import { createTestHarness } from '../helpers.js';
 
+const client = new UntappdClient();
 const get = vi.spyOn(client, 'get').mockResolvedValue(undefined as never);
 
 let harness: Awaited<ReturnType<typeof createTestHarness>>;
@@ -24,13 +25,13 @@ function parse(result: { content: { text: string }[] }): Record<string, unknown>
 describe('read tools', () => {
   it('setup', async () => {
     harness = await createTestHarness((server) => {
-      registerBeerTools(server);
-      registerBreweryTools(server);
-      registerVenueTools(server);
-      registerUserTools(server);
-      registerFeedTools(server);
-      registerDiscoverTools(server);
-      registerUtilityTools(server);
+      registerBeerTools(server, client);
+      registerBreweryTools(server, client);
+      registerVenueTools(server, client);
+      registerUserTools(server, client);
+      registerFeedTools(server, client);
+      registerDiscoverTools(server, client);
+      registerUtilityTools(server, client);
     });
   });
 

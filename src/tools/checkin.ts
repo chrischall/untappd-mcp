@@ -3,7 +3,7 @@ import { extname } from 'node:path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { textResult, toolAnnotations, schemaConfirm, fileBlob, McpToolError, createHelpfulError, messageOf } from '@chrischall/mcp-utils';
-import { client } from '../client.js';
+import type { UntappdClient } from '../client.js';
 
 const CheckinIdSchema = z.number().int().positive().describe('Untappd check-in id');
 
@@ -30,7 +30,7 @@ function localTimezone(): { timezone: string; gmt_offset: number } {
   return { timezone, gmt_offset };
 }
 
-export function registerCheckinTools(server: McpServer): void {
+export function registerCheckinTools(server: McpServer, client: UntappdClient): void {
   server.registerTool(
     'untappd_toast',
     {

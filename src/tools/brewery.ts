@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { textResult, toolAnnotations } from '@chrischall/mcp-utils';
-import { client } from '../client.js';
+import type { UntappdClient } from '../client.js';
 
-export function registerBreweryTools(server: McpServer): void {
+export function registerBreweryTools(server: McpServer, client: UntappdClient): void {
   server.registerTool(
     'untappd_search_brewery',
     {

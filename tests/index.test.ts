@@ -1,4 +1,5 @@
 import { describe, it, expect, afterAll } from 'vitest';
+import { UntappdClient } from '../src/client.js';
 import { registerBeerTools } from '../src/tools/beer.js';
 import { registerBreweryTools } from '../src/tools/brewery.js';
 import { registerVenueTools } from '../src/tools/venue.js';
@@ -21,18 +22,19 @@ describe('tool registry', () => {
   });
 
   it('includes all 37 expected tools', async () => {
+    const client = new UntappdClient();
     harness = await createTestHarness((server) => {
-      registerBeerTools(server);
-      registerBreweryTools(server);
-      registerVenueTools(server);
-      registerUserTools(server);
-      registerFeedTools(server);
-      registerResolveTools(server);
-      registerDiscoverTools(server);
-      registerWishlistTools(server);
-      registerFriendActionTools(server);
-      registerCheckinTools(server);
-      registerUtilityTools(server);
+      registerBeerTools(server, client);
+      registerBreweryTools(server, client);
+      registerVenueTools(server, client);
+      registerUserTools(server, client);
+      registerFeedTools(server, client);
+      registerResolveTools(server, client);
+      registerDiscoverTools(server, client);
+      registerWishlistTools(server, client);
+      registerFriendActionTools(server, client);
+      registerCheckinTools(server, client);
+      registerUtilityTools(server, client);
     });
 
     const tools = await harness.listTools();

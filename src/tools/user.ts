@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { textResult, toolAnnotations, createHelpfulError } from '@chrischall/mcp-utils';
-import { client } from '../client.js';
+import type { UntappdClient } from '../client.js';
 import { compactCheckins, compactWishlist, compactUserBeers } from '../compact.js';
 
 const UsernameArg = z
@@ -11,8 +11,8 @@ const UsernameArg = z
   .describe('Untappd username. Omit to use your own configured account (UNTAPPD_USERNAME).');
 
 /** Resolve the target username: explicit arg, else the configured login name. */
-function resolveUser(username: string | undefined): string {
-  const u = username ?? client.loginName;
+function resolveUser(username: string | undefined, loginName: string | null): string {
+  const u = username ?? loginName;
   if (!u) {
     throw createHelpfulError('No username given and no configured account to fall back to.', {
       hint: 'Pass `username`, or set UNTAPPD_USERNAME so user tools default to your own account.',
@@ -21,7 +21,7 @@ function resolveUser(username: string | undefined): string {
   return encodeURIComponent(u);
 }
 
-export function registerUserTools(server: McpServer): void {
+export function registerUserTools(server: McpServer, client: UntappdClient): void {
   server.registerTool(
     'untappd_user_info',
     {
@@ -36,7 +36,7 @@ export function registerUserTools(server: McpServer): void {
       },
     },
     async ({ username, compact }) => {
-      const data = await client.get(`/user/info/${resolveUser(username)}`, { compact: compact ? 'true' : undefined });
+      const data = await client.get(`/user/info/${resolveUser(username, client.loginName)}`, { compact: compact ? 'true' : undefined });
       return textResult(data);
     },
   );
@@ -60,7 +60,7 @@ export function registerUserTools(server: McpServer): void {
       },
     },
     async ({ username, limit, max_id, compact }) => {
-      const data = await client.get(`/user/checkins/${resolveUser(username)}`, { limit, max_id });
+      const data = await client.get(`/user/checkins/${resolveUser(username, client.loginName)}`, { limit, max_id });
       return textResult(compact ? compactCheckins(data) : data);
     },
   );
@@ -87,7 +87,7 @@ export function registerUserTools(server: McpServer): void {
       },
     },
     async ({ username, limit, offset, sort, compact }) => {
-      const data = await client.get(`/user/wishlist/${resolveUser(username)}`, { limit, offset, sort });
+      const data = await client.get(`/user/wishlist/${resolveUser(username, client.loginName)}`, { limit, offset, sort });
       return textResult(compact ? compactWishlist(data) : data);
     },
   );
@@ -115,7 +115,7 @@ export function registerUserTools(server: McpServer): void {
       },
     },
     async ({ username, limit, offset, sort, compact }) => {
-      const data = await client.get(`/user/beers/${resolveUser(username)}`, { limit, offset, sort });
+      const data = await client.get(`/user/beers/${resolveUser(username, client.loginName)}`, { limit, offset, sort });
       return textResult(compact ? compactUserBeers(data) : data);
     },
   );
@@ -133,7 +133,7 @@ export function registerUserTools(server: McpServer): void {
       },
     },
     async ({ username, limit, offset }) => {
-      const data = await client.get(`/user/badges/${resolveUser(username)}`, { limit, offset });
+      const data = await client.get(`/user/badges/${resolveUser(username, client.loginName)}`, { limit, offset });
       return textResult(data);
     },
   );
@@ -151,7 +151,7 @@ export function registerUserTools(server: McpServer): void {
       },
     },
     async ({ username, limit, offset }) => {
-      const data = await client.get(`/user/friends/${resolveUser(username)}`, { limit, offset });
+      const data = await client.get(`/user/friends/${resolveUser(username, client.loginName)}`, { limit, offset });
       return textResult(data);
     },
   );
@@ -175,7 +175,7 @@ export function registerUserTools(server: McpServer): void {
       },
     },
     async ({ username, limit, offset, sort }) => {
-      const data = await client.get(`/user/venues/${resolveUser(username)}`, { limit, offset, sort });
+      const data = await client.get(`/user/venues/${resolveUser(username, client.loginName)}`, { limit, offset, sort });
       return textResult(data);
     },
   );

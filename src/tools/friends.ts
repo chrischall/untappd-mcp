@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { textResult, toolAnnotations, schemaConfirm } from '@chrischall/mcp-utils';
-import { client } from '../client.js';
+import type { UntappdClient } from '../client.js';
 
 // The endpoint PATHS below are confirmed from the Untappd app's own JS bundle
 // (`friend/request`, `friend/accept`, `friend/reject`, `friend/remove`). The
@@ -56,7 +56,7 @@ const ACTIONS: FriendAction[] = [
   },
 ];
 
-export function registerFriendActionTools(server: McpServer): void {
+export function registerFriendActionTools(server: McpServer, client: UntappdClient): void {
   for (const action of ACTIONS) {
     server.registerTool(
       action.tool,

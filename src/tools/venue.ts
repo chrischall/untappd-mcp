@@ -1,10 +1,10 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { textResult, toolAnnotations } from '@chrischall/mcp-utils';
-import { client } from '../client.js';
+import type { UntappdClient } from '../client.js';
 import { compactCheckins } from '../compact.js';
 
-export function registerVenueTools(server: McpServer): void {
+export function registerVenueTools(server: McpServer, client: UntappdClient): void {
   server.registerTool(
     'untappd_search_venue',
     {

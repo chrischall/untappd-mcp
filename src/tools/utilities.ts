@@ -1,8 +1,8 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { textResult, toolAnnotations } from '@chrischall/mcp-utils';
-import { client } from '../client.js';
+import type { UntappdClient } from '../client.js';
 
-export function registerUtilityTools(server: McpServer): void {
+export function registerUtilityTools(server: McpServer, client: UntappdClient): void {
   server.registerTool(
     'untappd_healthcheck',
     {

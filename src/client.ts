@@ -311,11 +311,3 @@ export class UntappdClient {
     }
   }
 }
-
-/**
- * Module-level singleton shared by every tool module. Constructing it here (not
- * in `index.ts`) keeps the deferred-config-error pattern: the server boots and
- * answers the host's install-time tools/list smoke test even when credentials
- * are absent — the error only surfaces on the first tool call.
- */
-export const client = new UntappdClient();

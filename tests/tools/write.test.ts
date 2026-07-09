@@ -2,11 +2,12 @@ import { writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
-import { client } from '../../src/client.js';
+import { UntappdClient } from '../../src/client.js';
 import { registerCheckinTools } from '../../src/tools/checkin.js';
 import { registerWishlistTools } from '../../src/tools/wishlist.js';
 import { createTestHarness } from '../helpers.js';
 
+const client = new UntappdClient();
 const write = vi.spyOn(client, 'write').mockResolvedValue(undefined as never);
 const putBinary = vi.spyOn(client, 'putBinary').mockResolvedValue(undefined);
 
@@ -30,8 +31,8 @@ function parse(result: { content: { text: string }[] }): Record<string, unknown>
 describe('write tools (confirm-gated)', () => {
   it('setup', async () => {
     harness = await createTestHarness((server) => {
-      registerCheckinTools(server);
-      registerWishlistTools(server);
+      registerCheckinTools(server, client);
+      registerWishlistTools(server, client);
     });
   });
 
