@@ -12,6 +12,8 @@ export interface ConnectorAuth<Props> {
   login(fields: Record<string, string>, env: any): Promise<Props>;
   /** One-line note shown under the form. */
   privacyNote?: string;
+  /** Brand accent as a hex color (e.g. "#FFC000") for the login page's button, focus ring, and tint. Optional — a neutral is used if absent. */
+  accent?: string;
 }
 
 export interface ConnectorOptions<Props extends Record<string, unknown>, Client> {

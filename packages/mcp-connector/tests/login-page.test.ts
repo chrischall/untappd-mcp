@@ -54,4 +54,32 @@ describe('renderLoginPage', () => {
     const expected = btoa(JSON.stringify({ clientId: 'c' }));
     expect(html).toContain(`name="oauthReq" value="${expected}"`);
   });
+
+  it('applies a provided accent color and derives readable button text', () => {
+    const html = renderLoginPage({ ...auth, accent: '#FFC000' });
+    expect(html).toContain('--accent: #FFC000');
+    // #FFC000 is light → dark ink on the button
+    expect(html).toContain('--accent-ink: #141414');
+  });
+
+  it('falls back to the neutral accent when none/invalid is given', () => {
+    expect(renderLoginPage(auth)).toContain('--accent: #4f46e5');
+    expect(renderLoginPage({ ...auth, accent: 'red; }evil' })).toContain('--accent: #4f46e5');
+  });
+
+  it('is a styled, theme-aware document (inline CSS, dark mode, reduced motion, no external assets)', () => {
+    const html = renderLoginPage(auth);
+    expect(html).toContain('<style>');
+    expect(html).toContain('prefers-color-scheme: dark');
+    expect(html).toContain('prefers-reduced-motion');
+    expect(html).not.toContain('http://');
+    expect(html).not.toContain('https://');
+  });
+
+  it('sets autocomplete + autofocus for password-manager friendliness', () => {
+    const html = renderLoginPage(auth);
+    expect(html).toMatch(/name="username"[^>]*autocomplete="username"/);
+    expect(html).toMatch(/name="password"[^>]*autocomplete="current-password"/);
+    expect(html).toContain('autofocus');
+  });
 });
