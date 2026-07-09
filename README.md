@@ -51,6 +51,21 @@ your own app's traffic with an HTTPS proxy:
 
 Keep these values private; do not commit them.
 
+## Remote connector
+
+This server can also run as a hosted Cloudflare Worker — an unlisted, shareable
+"remote connector" you add to claude.ai (Settings → Connectors) instead of
+running it locally. It works on Claude web, desktop, and mobile alike, since
+connectors added on any of those sync to the rest. Each person you share it
+with logs in with their *own* Untappd username and password; the operator only
+ever supplies the shared Untappd app credentials, never anyone's personal
+login. The `.mcpb` / stdio install above remains the desktop-only alternative
+if you'd rather run it locally against just your own account.
+
+Setting this up requires a Cloudflare account and is a manual, one-time
+process for whoever hosts it — see
+[`docs/DEPLOY-CONNECTOR.md`](docs/DEPLOY-CONNECTOR.md) for the full runbook.
+
 ## Tools
 
 Reads: `untappd_search_beer`, `untappd_beer_info`, `untappd_beer_activity`,
