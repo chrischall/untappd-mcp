@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { runMcp } from '@chrischall/mcp-utils';
 import { VERSION } from './version.js';
+import { UntappdClient } from './client.js';
 import { registerBeerTools } from './tools/beer.js';
 import { registerBreweryTools } from './tools/brewery.js';
 import { registerVenueTools } from './tools/venue.js';
@@ -8,32 +9,32 @@ import { registerUserTools } from './tools/user.js';
 import { registerFeedTools } from './tools/feed.js';
 import { registerResolveTools } from './tools/resolve.js';
 import { registerDiscoverTools } from './tools/discover.js';
-import { registerWishlistTools } from './tools/wishlist.js';
 import { registerFriendActionTools } from './tools/friends.js';
+import { registerWishlistTools } from './tools/wishlist.js';
 import { registerCheckinTools } from './tools/checkin.js';
 import { registerUtilityTools } from './tools/utilities.js';
 
-// The Untappd client is a module-level singleton (imported by each tool module)
-// that defers its config error to the first request. That preserves the
-// deferred-config-error pattern: the server boots and answers the host's
-// install-time tools/list smoke test even when credentials are absent — the
-// configuration error only surfaces on the first tool call.
+// Build the env-based client once and inject it into each registrar. The
+// constructor defers its config error, so the server still boots (and answers
+// the host's install-time tools/list probe) when credentials are absent.
+const client = new UntappdClient();
+
 await runMcp({
   name: 'untappd-mcp',
   version: VERSION,
   banner:
     '[untappd-mcp] This project was developed and is maintained by AI (Claude Opus 4.8). Use at your own discretion.',
   tools: [
-    registerBeerTools,
-    registerBreweryTools,
-    registerVenueTools,
-    registerUserTools,
-    registerFeedTools,
-    registerResolveTools,
-    registerDiscoverTools,
-    registerWishlistTools,
-    registerFriendActionTools,
-    registerCheckinTools,
-    registerUtilityTools,
+    (s) => registerBeerTools(s, client),
+    (s) => registerBreweryTools(s, client),
+    (s) => registerVenueTools(s, client),
+    (s) => registerUserTools(s, client),
+    (s) => registerFeedTools(s, client),
+    (s) => registerResolveTools(s, client),
+    (s) => registerDiscoverTools(s, client),
+    (s) => registerFriendActionTools(s, client),
+    (s) => registerWishlistTools(s, client),
+    (s) => registerCheckinTools(s, client),
+    (s) => registerUtilityTools(s, client),
   ],
 });

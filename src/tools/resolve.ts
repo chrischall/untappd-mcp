@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { textResult, toolAnnotations, createHelpfulError } from '@chrischall/mcp-utils';
-import { client } from '../client.js';
+import type { UntappdClient } from '../client.js';
 
 export interface ResolvedUrl {
   type: 'beer' | 'brewery' | 'venue' | 'user' | 'checkin';
@@ -56,7 +56,7 @@ export function parseUntappdUrl(input: string): ResolvedUrl | null {
   return null;
 }
 
-export function registerResolveTools(server: McpServer): void {
+export function registerResolveTools(server: McpServer, client: UntappdClient): void {
   server.registerTool(
     'untappd_resolve',
     {

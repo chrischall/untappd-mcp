@@ -1,11 +1,11 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { textResult, toolAnnotations, schemaConfirm } from '@chrischall/mcp-utils';
-import { client } from '../client.js';
+import type { UntappdClient } from '../client.js';
 
 const BidSchema = z.number().int().positive().describe('Untappd beer id (bid) — from untappd_search_beer');
 
-export function registerWishlistTools(server: McpServer): void {
+export function registerWishlistTools(server: McpServer, client: UntappdClient): void {
   server.registerTool(
     'untappd_wishlist_add',
     {

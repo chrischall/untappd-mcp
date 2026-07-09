@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterAll } from 'vitest';
-import { client } from '../../src/client.js';
+import { UntappdClient } from '../../src/client.js';
 import { parseUntappdUrl, registerResolveTools } from '../../src/tools/resolve.js';
 import { createTestHarness } from '../helpers.js';
 
@@ -56,6 +56,7 @@ describe('parseUntappdUrl', () => {
 });
 
 describe('untappd_open_url (resolve + fetch)', () => {
+  const client = new UntappdClient();
   const get = vi.spyOn(client, 'get').mockResolvedValue(undefined as never);
   let harness: Awaited<ReturnType<typeof createTestHarness>>;
   afterAll(async () => {
@@ -75,7 +76,7 @@ describe('untappd_open_url (resolve + fetch)', () => {
   ];
 
   it('setup', async () => {
-    harness = await createTestHarness((server) => registerResolveTools(server));
+    harness = await createTestHarness((server) => registerResolveTools(server, client));
   });
 
   for (const [url, path] of ROUTES) {

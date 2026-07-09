@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { textResult, toolAnnotations } from '@chrischall/mcp-utils';
-import { client } from '../client.js';
+import type { UntappdClient } from '../client.js';
 import { compactBeerSearch, compactCheckins } from '../compact.js';
 
 const BidSchema = z.number().int().positive().describe('Untappd beer id (bid)');
@@ -11,7 +11,7 @@ const CompactCheckins = z
   .optional()
   .describe('Project each check-in to a slim summary (id, user, beer, rating, comment, venue, toast/comment counts) to save context (default false)');
 
-export function registerBeerTools(server: McpServer): void {
+export function registerBeerTools(server: McpServer, client: UntappdClient): void {
   server.registerTool(
     'untappd_search_beer',
     {
