@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/chrischall/untappd-mcp/compare/v1.2.0...v1.3.0) (2026-07-09)
+
+
+### Features
+
+* **mcp-connector:** polished, theme-aware connector login page ([#42](https://github.com/chrischall/untappd-mcp/issues/42)) ([96f73ad](https://github.com/chrischall/untappd-mcp/commit/96f73ade3de69ed4360279faa94357b4aae1a8bf))
+
 ## [1.2.0](https://github.com/chrischall/untappd-mcp/compare/v1.1.0...v1.2.0) (2026-07-09)
 
 
