@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.2.0](https://github.com/chrischall/untappd-mcp/compare/v1.1.0...v1.2.0) (2026-07-09)
+
+
+### Features
+
+* reusable remote-connector harness + Untappd Cloudflare worker ([#38](https://github.com/chrischall/untappd-mcp/issues/38)) ([2bf0c3a](https://github.com/chrischall/untappd-mcp/commit/2bf0c3ac5b48e8d1df04cb649e7bf07d0591a4ed))
+
+
+### Bug Fixes
+
+* worker boots off-Node + production wrangler config ([#41](https://github.com/chrischall/untappd-mcp/issues/41)) ([1af0974](https://github.com/chrischall/untappd-mcp/commit/1af09740e89574e98875197e3fce8127e5b49c16))
+
+
+### Refactor
+
+* inject the client into tools (remote-connector prep) ([#36](https://github.com/chrischall/untappd-mcp/issues/36)) ([f84ed8a](https://github.com/chrischall/untappd-mcp/commit/f84ed8a3d84bc64927e118b411c21fc876bd4571))
+
 ## [1.1.0](https://github.com/chrischall/untappd-mcp/compare/v1.0.0...v1.1.0) (2026-07-08)
 
 
