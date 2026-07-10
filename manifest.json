@@ -3,7 +3,7 @@
   "manifest_version": "0.3",
   "name": "untappd-mcp",
   "display_name": "Untappd",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Search Untappd beers, breweries, and venues; read profiles, check-ins, wishlists, and your friend feed; and post check-ins, toasts, and comments to your account",
   "author": {
     "name": "Chris Chall",
