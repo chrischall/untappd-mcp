@@ -17,7 +17,13 @@ import { registerUtilityTools } from '../src/tools/utilities.js';
 import { registerCacheTools } from '../src/tools/cache.js';
 import { createTestHarness } from './helpers.js';
 
-const CACHE_TOOLS = ['untappd_sync_checkins', 'untappd_cache_has_had', 'untappd_cache_has_had_many', 'untappd_cache_query'];
+const CACHE_TOOLS = [
+  'untappd_sync_checkins',
+  'untappd_cache_has_had',
+  'untappd_cache_has_had_many',
+  'untappd_cache_not_had',
+  'untappd_cache_query',
+];
 
 describe('healthcheck build diagnostics', () => {
   const client = new UntappdClient();
@@ -51,10 +57,10 @@ describe('healthcheck build diagnostics', () => {
     expect(out.server_version).toBe(VERSION);
 
     const tools = out.tools as string[];
-    // The full toolset (incl. the 4 cache tools) is registered — this is the
-    // 41-tool set the remote connector must also expose.
-    expect(tools.length).toBe(41);
-    expect(out.tool_count).toBe(41);
+    // The full toolset (incl. the 5 cache tools) is registered — this is the
+    // 42-tool set the remote connector must also expose.
+    expect(tools.length).toBe(42);
+    expect(out.tool_count).toBe(42);
     for (const name of CACHE_TOOLS) expect(tools).toContain(name);
 
     // The hash is the FNV-1a of the sorted names — stable and self-consistent.

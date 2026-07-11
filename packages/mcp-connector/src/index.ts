@@ -15,8 +15,7 @@ export function createConnector<Props extends Record<string, unknown>, Client>(
     server = new McpServer({ name: opts.name, version: opts.version });
     async init() {
       const client = opts.buildClient(this.props as Props, this.env);
-      const ctx = { env: this.env, props: this.props as Props };
-      for (const register of opts.tools) register(this.server, client, ctx);
+      for (const register of opts.tools) register(this.server, client);
     }
   }
 

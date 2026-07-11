@@ -168,6 +168,47 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
   );
 
   server.registerTool(
+    'untappd_cache_not_had',
+    {
+      title: 'From a list of beers, return the ones a user has NOT had',
+      description:
+        'Given a list of beer ids, return only the ones the user has NOT checked in — the "what here is new to me?" ' +
+        'filter for a venue menu, a brewery lineup, or a festival list. Reads the cache only, NO API call. Returns ' +
+        'the not-had bids (plus the had bids and counts) and cache freshness. Run untappd_sync_checkins first; if the ' +
+        'cache is incomplete the freshness caveat flags that a "not had" may be a false negative.',
+      annotations: toolAnnotations({ title: 'From a list of beers, return the ones a user has NOT had', readOnly: true, idempotent: true, openWorld: false }),
+      inputSchema: {
+        username: UsernameArg,
+        bids: z.array(z.number().int().positive()).min(1).max(500).describe('Candidate beer ids to filter (1–500)'),
+      },
+    },
+    async ({ username, bids }) => {
+      const user = resolveUser(username, client.loginName);
+      const cache = cacheProvider();
+      // De-dupe the input, preserving first-seen order, so a repeated bid is
+      // looked up once and reported once.
+      const seen = new Set<number>();
+      const notHad: number[] = [];
+      const had: number[] = [];
+      for (const bid of bids) {
+        if (seen.has(bid)) continue;
+        seen.add(bid);
+        if ((await cache.hasHad(user, { bid })).had) had.push(bid);
+        else notHad.push(bid);
+      }
+      return textResult({
+        username: user,
+        checked: seen.size,
+        not_had_count: notHad.length,
+        had_count: had.length,
+        not_had: notHad,
+        had,
+        freshness: await freshness(cache, user),
+      });
+    },
+  );
+
+  server.registerTool(
     'untappd_cache_query',
     {
       title: 'Query cached check-ins with filters',

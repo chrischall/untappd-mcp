@@ -15,7 +15,17 @@ import { registerCheckinTools } from './tools/checkin.js';
 import { registerUtilityTools } from './tools/utilities.js';
 import { registerCacheTools } from './tools/cache.js';
 import { logRegisteredTools } from './tools/diagnostics.js';
-import { UntappdCacheDO, makeDurableCacheStore } from './cache/durable.js';
+import { UntappdCacheDO, durableCacheProvider } from './cache/durable.js';
+
+// Capture the Worker `env` (bindings) + operator username per client instance.
+// We set this in `buildClient` — which the connector ALWAYS calls with `env`
+// (the API tools depend on it) — and read it back in the cache registrar, keyed
+// by the exact client instance so concurrent user sessions never cross wires.
+// Deliberately NOT threaded through a registrar context argument: that would
+// depend on the connector build forwarding it, and a stale bundle silently
+// dropping it is what made every cache tool throw
+// "Cannot read properties of undefined (reading 'env')".
+const cacheContext = new WeakMap<UntappdClient, { env: { CACHE_DO?: DurableObjectNamespace<UntappdCacheDO> }; username: string }>();
 
 // The Cloudflare remote-connector entrypoint: wires the same tool registrars
 // the stdio server uses (`src/index.ts`) into `@chrischall/mcp-connector`'s
@@ -26,13 +36,21 @@ const { Agent, handler } = createConnector<UntappdProps, UntappdClient>({
   name: 'untappd-mcp',
   version: VERSION,
   auth: untappdAuth,
-  buildClient: (props, env) =>
-    new UntappdClient({
+  buildClient: (props, env) => {
+    const client = new UntappdClient({
       token: props.token,
       clientId: env.UNTAPPD_CLIENT_ID,
       clientSecret: env.UNTAPPD_CLIENT_SECRET,
       loginName: props.username,
-    }),
+    });
+    if (!env?.CACHE_DO) {
+      console.error(
+        '[untappd-mcp] worker: CACHE_DO Durable Object binding is missing — cache tools will error until it is declared in wrangler.jsonc and redeployed.',
+      );
+    }
+    cacheContext.set(client, { env, username: props.username });
+    return client;
+  },
   tools: [
     registerBeerTools,
     registerBreweryTools,
@@ -48,9 +66,11 @@ const { Agent, handler } = createConnector<UntappdProps, UntappdClient>({
     // The cache tools need durable per-user storage. Back them with a dedicated
     // Durable Object keyed by the authenticated operator's username (so the
     // cache persists across that user's conversations — unlike the session-keyed
-    // MCP agent DO). `ctx` carries the Worker `env` and the user's OAuth props.
-    (server, client, ctx) =>
-      registerCacheTools(server, client, () => makeDurableCacheStore(ctx.env.CACHE_DO, ctx.props.username)),
+    // MCP agent DO). The env/username come from the WeakMap set in buildClient.
+    (server, client) => {
+      const cx = cacheContext.get(client);
+      registerCacheTools(server, client, durableCacheProvider(cx?.env?.CACHE_DO, cx?.username));
+    },
     // Keep last: logs the full registered toolset (count + names) at startup.
     (server) => logRegisteredTools(server, 'worker'),
   ],

@@ -222,6 +222,16 @@ describe('cache tools', () => {
     expect((out.freshness as { backfill_complete: boolean }).backfill_complete).toBe(true);
   });
 
+  it('not_had returns only the beers the user has NOT had', async () => {
+    const out = parse(await harness.callTool('untappd_cache_not_had', { username: 'mer', bids: [11, 22, 99, 100, 11] }));
+    // 11 & 22 are cached (had); 99 & 100 are not; the duplicate 11 is de-duped.
+    expect(out.checked).toBe(4);
+    expect(out.not_had).toEqual([99, 100]);
+    expect(out.had).toEqual([11, 22]);
+    expect(out.not_had_count).toBe(2);
+    expect(out.had_count).toBe(2);
+  });
+
   it('has_had matches by bid and reports freshness', async () => {
     const out = parse(await harness.callTool('untappd_cache_has_had', { username: 'mer', bid: 22 }));
     expect(out.had).toBe(true);

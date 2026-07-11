@@ -68,6 +68,8 @@ on the remote connector it's a per-user Durable Object. Same tools either way.
   case-insensitive `beer_name` substring.
 - `untappd_cache_has_had_many` — batch had/not-had for a list of `bids` in one
   call (venue-menu cross-check).
+- `untappd_cache_not_had` — given a list of `bids`, return only the ones the user
+  has NOT had ("what's new to me on this menu?").
 - `untappd_cache_query` — filter cached check-ins by brewery, style, `min_rating`,
   venue, and date range, with sort + limit.
 

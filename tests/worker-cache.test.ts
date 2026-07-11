@@ -1,7 +1,10 @@
 import { env } from 'cloudflare:test';
 import { describe, it, expect } from 'vitest';
 import type { CheckinRow } from '../src/cache/store.js';
-import type { UntappdCacheDO } from '../src/cache/durable.js';
+import { makeDurableCacheStore, durableCacheProvider, type UntappdCacheDO } from '../src/cache/durable.js';
+import { registerCacheTools } from '../src/tools/cache.js';
+import { UntappdClient } from '../src/client.js';
+import { createTestHarness } from './helpers.js';
 
 // Exercises the Durable Object cache backend inside the REAL Workers runtime
 // (Miniflare via @cloudflare/vitest-pool-workers), against wrangler.jsonc's
@@ -63,5 +66,31 @@ describe('UntappdCacheDO (Durable Object SQLite backend)', () => {
     expect(await a.cachedCount('a')).toBe(1);
     // A different operator's DO is a separate database — no cross-contamination.
     expect(await b.cachedCount('a')).toBe(0);
+  });
+});
+
+describe('worker cache wiring (regression for the env-threading bug)', () => {
+  it('surfaces a clear error — not an undefined TypeError — when the binding is missing', () => {
+    // This is the exact failure mode the connector hit: no storage binding. It
+    // must read as "CACHE_DO not configured", not "Cannot read properties of
+    // undefined".
+    expect(() => makeDurableCacheStore(undefined, 'someone')).toThrowError(/CACHE_DO/);
+  });
+
+  it('drives a cache tool end-to-end through MCP against the real DO binding', async () => {
+    // Mirrors how worker.ts wires the store: a provider built from env.CACHE_DO,
+    // handed to registerCacheTools. Exercises env → provider → store → DO → tool.
+    const provider = durableCacheProvider(CACHE, 'regression_op');
+    await provider().upsertCheckins('regression_op', [row(11), row(22)]);
+
+    const harness = await createTestHarness((server) => registerCacheTools(server, new UntappdClient(), provider));
+    try {
+      const r = await harness.callTool('untappd_cache_not_had', { username: 'regression_op', bids: [11, 22, 77] });
+      const out = JSON.parse((r as { content: { text: string }[] }).content[0].text);
+      expect(out.not_had).toEqual([77]);
+      expect(out.had).toEqual([11, 22]);
+    } finally {
+      await harness.close();
+    }
   });
 });
