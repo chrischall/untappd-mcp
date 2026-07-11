@@ -217,6 +217,22 @@
     {
       "name": "untappd_remove_friend",
       "description": "Remove a friend or cancel a sent request (confirm-gated)"
+    },
+    {
+      "name": "untappd_sync_checkins",
+      "description": "Sync a user's check-ins into a local SQLite cache (incremental + resumable backfill)"
+    },
+    {
+      "name": "untappd_cache_has_had",
+      "description": "Check if a user has had a beer, from the local cache (no API call)"
+    },
+    {
+      "name": "untappd_cache_has_had_many",
+      "description": "Batch had/not-had for many beer ids, from the local cache (no API call)"
+    },
+    {
+      "name": "untappd_cache_query",
+      "description": "Query cached check-ins by brewery, style, rating, venue, or date (no API call)"
     }
   ],
   "compatibility": {

@@ -13,6 +13,7 @@ import { registerFriendActionTools } from './tools/friends.js';
 import { registerWishlistTools } from './tools/wishlist.js';
 import { registerCheckinTools } from './tools/checkin.js';
 import { registerUtilityTools } from './tools/utilities.js';
+import { registerCacheTools } from './tools/cache.js';
 
 // Build the env-based client once and inject it into each registrar. The
 // constructor defers its config error, so the server still boots (and answers
@@ -36,5 +37,9 @@ await runMcp({
     (s) => registerWishlistTools(s, client),
     (s) => registerCheckinTools(s, client),
     (s) => registerUtilityTools(s, client),
+    // Cache tools live only on the Node/stdio server: they need a local SQLite
+    // file, which the filesystem-less Cloudflare Worker (src/worker.ts) can't
+    // provide, so they are intentionally NOT registered there.
+    (s) => registerCacheTools(s, client),
   ],
 });

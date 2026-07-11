@@ -45,3 +45,32 @@ Each returns a dry-run preview and makes NO network call unless called with
   `untappd_search_beer`; optional `rating` 0–5 in 0.25 steps, `shout`, venue).
 
 Photo attachment and wishlist add/remove are not yet supported.
+
+## Local check-in cache (stdio/local only)
+
+The API can't answer "has this user ever had beer X?" without paging their whole
+history (50/page, rate-limited). These tools keep a local SQLite mirror so that
+question is answered instantly with **no** API calls. `UNTAPPD_CACHE_DB` sets the
+db path (default `~/.untappd-mcp/checkins.db`). Not available on the remote
+connector (no filesystem).
+
+**Sync first, then query:**
+
+- `untappd_sync_checkins` — fetch check-ins into the cache. Incremental (stops at
+  already-cached check-ins) and resumable: while the backfill is incomplete it
+  pages backwards up to `max_pages` per call (default 10) and saves progress
+  after every page. If the returned `another_run_needed` is true, call it again
+  until it is false (covers both the backfill and catching up large bursts of
+  new check-ins). Omit `username` for your own account;
+  syncing another user needs their account public or a friend (friends-only, same
+  as `untappd_user_checkins`).
+- `untappd_cache_has_had` — has the user had a beer? By exact `bid` or a
+  case-insensitive `beer_name` substring.
+- `untappd_cache_has_had_many` — batch had/not-had for a list of `bids` in one
+  call (venue-menu cross-check).
+- `untappd_cache_query` — filter cached check-ins by brewery, style, `min_rating`,
+  venue, and date range, with sort + limit.
+
+Every cache read returns a `freshness` block (and a `caveat` when the backfill is
+incomplete) so you can flag that a "not found" may be a false negative until the
+sync finishes.
