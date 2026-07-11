@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.1](https://github.com/chrischall/untappd-mcp/compare/v1.3.0...v1.3.1) (2026-07-11)
+
+
+### Bug Fixes
+
+* **deps:** bump @modelcontextprotocol/sdk to 1.29.0 and agents to 0.17.3 in /packages/mcp-connector ([#40](https://github.com/chrischall/untappd-mcp/issues/40)) ([a8be812](https://github.com/chrischall/untappd-mcp/commit/a8be81234c5bc8ccadd5c4ea59eaa27844f7011a))
+* **deps:** bump agents ([#46](https://github.com/chrischall/untappd-mcp/issues/46)) ([7d706e0](https://github.com/chrischall/untappd-mcp/commit/7d706e06b96633d7e279247fd7af1a5ec2ce68c6))
+
 ## [1.3.0](https://github.com/chrischall/untappd-mcp/compare/v1.2.0...v1.3.0) (2026-07-09)
 
 
