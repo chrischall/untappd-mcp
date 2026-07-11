@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/chrischall/untappd-mcp/compare/v1.3.1...v1.4.0) (2026-07-11)
+
+
+### Features
+
+* check-in cache diagnostics and remote-connector (Durable Object) support ([#51](https://github.com/chrischall/untappd-mcp/issues/51)) ([696a67d](https://github.com/chrischall/untappd-mcp/commit/696a67da515e8eed91f10866f4d0dd0a1c6d726e))
+
 ## [1.3.1](https://github.com/chrischall/untappd-mcp/compare/v1.3.0...v1.3.1) (2026-07-11)
 
 
