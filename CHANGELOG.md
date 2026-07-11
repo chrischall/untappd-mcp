@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/chrischall/untappd-mcp/compare/v1.4.0...v1.5.0) (2026-07-11)
+
+
+### Features
+
+* fix remote cache env wiring; add untappd_cache_not_had ([#53](https://github.com/chrischall/untappd-mcp/issues/53)) ([d38bbc7](https://github.com/chrischall/untappd-mcp/commit/d38bbc7addd003fa5d9b93c43bc30b526d943cd8))
+
 ## [1.4.0](https://github.com/chrischall/untappd-mcp/compare/v1.3.1...v1.4.0) (2026-07-11)
 
 
