@@ -12,3 +12,7 @@ coverage/
 .DS_Store
 .superpowers/
 .wrangler/
+
+# npm resolves the connector via the root lockfile (file: dep); a nested
+# lock only misleads GitHub's security updater into bumping it in isolation
+packages/*/package-lock.json
