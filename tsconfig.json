@@ -11,5 +11,5 @@
     "types": ["node"]
   },
   "include": ["src"],
-  "exclude": ["src/worker.ts", "src/untappd-auth.ts"]
+  "exclude": ["src/worker.ts", "src/untappd-auth.ts", "src/cache/durable.ts"]
 }

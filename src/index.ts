@@ -14,11 +14,19 @@ import { registerWishlistTools } from './tools/wishlist.js';
 import { registerCheckinTools } from './tools/checkin.js';
 import { registerUtilityTools } from './tools/utilities.js';
 import { registerCacheTools } from './tools/cache.js';
+import { logRegisteredTools } from './tools/diagnostics.js';
+import { CheckinCache, defaultCachePath } from './cache/db.js';
+import type { CacheStore } from './cache/store.js';
 
 // Build the env-based client once and inject it into each registrar. The
 // constructor defers its config error, so the server still boots (and answers
 // the host's install-time tools/list probe) when credentials are absent.
 const client = new UntappdClient();
+
+// The stdio server backs the cache with a local `node:sqlite` file, opened lazily
+// on first cache-tool use so the server still boots when no path is configured.
+let nodeCache: CacheStore | undefined;
+const nodeCacheProvider = (): CacheStore => (nodeCache ??= CheckinCache.open(defaultCachePath()));
 
 await runMcp({
   name: 'untappd-mcp',
@@ -37,9 +45,11 @@ await runMcp({
     (s) => registerWishlistTools(s, client),
     (s) => registerCheckinTools(s, client),
     (s) => registerUtilityTools(s, client),
-    // Cache tools live only on the Node/stdio server: they need a local SQLite
-    // file, which the filesystem-less Cloudflare Worker (src/worker.ts) can't
-    // provide, so they are intentionally NOT registered there.
-    (s) => registerCacheTools(s, client),
+    // The stdio server backs the cache with a local `node:sqlite` file; the
+    // remote Cloudflare connector (src/worker.ts) backs the same cache tools
+    // with a per-user Durable Object instead.
+    (s) => registerCacheTools(s, client, nodeCacheProvider),
+    // Keep last: logs the full registered toolset (count + names) at startup.
+    (s) => logRegisteredTools(s, 'stdio'),
   ],
 });

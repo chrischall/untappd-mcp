@@ -46,13 +46,13 @@ Each returns a dry-run preview and makes NO network call unless called with
 
 Photo attachment and wishlist add/remove are not yet supported.
 
-## Local check-in cache (stdio/local only)
+## Check-in cache
 
 The API can't answer "has this user ever had beer X?" without paging their whole
-history (50/page, rate-limited). These tools keep a local SQLite mirror so that
-question is answered instantly with **no** API calls. `UNTAPPD_CACHE_DB` sets the
-db path (default `~/.untappd-mcp/checkins.db`). Not available on the remote
-connector (no filesystem).
+history (50/page, rate-limited). These tools keep a SQLite mirror so that
+question is answered instantly with **no** API calls. On the stdio server the
+mirror is a local file (`UNTAPPD_CACHE_DB`, default `~/.untappd-mcp/checkins.db`);
+on the remote connector it's a per-user Durable Object. Same tools either way.
 
 **Sync first, then query:**
 

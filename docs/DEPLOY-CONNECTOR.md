@@ -74,14 +74,26 @@ npm run worker:deploy
 ```
 
 This runs `wrangler deploy`, which builds and pushes `src/worker.ts` (plus the
-`UntappdMcpAgent` Durable Object binding and the `OAUTH_KV` namespace from step
-2). On success it prints the deployed URL:
+`UntappdMcpAgent` and `UntappdCacheDO` Durable Object bindings and the
+`OAUTH_KV` namespace from step 2). On success it prints the deployed URL:
 
 ```
 https://untappd-connector.<your-subdomain>.workers.dev
 ```
 
 Note that URL — it's what you'll share and what gets added as a connector.
+
+> **Check-in cache Durable Object.** The connector's `untappd_sync_checkins` /
+> `untappd_cache_*` tools store each user's synced history in a `UntappdCacheDO`
+> Durable Object with SQLite storage, keyed by the logged-in user so it persists
+> across their conversations and is isolated from other users. Its binding and
+> SQLite migration are declared in `wrangler.jsonc` and applied automatically by
+> `wrangler deploy` — no extra setup. **If you are upgrading an existing
+> deployment** that predates these tools, this deploy adds the `v2` migration
+> (`new_sqlite_classes: ["UntappdCacheDO"]`); it applies on the next deploy with
+> no action needed. After deploying, call `untappd_healthcheck` from claude.ai
+> and confirm it reports the expected `tool_count` (the cache tools included) and
+> `server_version` — that's how you verify the live build exposes them.
 
 Before deploying to production, you can sanity-check the Worker locally with:
 

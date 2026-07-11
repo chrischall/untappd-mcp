@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import { McpToolError } from '@chrischall/mcp-utils';
-import { CheckinCache, mapCheckinRow, type CheckinRow } from '../src/cache/db.js';
+import { CheckinCache } from '../src/cache/db.js';
+import { mapCheckinRow, type CacheStore, type CheckinRow } from '../src/cache/store.js';
 import { syncCheckins } from '../src/cache/sync.js';
 import { registerCacheTools } from '../src/tools/cache.js';
 import { UntappdClient } from '../src/client.js';
@@ -56,31 +57,31 @@ function fakeClient(history: unknown[], opts: { total?: number; throwOnCall?: nu
   };
 }
 
-function seed(cache: CheckinCache, username: string, items: unknown[]): void {
+async function seed(cache: CacheStore, username: string, items: unknown[]): Promise<void> {
   const rows = items.map((it) => mapCheckinRow(username, it)).filter((r): r is CheckinRow => r !== null);
-  cache.upsertCheckins(username, rows);
+  await cache.upsertCheckins(username, rows);
 }
 
 describe('CheckinCache upsert/dedupe', () => {
-  it('dedupes on checkin_id and reports only net-new rows', () => {
+  it('dedupes on checkin_id and reports only net-new rows', async () => {
     const cache = CheckinCache.open(':memory:');
-    const first = cache.upsertCheckins('u', [mapCheckinRow('u', makeCheckin(5, 5, { rating_score: 3 }))!]);
+    const first = await cache.upsertCheckins('u', [mapCheckinRow('u', makeCheckin(5, 5, { rating_score: 3 }))!]);
     expect(first).toBe(1);
-    expect(cache.cachedCount('u')).toBe(1);
+    expect(await cache.cachedCount('u')).toBe(1);
 
     // Re-upsert the SAME checkin_id with a changed rating: 0 net-new, updated in place.
-    const again = cache.upsertCheckins('u', [mapCheckinRow('u', makeCheckin(5, 5, { rating_score: 4.5 }))!]);
+    const again = await cache.upsertCheckins('u', [mapCheckinRow('u', makeCheckin(5, 5, { rating_score: 4.5 }))!]);
     expect(again).toBe(0);
-    expect(cache.cachedCount('u')).toBe(1);
-    const row = cache.query('u', {})[0];
+    expect(await cache.cachedCount('u')).toBe(1);
+    const row = (await cache.query('u', {}))[0];
     expect(row.rating).toBe(4.5);
   });
 
-  it('keys usernames case-insensitively', () => {
+  it('keys usernames case-insensitively', async () => {
     const cache = CheckinCache.open(':memory:');
-    cache.upsertCheckins('Mer1331', [mapCheckinRow('Mer1331', makeCheckin(9))!]);
-    expect(cache.cachedCount('mer1331')).toBe(1);
-    expect(cache.hasHad('MER1331', { bid: 9 }).had).toBe(true);
+    await cache.upsertCheckins('Mer1331', [mapCheckinRow('Mer1331', makeCheckin(9))!]);
+    expect(await cache.cachedCount('mer1331')).toBe(1);
+    expect((await cache.hasHad('MER1331', { bid: 9 })).had).toBe(true);
   });
 });
 
@@ -89,8 +90,8 @@ describe('syncCheckins incremental', () => {
     const cache = CheckinCache.open(':memory:');
     const history = makeHistory(200); // ids 200..1
     // Pretend a prior sync cached ids 150..1 and finished its backfill.
-    seed(cache, 'mer', history.slice(50));
-    cache.setState('mer', { newest_checkin_id: 150, backfill_complete: true, oldest_max_id: null });
+    await seed(cache, 'mer', history.slice(50));
+    await cache.setState('mer', { newest_checkin_id: 150, backfill_complete: true, oldest_max_id: null });
 
     const { client, checkinCalls } = fakeClient(history, { total: 200 });
     const summary = await syncCheckins(client, cache, 'mer', 10);
@@ -102,7 +103,7 @@ describe('syncCheckins incremental', () => {
     expect(checkinCalls()).toBe(2);
     expect(summary.backfill_complete).toBe(true);
     expect(summary.another_run_needed).toBe(false);
-    expect(cache.cachedCount('mer')).toBe(200);
+    expect(await cache.cachedCount('mer')).toBe(200);
   });
 });
 
@@ -116,8 +117,8 @@ describe('syncCheckins backfill resume after interruption', () => {
     await expect(syncCheckins(first.client, cache, 'mer', 10)).rejects.toThrow('boom');
 
     // Page 1 was persisted before the crash: 50 rows + a resume cursor.
-    expect(cache.cachedCount('mer')).toBe(50);
-    const mid = cache.getState('mer')!;
+    expect(await cache.cachedCount('mer')).toBe(50);
+    const mid = (await cache.getState('mer'))!;
     expect(mid.oldest_max_id).toBe(71); // last id on page 1 (120..71)
     expect(mid.backfill_complete).toBe(false);
     expect(mid.newest_checkin_id).toBe(120);
@@ -126,12 +127,12 @@ describe('syncCheckins backfill resume after interruption', () => {
     const second = fakeClient(history, { total: 120 });
     const summary = await syncCheckins(second.client, cache, 'mer', 10);
 
-    expect(cache.cachedCount('mer')).toBe(120); // complete, no duplicates
+    expect(await cache.cachedCount('mer')).toBe(120); // complete, no duplicates
     expect(summary.backfill_complete).toBe(true);
     expect(summary.another_run_needed).toBe(false);
     expect(summary.backfill_percent).toBe(100);
     // The resume cursor is cleared once the backfill reaches the end.
-    expect(cache.getState('mer')!.oldest_max_id).toBeNull();
+    expect((await cache.getState('mer'))!.oldest_max_id).toBeNull();
   });
 
   it('reports partial progress and that another run is needed when budget runs out', async () => {
@@ -141,7 +142,7 @@ describe('syncCheckins backfill resume after interruption', () => {
 
     const summary = await syncCheckins(client, cache, 'mer', 1); // only one page
     expect(summary.pages_fetched).toBe(1);
-    expect(cache.cachedCount('mer')).toBe(50);
+    expect(await cache.cachedCount('mer')).toBe(50);
     expect(summary.backfill_complete).toBe(false);
     expect(summary.another_run_needed).toBe(true);
     expect(summary.backfill_percent).toBe(42); // 50/120
@@ -153,8 +154,8 @@ describe('syncCheckins large new-check-in burst (> max_pages * 50)', () => {
     const cache = CheckinCache.open(':memory:');
     const history = makeHistory(800); // ids 800..1
     // Prior state: ids 200..1 cached contiguously, backfill already complete.
-    seed(cache, 'mer', history.slice(600));
-    cache.setState('mer', { newest_checkin_id: 200, backfill_complete: true, oldest_max_id: null });
+    await seed(cache, 'mer', history.slice(600));
+    await cache.setState('mer', { newest_checkin_id: 200, backfill_complete: true, oldest_max_id: null });
 
     // 600 new check-ins (201..800) appear; with max_pages=3 (150/run) a single
     // run cannot catch up — the old code would jump newest to 800 and strand ids
@@ -165,7 +166,7 @@ describe('syncCheckins large new-check-in burst (> max_pages * 50)', () => {
     expect(first.catchup_in_progress).toBe(true);
     expect(first.another_run_needed).toBe(true);
     // Boundary must NOT have jumped ahead of the still-missing middle.
-    const s1 = cache.getState('mer')!;
+    const s1 = (await cache.getState('mer'))!;
     expect(s1.newest_checkin_id).toBe(200);
     expect(s1.catchup_max_id).not.toBeNull();
 
@@ -180,10 +181,10 @@ describe('syncCheckins large new-check-in burst (> max_pages * 50)', () => {
     expect(last.backfill_complete).toBe(true);
     // Every check-in 1..800 is now cached — the once-vulnerable gap (201..300)
     // included — with the boundary at the true newest and no duplicates.
-    expect(cache.cachedCount('mer')).toBe(800);
-    expect(cache.getState('mer')!.newest_checkin_id).toBe(800);
+    expect(await cache.cachedCount('mer')).toBe(800);
+    expect((await cache.getState('mer'))!.newest_checkin_id).toBe(800);
     for (const bid of [201, 250, 300, 500, 800]) {
-      expect(cache.hasHad('mer', { bid }).had).toBe(true);
+      expect((await cache.hasHad('mer', { bid })).had).toBe(true);
     }
   });
 });
@@ -194,8 +195,8 @@ describe('cache tools', () => {
 
   beforeEach(async () => {
     cache = CheckinCache.open(':memory:');
-    seed(cache, 'mer', [makeCheckin(11, 11), makeCheckin(22, 22), makeCheckin(33, 33)]);
-    cache.setState('mer', { backfill_complete: true, last_synced_at: '2026-07-11T00:00:00.000Z', total_checkins: 3 });
+    await seed(cache, 'mer', [makeCheckin(11, 11), makeCheckin(22, 22), makeCheckin(33, 33)]);
+    await cache.setState('mer', { backfill_complete: true, last_synced_at: '2026-07-11T00:00:00.000Z', total_checkins: 3 });
     harness = await createTestHarness((server) => registerCacheTools(server, new UntappdClient(), () => cache));
   });
   afterAll(async () => {
@@ -234,7 +235,7 @@ describe('cache tools', () => {
   });
 
   it('query filters by style and returns a caveat when backfill is incomplete', async () => {
-    cache.setState('mer', { backfill_complete: false, total_checkins: 100 });
+    await cache.setState('mer', { backfill_complete: false, total_checkins: 100 });
     const out = parse(await harness.callTool('untappd_cache_query', { username: 'mer', style: 'ipa' }));
     expect(out.count).toBe(3);
     expect((out.freshness as { caveat?: string }).caveat).toContain('Backfill is incomplete');

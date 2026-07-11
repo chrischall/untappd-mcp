@@ -2,8 +2,16 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { textResult, toolAnnotations, createHelpfulError } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
-import { CheckinCache, defaultCachePath, type SyncState } from '../cache/db.js';
+import type { CacheStore, SyncState } from '../cache/store.js';
 import { syncCheckins } from '../cache/sync.js';
+
+/**
+ * A source of the {@link CacheStore} to use for a request. Injected per
+ * entrypoint so this module stays platform-neutral: the stdio server passes a
+ * `node:sqlite` file cache; the Cloudflare connector passes a Durable Object
+ * cache scoped to the authenticated operator.
+ */
+export type CacheProvider = () => CacheStore;
 
 const UsernameArg = z
   .string()
@@ -28,9 +36,9 @@ function resolveUser(username: string | undefined, loginName: string | null): st
  * is, and a plain-language warning when a "not had" answer might be a false
  * negative.
  */
-function freshness(cache: CheckinCache, username: string): Record<string, unknown> {
-  const state: SyncState | undefined = cache.getState(username);
-  const cached = cache.cachedCount(username);
+async function freshness(cache: CacheStore, username: string): Promise<Record<string, unknown>> {
+  const state: SyncState | undefined = await cache.getState(username);
+  const cached = await cache.cachedCount(username);
   const backfillComplete = state?.backfill_complete ?? false;
   const percent =
     state?.total_checkins && state.total_checkins > 0
@@ -53,32 +61,28 @@ function freshness(cache: CheckinCache, username: string): Record<string, unknow
     catchup_in_progress: catchupInProgress,
     backfill_percent: percent,
     cached_checkins: cached,
-    distinct_beers: cache.distinctBeerCount(username),
+    distinct_beers: await cache.distinctBeerCount(username),
     ...(caveat ? { caveat } : {}),
   };
 }
 
 /**
- * Register the local check-in cache tools. `cacheProvider` is injectable for
- * tests; in production it lazily opens the env-configured on-disk SQLite file on
- * first use (so the server still boots when no cache path/credentials are set).
+ * Register the check-in cache tools. `cacheProvider` supplies the backing store
+ * (a `node:sqlite` file on the stdio server, a Durable Object on the remote
+ * connector) and is required so this module imports no platform-specific code.
  */
-export function registerCacheTools(
-  server: McpServer,
-  client: UntappdClient,
-  cacheProvider: () => CheckinCache = defaultCacheProvider(),
-): void {
+export function registerCacheTools(server: McpServer, client: UntappdClient, cacheProvider: CacheProvider): void {
   server.registerTool(
     'untappd_sync_checkins',
     {
-      title: 'Sync Untappd check-ins into the local cache',
+      title: 'Sync Untappd check-ins into the cache',
       description:
-        "Fetch a user's check-ins into a local SQLite cache so history can be queried without paging the API. " +
+        "Fetch a user's check-ins into a persistent cache so history can be queried without paging the API. " +
         'Incremental (stops once it reaches already-cached check-ins) and resumable: if the backfill is not yet ' +
         'complete it pages backwards up to max_pages per call and persists progress after every page, so run it ' +
-        'repeatedly until backfill_complete is true. Syncing another user requires their account be public or a ' +
+        'repeatedly until another_run_needed is false. Syncing another user requires their account be public or a ' +
         'friend. Omit username for your own account.',
-      annotations: toolAnnotations({ title: 'Sync Untappd check-ins into the local cache', readOnly: false, idempotent: false, openWorld: true }),
+      annotations: toolAnnotations({ title: 'Sync Untappd check-ins into the cache', readOnly: false, idempotent: false, openWorld: true }),
       inputSchema: {
         username: UsernameArg,
         max_pages: z
@@ -100,13 +104,13 @@ export function registerCacheTools(
   server.registerTool(
     'untappd_cache_has_had',
     {
-      title: 'Check if a user has had a beer (from local cache)',
+      title: 'Check if a user has had a beer (from the cache)',
       description:
-        'Answer "has this user ever checked in this beer?" from the LOCAL cache only — NO API call. Match by exact ' +
+        'Answer "has this user ever checked in this beer?" from the cache only — NO API call. Match by exact ' +
         'bid, or by a case-insensitive substring of the beer name. Returns whether they had it, how many times, the ' +
         "best rating, the last date, and the matching check-ins. Always reports cache freshness so you can caveat " +
         'incomplete data. Requires bid or beer_name. Run untappd_sync_checkins first.',
-      annotations: toolAnnotations({ title: 'Check if a user has had a beer (from local cache)', readOnly: true, idempotent: true, openWorld: false }),
+      annotations: toolAnnotations({ title: 'Check if a user has had a beer (from the cache)', readOnly: true, idempotent: true, openWorld: false }),
       inputSchema: {
         username: UsernameArg,
         bid: z.number().int().positive().optional().describe('Exact Untappd beer id to look for'),
@@ -119,20 +123,20 @@ export function registerCacheTools(
       }
       const user = resolveUser(username, client.loginName);
       const cache = cacheProvider();
-      const result = cache.hasHad(user, { bid, beerName: beer_name });
-      return textResult({ username: user, query: { bid, beer_name }, ...result, freshness: freshness(cache, user) });
+      const result = await cache.hasHad(user, { bid, beerName: beer_name });
+      return textResult({ username: user, query: { bid, beer_name }, ...result, freshness: await freshness(cache, user) });
     },
   );
 
   server.registerTool(
     'untappd_cache_has_had_many',
     {
-      title: 'Batch-check many beers against the local cache',
+      title: 'Batch-check many beers against the cache',
       description:
         'Cross-check a list of beer ids against a user\'s cached history in ONE call — NO API call. Returns had/not-had ' +
         'per bid (with count and last date when had). Ideal for checking a whole venue menu at once. Run ' +
         'untappd_sync_checkins first; the freshness block flags if the cache is incomplete.',
-      annotations: toolAnnotations({ title: 'Batch-check many beers against the local cache', readOnly: true, idempotent: true, openWorld: false }),
+      annotations: toolAnnotations({ title: 'Batch-check many beers against the cache', readOnly: true, idempotent: true, openWorld: false }),
       inputSchema: {
         username: UsernameArg,
         bids: z.array(z.number().int().positive()).min(1).max(500).describe('Beer ids to check (1–500)'),
@@ -148,7 +152,7 @@ export function registerCacheTools(
       for (const bid of bids) {
         if (seen.has(bid)) continue;
         seen.add(bid);
-        const r = cache.hasHad(user, { bid });
+        const r = await cache.hasHad(user, { bid });
         if (r.had) hadCount++;
         results.push({ bid, had: r.had, count: r.count, last_date: r.last_date, best_rating: r.best_rating });
       }
@@ -158,7 +162,7 @@ export function registerCacheTools(
         had: hadCount,
         not_had: seen.size - hadCount,
         results,
-        freshness: freshness(cache, user),
+        freshness: await freshness(cache, user),
       });
     },
   );
@@ -169,7 +173,7 @@ export function registerCacheTools(
       title: 'Query cached check-ins with filters',
       description:
         "Query a user's cached check-ins by brewery, style, minimum rating, venue, and/or date range, with sorting " +
-        'and a limit — from the LOCAL cache only, NO API call. Returns the matching check-ins plus cache freshness. ' +
+        'and a limit — from the cache only, NO API call. Returns the matching check-ins plus cache freshness. ' +
         'Run untappd_sync_checkins first.',
       annotations: toolAnnotations({ title: 'Query cached check-ins with filters', readOnly: true, idempotent: true, openWorld: false }),
       inputSchema: {
@@ -192,14 +196,8 @@ export function registerCacheTools(
     async ({ username, ...filters }) => {
       const user = resolveUser(username, client.loginName);
       const cache = cacheProvider();
-      const rows = cache.query(user, filters);
-      return textResult({ username: user, count: rows.length, filters, results: rows, freshness: freshness(cache, user) });
+      const rows = await cache.query(user, filters);
+      return textResult({ username: user, count: rows.length, filters, results: rows, freshness: await freshness(cache, user) });
     },
   );
-}
-
-/** Lazily open (once) the env-configured on-disk cache. */
-function defaultCacheProvider(): () => CheckinCache {
-  let cache: CheckinCache | undefined;
-  return () => (cache ??= CheckinCache.open(defaultCachePath()));
 }
