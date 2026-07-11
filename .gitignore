@@ -9,6 +9,7 @@ coverage/
 *.skill
 *.mcpb
 *.log
+*.db
 .DS_Store
 .superpowers/
 .wrangler/
