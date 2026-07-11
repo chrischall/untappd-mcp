@@ -5,9 +5,15 @@
   "compatibility_date": "2025-11-01",
   "compatibility_flags": ["nodejs_compat"],
   "durable_objects": {
-    "bindings": [{ "name": "MCP_OBJECT", "class_name": "UntappdMcpAgent" }]
+    "bindings": [
+      { "name": "MCP_OBJECT", "class_name": "UntappdMcpAgent" },
+      { "name": "CACHE_DO", "class_name": "UntappdCacheDO" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UntappdMcpAgent"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["UntappdMcpAgent"] },
+    { "tag": "v2", "new_sqlite_classes": ["UntappdCacheDO"] }
+  ],
   "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "09c7c901f46b4162a4a64aea22a06948" }],
   "routes": [{ "pattern": "connector.untappd.nullnet.app", "custom_domain": true }],
   "workers_dev": true,

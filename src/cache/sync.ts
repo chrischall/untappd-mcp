@@ -1,6 +1,6 @@
 import { createHelpfulError, RateLimitError, messageOf } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
-import { CheckinCache, mapCheckinRow, type CheckinRow } from './db.js';
+import { mapCheckinRow, type CacheStore, type CheckinRow } from './store.js';
 
 const PAGE_LIMIT = 50; // Untappd's max page size for /user/checkins.
 
@@ -75,12 +75,12 @@ async function fetchTotalCheckins(client: UntappdClient, encodedUser: string): P
  */
 export async function syncCheckins(
   client: UntappdClient,
-  cache: CheckinCache,
+  cache: CacheStore,
   rawUsername: string,
   maxPages = 10,
 ): Promise<SyncSummary> {
   const encodedUser = encodeURIComponent(rawUsername);
-  const prior = cache.getState(rawUsername);
+  const prior = await cache.getState(rawUsername);
   const priorNewest = prior?.newest_checkin_id ?? null;
 
   let pages = 0;
@@ -127,7 +127,7 @@ export async function syncCheckins(
         break;
       }
       const rows = rowsOf(rawUsername, page.items);
-      added += cache.upsertCheckins(rawUsername, rows);
+      added += await cache.upsertCheckins(rawUsername, rows);
       const oldestOnPage = rows[rows.length - 1].checkin_id;
       if (oldestOnPage <= priorNewest) {
         caughtUp = true; // reconnected to the cached block
@@ -143,16 +143,16 @@ export async function syncCheckins(
       }
       catchupMaxId = page.nextMaxId;
       // Persist the resume cursor after EVERY page; the boundary stays put.
-      cache.setState(rawUsername, { catchup_max_id: catchupMaxId, last_synced_at: now() });
+      await cache.setState(rawUsername, { catchup_max_id: catchupMaxId, last_synced_at: now() });
       maxId = page.nextMaxId;
     }
     if (caughtUp) {
       // Contiguous from the true newest down to the old block: advance the
       // boundary and clear the catch-up cursor.
-      newest = cache.newestCachedId(rawUsername);
+      newest = await cache.newestCachedId(rawUsername);
       catchupMaxId = null;
       catchupInProgress = false;
-      cache.setState(rawUsername, {
+      await cache.setState(rawUsername, {
         newest_checkin_id: newest,
         catchup_max_id: null,
         backfill_complete: backfillComplete,
@@ -179,12 +179,12 @@ export async function syncCheckins(
         break;
       }
       const rows = rowsOf(rawUsername, page.items);
-      added += cache.upsertCheckins(rawUsername, rows);
+      added += await cache.upsertCheckins(rawUsername, rows);
       if (newest === null) newest = rows[0].checkin_id; // first-ever sync sets the boundary
       oldestMaxId = page.nextMaxId;
       if (page.nextMaxId === null) backfillComplete = true;
       // Persist progress after EVERY page so an interruption never loses work.
-      cache.setState(rawUsername, {
+      await cache.setState(rawUsername, {
         newest_checkin_id: newest,
         oldest_max_id: oldestMaxId,
         backfill_complete: backfillComplete,
@@ -196,8 +196,8 @@ export async function syncCheckins(
   }
 
   const total = await fetchTotalCheckins(client, encodedUser);
-  const cached = cache.cachedCount(rawUsername);
-  cache.setState(rawUsername, {
+  const cached = await cache.cachedCount(rawUsername);
+  await cache.setState(rawUsername, {
     newest_checkin_id: newest,
     oldest_max_id: oldestMaxId,
     catchup_max_id: catchupMaxId,
@@ -227,7 +227,7 @@ export async function syncCheckins(
     rows_added: added,
     pages_fetched: pages,
     cached_checkins: cached,
-    distinct_beers: cache.distinctBeerCount(rawUsername),
+    distinct_beers: await cache.distinctBeerCount(rawUsername),
     total_checkins: total,
     backfill_percent: backfillPercent,
     backfill_complete: backfillComplete,

@@ -82,18 +82,19 @@ Writes (confirm-gated — return a dry-run preview unless called with
 `untappd_wishlist_add`, `untappd_wishlist_remove`, `untappd_delete_checkin`,
 `untappd_add_friend`, `untappd_accept_friend`, `untappd_reject_friend`, `untappd_remove_friend`.
 
-Local check-in cache (stdio/local only — needs a filesystem, so not available on
-the remote connector): `untappd_sync_checkins`, `untappd_cache_has_had`,
+Check-in cache: `untappd_sync_checkins`, `untappd_cache_has_had`,
 `untappd_cache_has_had_many`, `untappd_cache_query`.
 
-## Local check-in cache
+## Check-in cache
 
 The Untappd API only exposes paged, most-recent-first check-in lists (50 per
 page) and has **no** "has this user ever had beer X?" lookup — answering that
 from the API alone means paging an entire history (often 11k+ check-ins) against
-a tight ~100-calls/hour rate limit. These tools maintain a local SQLite mirror
-of a user's check-ins so the question is answered instantly, offline, with zero
-API calls.
+a tight ~100-calls/hour rate limit. These tools maintain a SQLite mirror of a
+user's check-ins so the question is answered instantly, offline, with zero API
+calls. The mirror is a local file on the stdio/desktop server (`node:sqlite`,
+path via `UNTAPPD_CACHE_DB`) and a per-user Durable Object on the remote
+connector — the tools and behaviour are identical either way.
 
 **Recommended workflow — sync first, then query:**
 
@@ -125,6 +126,14 @@ Syncing **another** user goes through the same authed endpoint as
 `untappd_user_checkins`, so Untappd's privacy rules apply: it only works if that
 account is public or your friend. Otherwise the sync returns a clear error
 telling you to add them as a friend first.
+
+On the remote connector each logged-in user gets their **own** durable cache
+(keyed by their account), holding only the check-ins their account was allowed
+to fetch — one user can never read another's cache. See
+[`docs/DEPLOY-CONNECTOR.md`](docs/DEPLOY-CONNECTOR.md) for the one-time deploy
+step this adds. `untappd_healthcheck` reports the running version and the exact
+tool set (count + names + a stable hash), so you can confirm which build a
+connector is serving.
 
 ## Development
 
