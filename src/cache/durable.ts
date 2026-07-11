@@ -1,4 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
+import { createHelpfulError } from '@chrischall/mcp-utils';
 import {
   CheckinStoreCore,
   type CacheStore,
@@ -117,9 +118,33 @@ class DurableCacheStore implements CacheStore {
  * persistent cache.
  */
 export function makeDurableCacheStore(
-  namespace: DurableObjectNamespace<UntappdCacheDO>,
-  operatorUsername: string,
+  namespace: DurableObjectNamespace<UntappdCacheDO> | undefined,
+  operatorUsername: string | undefined,
 ): CacheStore {
+  // Fail loudly and specifically instead of letting an `undefined` binding
+  // surface later as an opaque "Cannot read properties of undefined" TypeError.
+  if (!namespace) {
+    throw createHelpfulError('The check-in cache storage binding (CACHE_DO) is not available on this deployment.', {
+      hint: 'Declare the CACHE_DO Durable Object binding and its migration in wrangler.jsonc, then redeploy (npm run worker:deploy). Non-cache tools do not need it.',
+    });
+  }
+  if (!operatorUsername) {
+    throw createHelpfulError('Cannot open the check-in cache: no authenticated Untappd username on the session.', {
+      hint: 'Re-authenticate with the connector so the cache can be scoped to your account.',
+    });
+  }
   const id = namespace.idFromName(operatorUsername.toLowerCase());
   return new DurableCacheStore(namespace.get(id));
+}
+
+/**
+ * Build the cache-store provider the Worker hands to `registerCacheTools`.
+ * Deferred (built per tool call) so a missing binding surfaces as a clear error
+ * on a cache tool rather than breaking client construction / the API tools.
+ */
+export function durableCacheProvider(
+  namespace: DurableObjectNamespace<UntappdCacheDO> | undefined,
+  operatorUsername: string | undefined,
+): () => CacheStore {
+  return () => makeDurableCacheStore(namespace, operatorUsername);
 }

@@ -83,7 +83,7 @@ Writes (confirm-gated — return a dry-run preview unless called with
 `untappd_add_friend`, `untappd_accept_friend`, `untappd_reject_friend`, `untappd_remove_friend`.
 
 Check-in cache: `untappd_sync_checkins`, `untappd_cache_has_had`,
-`untappd_cache_has_had_many`, `untappd_cache_query`.
+`untappd_cache_has_had_many`, `untappd_cache_not_had`, `untappd_cache_query`.
 
 ## Check-in cache
 
@@ -114,6 +114,8 @@ connector — the tools and behaviour are identical either way.
      date, and the matching check-ins.
    - `untappd_cache_has_had_many` — cross-check a whole list of `bids` in one
      call (e.g. a venue's menu) → had/not-had per beer.
+   - `untappd_cache_not_had` — given a list of `bids`, return just the ones the
+     user has **not** had — the "what's new to me on this menu?" filter.
    - `untappd_cache_query` — filter cached check-ins by brewery, style,
      `min_rating`, venue, and/or date range, with sorting and a limit.
 

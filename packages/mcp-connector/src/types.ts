@@ -16,21 +16,10 @@ export interface ConnectorAuth<Props> {
   accent?: string;
 }
 
-/**
- * Per-request context handed to each tool registrar alongside the server and
- * client, so a registrar can reach the Worker `env` (bindings) and the
- * authenticated user's OAuth `props` — e.g. to scope a Durable Object to the
- * logged-in user. Registrars that don't need it simply ignore the argument.
- */
-export interface ConnectorContext<Props> {
-  env: any;
-  props: Props;
-}
-
 export interface ConnectorOptions<Props extends Record<string, unknown>, Client> {
   name: string;
   version: string;
   auth: ConnectorAuth<Props>;
   buildClient(props: Props, env: any): Client;
-  tools: Array<(server: any, client: Client, ctx: ConnectorContext<Props>) => void>;
+  tools: Array<(server: any, client: Client) => void>;
 }

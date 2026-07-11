@@ -228,7 +228,11 @@
     },
     {
       "name": "untappd_cache_has_had_many",
-      "description": "Batch had/not-had for many beer ids, from the local cache (no API call)"
+      "description": "Batch had/not-had for many beer ids, from the cache (no API call)"
+    },
+    {
+      "name": "untappd_cache_not_had",
+      "description": "From a list of beer ids, return the ones a user has NOT had (no API call)"
     },
     {
       "name": "untappd_cache_query",
