@@ -33,8 +33,19 @@ export interface SyncState {
   username: string;
   /** pagination.max_id cursor for the NEXT older page (backfill resume point). */
   oldest_max_id: number | null;
-  /** Highest checkin_id ever stored — the incremental catch-up boundary. */
+  /**
+   * Top of the CONTIGUOUS cached block — the incremental catch-up boundary.
+   * Only advanced once a catch-up run has connected the new-top region down to
+   * this point, so it never runs ahead of a gap.
+   */
   newest_checkin_id: number | null;
+  /**
+   * Resume cursor for an in-progress incremental catch-up (the new-top region).
+   * Non-null means a catch-up did NOT finish within a run's page budget: the
+   * next run resumes paging from here instead of restarting at the very top, so
+   * a >`max_pages`*50 burst of new check-ins can never strand a permanent gap.
+   */
+  catchup_max_id: number | null;
   last_synced_at: string | null;
   backfill_complete: boolean;
   /** stats.total_checkins from the last user_info fetch (for a % estimate). */
@@ -135,6 +146,7 @@ CREATE TABLE IF NOT EXISTS sync_state (
   username          TEXT PRIMARY KEY,
   oldest_max_id     INTEGER,
   newest_checkin_id INTEGER,
+  catchup_max_id    INTEGER,
   last_synced_at    TEXT,
   backfill_complete INTEGER NOT NULL DEFAULT 0,
   total_checkins    INTEGER
@@ -152,6 +164,19 @@ export class CheckinCache {
   constructor(db: DatabaseSync) {
     this.db = db;
     this.db.exec(SCHEMA);
+    this.migrate();
+  }
+
+  // Forward-compat for a sync_state table created before a column existed. Each
+  // ADD COLUMN throws harmlessly if the column is already present.
+  private migrate(): void {
+    for (const col of ['catchup_max_id INTEGER']) {
+      try {
+        this.db.exec(`ALTER TABLE sync_state ADD COLUMN ${col}`);
+      } catch {
+        /* column already exists */
+      }
+    }
   }
 
   /** Open (creating parent dirs) a file-backed cache, or `:memory:` for tests. */
@@ -226,6 +251,14 @@ export class CheckinCache {
     return row.n;
   }
 
+  /** Highest cached checkin_id for a user (the true newest once contiguous), or null. */
+  newestCachedId(username: string): number | null {
+    const row = this.db
+      .prepare('SELECT MAX(checkin_id) AS m FROM checkins WHERE username = ?')
+      .get(username.toLowerCase()) as { m: number | null };
+    return row.m;
+  }
+
   getState(username: string): SyncState | undefined {
     const row = this.db.prepare('SELECT * FROM sync_state WHERE username = ?').get(username.toLowerCase()) as
       | (Omit<SyncState, 'backfill_complete'> & { backfill_complete: number })
@@ -248,16 +281,18 @@ export class CheckinCache {
       username: key,
       oldest_max_id: pick('oldest_max_id', null),
       newest_checkin_id: pick('newest_checkin_id', null),
+      catchup_max_id: pick('catchup_max_id', null),
       last_synced_at: pick('last_synced_at', null),
       backfill_complete: pick('backfill_complete', false),
       total_checkins: pick('total_checkins', null),
     };
     this.db
       .prepare(
-        `INSERT INTO sync_state (username, oldest_max_id, newest_checkin_id, last_synced_at, backfill_complete, total_checkins)
-         VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO sync_state (username, oldest_max_id, newest_checkin_id, catchup_max_id, last_synced_at, backfill_complete, total_checkins)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(username) DO UPDATE SET
            oldest_max_id=excluded.oldest_max_id, newest_checkin_id=excluded.newest_checkin_id,
+           catchup_max_id=excluded.catchup_max_id,
            last_synced_at=excluded.last_synced_at, backfill_complete=excluded.backfill_complete,
            total_checkins=excluded.total_checkins`,
       )
@@ -265,6 +300,7 @@ export class CheckinCache {
         key,
         next.oldest_max_id,
         next.newest_checkin_id,
+        next.catchup_max_id,
         next.last_synced_at,
         next.backfill_complete ? 1 : 0,
         next.total_checkins,

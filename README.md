@@ -103,9 +103,10 @@ API calls.
    `max_pages` per call (default 10) and **persists progress after every page**,
    so an interrupted run never loses data. The summary reports `rows_added`,
    `pages_fetched`, a `backfill_percent` estimate, and `another_run_needed` — if
-   that is `true`, just call it again (and again) until `backfill_complete` is
-   `true`. Spreading the backfill across several runs keeps you under the rate
-   limit.
+   that is `true`, just call it again (and again) until it is `false`. That
+   covers both extending the backfill downwards and catching up a burst of new
+   check-ins too large for one run (`catchup_in_progress`). Spreading the work
+   across several runs keeps you under the rate limit.
 2. **Query** the cache with no further API calls:
    - `untappd_cache_has_had` — has the user had a beer, by exact `bid` or a
      case-insensitive `beer_name` substring; returns count, best rating, last

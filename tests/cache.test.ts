@@ -148,6 +148,46 @@ describe('syncCheckins backfill resume after interruption', () => {
   });
 });
 
+describe('syncCheckins large new-check-in burst (> max_pages * 50)', () => {
+  it('never advances the boundary past an unfilled gap, and heals across runs', async () => {
+    const cache = CheckinCache.open(':memory:');
+    const history = makeHistory(800); // ids 800..1
+    // Prior state: ids 200..1 cached contiguously, backfill already complete.
+    seed(cache, 'mer', history.slice(600));
+    cache.setState('mer', { newest_checkin_id: 200, backfill_complete: true, oldest_max_id: null });
+
+    // 600 new check-ins (201..800) appear; with max_pages=3 (150/run) a single
+    // run cannot catch up — the old code would jump newest to 800 and strand ids
+    // 300..201 forever while reporting the cache complete.
+    const { client } = fakeClient(history, { total: 800 });
+
+    const first = await syncCheckins(client, cache, 'mer', 3);
+    expect(first.catchup_in_progress).toBe(true);
+    expect(first.another_run_needed).toBe(true);
+    // Boundary must NOT have jumped ahead of the still-missing middle.
+    const s1 = cache.getState('mer')!;
+    expect(s1.newest_checkin_id).toBe(200);
+    expect(s1.catchup_max_id).not.toBeNull();
+
+    // Keep syncing until it reports itself done (guard against a runaway loop).
+    let last = first;
+    for (let i = 0; i < 20 && last.another_run_needed; i++) {
+      last = await syncCheckins(client, cache, 'mer', 3);
+    }
+
+    expect(last.another_run_needed).toBe(false);
+    expect(last.catchup_in_progress).toBe(false);
+    expect(last.backfill_complete).toBe(true);
+    // Every check-in 1..800 is now cached — the once-vulnerable gap (201..300)
+    // included — with the boundary at the true newest and no duplicates.
+    expect(cache.cachedCount('mer')).toBe(800);
+    expect(cache.getState('mer')!.newest_checkin_id).toBe(800);
+    for (const bid of [201, 250, 300, 500, 800]) {
+      expect(cache.hasHad('mer', { bid }).had).toBe(true);
+    }
+  });
+});
+
 describe('cache tools', () => {
   let cache: CheckinCache;
   let harness: Awaited<ReturnType<typeof createTestHarness>>;

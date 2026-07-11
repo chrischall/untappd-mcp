@@ -13,6 +13,8 @@ export interface SyncSummary {
   total_checkins: number | null;
   backfill_percent: number | null;
   backfill_complete: boolean;
+  /** True when a burst of new check-ins exceeded this run's page budget. */
+  catchup_in_progress: boolean;
   another_run_needed: boolean;
   last_synced_at: string;
   note: string;
@@ -84,6 +86,13 @@ export async function syncCheckins(
   let pages = 0;
   let added = 0;
   let newest = priorNewest;
+  let backfillComplete = prior?.backfill_complete ?? false;
+  let oldestMaxId = prior?.oldest_max_id ?? null;
+  // Resume cursor for an unfinished top catch-up. Non-null → a prior run advanced
+  // partway through a burst of new check-ins but ran out of page budget before
+  // reconnecting to the cached block; this run resumes from here.
+  let catchupMaxId = prior?.catchup_max_id ?? null;
+  let catchupInProgress = catchupMaxId !== null;
   const now = () => new Date().toISOString();
 
   // Wrap the very first fetch so a private/non-friend account produces a clear,
@@ -100,30 +109,64 @@ export async function syncCheckins(
     }
   };
 
-  // ── Phase 1: incremental catch-up (only meaningful once we have a boundary) ──
+  // ── Phase 1: incremental catch-up of the new-top region (resumable) ──
+  // Only meaningful once we have a cached block (priorNewest set). Pages from the
+  // top (or a resumed cursor) DOWN until it reconnects to the cached block —
+  // i.e. a page whose oldest id <= priorNewest. Crucially, `newest_checkin_id`
+  // is NOT advanced until that reconnection happens: if the run exhausts its page
+  // budget first, the boundary stays put and a resume cursor is saved, so a burst
+  // of more than maxPages*50 new check-ins can never strand a permanent gap.
   if (priorNewest !== null) {
-    let maxId: number | undefined = undefined;
+    let maxId: number | undefined = catchupMaxId ?? undefined;
+    let caughtUp = false;
     for (; pages < maxPages; ) {
       const page: Page = pages === 0 ? await firstFetch(maxId) : await fetchPage(client, encodedUser, maxId);
       pages++;
-      if (page.items.length === 0) break;
+      if (page.items.length === 0) {
+        caughtUp = true;
+        break;
+      }
       const rows = rowsOf(rawUsername, page.items);
       added += cache.upsertCheckins(rawUsername, rows);
-      // The top of page 1 is the newest check-in overall.
-      if (newest === null || rows[0].checkin_id > newest) newest = rows[0].checkin_id;
-      cache.setState(rawUsername, { newest_checkin_id: newest, last_synced_at: now() });
-      // Caught up once this page reaches into already-cached territory.
       const oldestOnPage = rows[rows.length - 1].checkin_id;
-      if (oldestOnPage <= priorNewest) break;
-      if (page.nextMaxId === null) break;
+      if (oldestOnPage <= priorNewest) {
+        caughtUp = true; // reconnected to the cached block
+        break;
+      }
+      if (page.nextMaxId === null) {
+        // Paged all the way to the true bottom via the top — the whole history
+        // is now contiguous, so the backfill is complete too.
+        caughtUp = true;
+        backfillComplete = true;
+        oldestMaxId = null;
+        break;
+      }
+      catchupMaxId = page.nextMaxId;
+      // Persist the resume cursor after EVERY page; the boundary stays put.
+      cache.setState(rawUsername, { catchup_max_id: catchupMaxId, last_synced_at: now() });
       maxId = page.nextMaxId;
+    }
+    if (caughtUp) {
+      // Contiguous from the true newest down to the old block: advance the
+      // boundary and clear the catch-up cursor.
+      newest = cache.newestCachedId(rawUsername);
+      catchupMaxId = null;
+      catchupInProgress = false;
+      cache.setState(rawUsername, {
+        newest_checkin_id: newest,
+        catchup_max_id: null,
+        backfill_complete: backfillComplete,
+        oldest_max_id: oldestMaxId,
+        last_synced_at: now(),
+      });
+    } else {
+      catchupInProgress = true; // budget spent mid-catch-up; next run resumes
     }
   }
 
   // ── Phase 2: backfill older history (resumable) ──
-  let backfillComplete = prior?.backfill_complete ?? false;
-  let oldestMaxId = prior?.oldest_max_id ?? null;
-  if (!backfillComplete) {
+  // Skipped while a catch-up is still in progress (that already spent the budget).
+  if (!backfillComplete && !catchupInProgress) {
     // First-ever sync starts from the top (undefined); a resumed backfill picks
     // up from the stored cursor.
     let maxId: number | undefined = oldestMaxId ?? undefined;
@@ -157,14 +200,27 @@ export async function syncCheckins(
   cache.setState(rawUsername, {
     newest_checkin_id: newest,
     oldest_max_id: oldestMaxId,
+    catchup_max_id: catchupMaxId,
     backfill_complete: backfillComplete,
     total_checkins: total,
     last_synced_at: now(),
   });
 
   const backfillPercent =
-    total && total > 0 ? Math.min(100, Math.round((cached / total) * 100)) : backfillComplete ? 100 : null;
-  const anotherRunNeeded = !backfillComplete;
+    total && total > 0
+      ? Math.min(100, Math.round((cached / total) * 100))
+      : backfillComplete && !catchupInProgress
+        ? 100
+        : null;
+  // Another run is needed while EITHER frontier is unfinished: the bottom
+  // backfill, or an in-progress top catch-up of a large burst of new check-ins.
+  const anotherRunNeeded = !backfillComplete || catchupInProgress;
+
+  const note = catchupInProgress
+    ? 'More new check-ins remain than fit in this run — run untappd_sync_checkins again to finish catching up the newest check-ins.'
+    : backfillComplete
+      ? 'Full history is cached. Re-run occasionally to pick up new check-ins.'
+      : `Backfill incomplete — run untappd_sync_checkins again to fetch the next ${maxPages} pages of older check-ins.`;
 
   return {
     username: rawUsername,
@@ -175,10 +231,9 @@ export async function syncCheckins(
     total_checkins: total,
     backfill_percent: backfillPercent,
     backfill_complete: backfillComplete,
+    catchup_in_progress: catchupInProgress,
     another_run_needed: anotherRunNeeded,
     last_synced_at: now(),
-    note: backfillComplete
-      ? 'Full history is cached. Re-run occasionally to pick up new check-ins.'
-      : `Backfill incomplete — run untappd_sync_checkins again to fetch the next ${maxPages} pages of older check-ins.`,
+    note,
   };
 }

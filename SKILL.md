@@ -60,7 +60,8 @@ connector (no filesystem).
   already-cached check-ins) and resumable: while the backfill is incomplete it
   pages backwards up to `max_pages` per call (default 10) and saves progress
   after every page. If the returned `another_run_needed` is true, call it again
-  until `backfill_complete` is true. Omit `username` for your own account;
+  until it is false (covers both the backfill and catching up large bursts of
+  new check-ins). Omit `username` for your own account;
   syncing another user needs their account public or a friend (friends-only, same
   as `untappd_user_checkins`).
 - `untappd_cache_has_had` — has the user had a beer? By exact `bid` or a

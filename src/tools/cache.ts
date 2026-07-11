@@ -38,15 +38,19 @@ function freshness(cache: CheckinCache, username: string): Record<string, unknow
       : backfillComplete
         ? 100
         : null;
+  const catchupInProgress = (state?.catchup_max_id ?? null) !== null;
   let caveat: string | undefined;
   if (!state || state.last_synced_at === null) {
     caveat = 'This user has never been synced — the cache is EMPTY. Run untappd_sync_checkins first; results here are not authoritative.';
+  } else if (catchupInProgress) {
+    caveat = 'A batch of the newest check-ins is still being caught up (last sync ran out of pages). Recent check-ins may be missing — run untappd_sync_checkins again to finish.';
   } else if (!backfillComplete) {
     caveat = `Backfill is incomplete${percent !== null ? ` (~${percent}% of history cached)` : ''}. A "not found" result may be a false negative for older check-ins — run untappd_sync_checkins again to keep backfilling.`;
   }
   return {
     last_synced_at: state?.last_synced_at ?? null,
     backfill_complete: backfillComplete,
+    catchup_in_progress: catchupInProgress,
     backfill_percent: percent,
     cached_checkins: cached,
     distinct_beers: cache.distinctBeerCount(username),
