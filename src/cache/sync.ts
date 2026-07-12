@@ -7,6 +7,11 @@ const PAGE_LIMIT = 50; // Untappd's max page size for /user/checkins.
 // API's reported total_checkins — allowing drift for deleted check-ins. Below
 // this after reaching the end means the endpoint refused to page (truncated).
 const COVERAGE_THRESHOLD = 0.98;
+// Absolute coverage drift allowed on top of the ratio, so a few new/deleted
+// check-ins on a SMALL fully-backfilled history aren't mistaken for an
+// incomplete backfill. Deliberately its own constant, not PAGE_LIMIT: it's a
+// tolerance for count drift, unrelated to how many rows a page returns.
+const COVERAGE_DRIFT_FLOOR = 50;
 
 export interface SyncSummary {
   username: string;
@@ -75,7 +80,7 @@ async function fetchTotalCheckins(client: UntappdClient, encodedUser: string): P
  */
 function reachedFullCoverage(cached: number, total: number | null): boolean {
   if (total === null || total <= 0) return true;
-  return cached >= total - 50 || cached >= Math.floor(total * COVERAGE_THRESHOLD);
+  return cached >= total - COVERAGE_DRIFT_FLOOR || cached >= Math.floor(total * COVERAGE_THRESHOLD);
 }
 
 export interface SyncCheckinsOptions {
