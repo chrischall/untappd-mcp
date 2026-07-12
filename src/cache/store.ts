@@ -52,6 +52,26 @@ export interface DistinctBeerRow {
   last_had: string | null;
 }
 
+/**
+ * Cached global beer metadata (from beer/info or search results). Keyed by bid
+ * and shared across usernames — beer facts are the same for everyone. `fetched_at`
+ * drives staleness so metadata is re-fetched at most every ~30 days.
+ */
+export interface BeerMeta {
+  bid: number;
+  name: string | null;
+  brewery: string | null;
+  brewery_id: number | null;
+  style: string | null;
+  parent_style: string | null;
+  abv: number | null;
+  ibu: number | null;
+  weighted_rating_score: number | null;
+  rating_score: number | null;
+  rating_count: number | null;
+  fetched_at: string | null;
+}
+
 /** Per-username sync bookkeeping. Mirrors the `sync_state` table. */
 export interface SyncState {
   username: string;
@@ -120,6 +140,10 @@ export interface CacheStore {
   setState(username: string, patch: Partial<Omit<SyncState, 'username'>>): Promise<void>;
   hasHad(username: string, opts: { bid?: number; beerName?: string }): Promise<HasHadResult>;
   query(username: string, filters: QueryFilters): Promise<CheckinRow[]>;
+  /** Read cached metadata for the given bids (only those present are returned). */
+  getBeerMeta(bids: number[]): Promise<BeerMeta[]>;
+  /** Upsert cached beer metadata (dedupe on bid). */
+  upsertBeerMeta(rows: BeerMeta[]): Promise<void>;
 }
 
 export type SqlParam = string | number | null;
@@ -201,6 +225,32 @@ export function mapBeerRow(username: string, item: unknown): DistinctBeerRow | n
   };
 }
 
+/**
+ * Normalise a beer object (from beer/info's `beer`, or a search/list item's
+ * `beer` with a sibling `brewery`) to {@link BeerMeta}. `fetchedAt` stamps when
+ * it was read so staleness can be judged. Returns null without a bid.
+ */
+export function beerMetaFrom(beer: unknown, brewery: unknown, fetchedAt: string): BeerMeta | null {
+  const b = asDict(beer);
+  const bid = num(b.bid);
+  if (bid === null) return null;
+  const brw = asDict(brewery ?? b.brewery);
+  return {
+    bid,
+    name: str(b.beer_name),
+    brewery: str(brw.brewery_name),
+    brewery_id: num(brw.brewery_id),
+    style: str(b.beer_style),
+    parent_style: str(b.parent_style_name),
+    abv: num(b.beer_abv),
+    ibu: num(b.beer_ibu),
+    weighted_rating_score: num(b.weighted_rating_score),
+    rating_score: num(b.rating_score),
+    rating_count: num(b.rating_count),
+    fetched_at: fetchedAt,
+  };
+}
+
 function normaliseDate(v: unknown): string | null {
   const s = str(v);
   if (!s) return null;
@@ -242,6 +292,20 @@ export const SCHEMA_STATEMENTS = [
      PRIMARY KEY (username, bid)
    )`,
   `CREATE INDEX IF NOT EXISTS idx_distinct_user_brewery ON distinct_beers(username, brewery_id)`,
+  `CREATE TABLE IF NOT EXISTS beer_meta (
+     bid                   INTEGER PRIMARY KEY,
+     name                  TEXT,
+     brewery               TEXT,
+     brewery_id            INTEGER,
+     style                 TEXT,
+     parent_style          TEXT,
+     abv                   REAL,
+     ibu                   REAL,
+     weighted_rating_score REAL,
+     rating_score          REAL,
+     rating_count          INTEGER,
+     fetched_at            TEXT
+   )`,
   `CREATE TABLE IF NOT EXISTS sync_state (
      username           TEXT PRIMARY KEY,
      oldest_max_id      INTEGER,
@@ -553,6 +617,36 @@ export class CheckinStoreCore {
       [...params, limit],
     ) as unknown as CheckinRow[];
   }
+
+  getBeerMeta(bids: number[]): BeerMeta[] {
+    if (bids.length === 0) return [];
+    const placeholders = bids.map(() => '?').join(', ');
+    return this.db.all(
+      `SELECT * FROM beer_meta WHERE bid IN (${placeholders})`,
+      bids,
+    ) as unknown as BeerMeta[];
+  }
+
+  upsertBeerMeta(rows: BeerMeta[]): void {
+    if (rows.length === 0) return;
+    const sql = `
+      INSERT INTO beer_meta
+        (bid, name, brewery, brewery_id, style, parent_style, abv, ibu, weighted_rating_score, rating_score, rating_count, fetched_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(bid) DO UPDATE SET
+        name=excluded.name, brewery=excluded.brewery, brewery_id=excluded.brewery_id,
+        style=excluded.style, parent_style=excluded.parent_style, abv=excluded.abv, ibu=excluded.ibu,
+        weighted_rating_score=excluded.weighted_rating_score, rating_score=excluded.rating_score,
+        rating_count=excluded.rating_count, fetched_at=excluded.fetched_at`;
+    this.db.transaction(() => {
+      for (const r of rows) {
+        this.db.run(sql, [
+          r.bid, r.name, r.brewery, r.brewery_id, r.style, r.parent_style, r.abv, r.ibu,
+          r.weighted_rating_score, r.rating_score, r.rating_count, r.fetched_at,
+        ]);
+      }
+    });
+  }
 }
 
 /**
@@ -591,6 +685,12 @@ export class LocalCacheStore implements CacheStore {
   }
   async query(username: string, filters: QueryFilters): Promise<CheckinRow[]> {
     return this.core.query(username, filters);
+  }
+  async getBeerMeta(bids: number[]): Promise<BeerMeta[]> {
+    return this.core.getBeerMeta(bids);
+  }
+  async upsertBeerMeta(rows: BeerMeta[]): Promise<void> {
+    this.core.upsertBeerMeta(rows);
   }
 }
 

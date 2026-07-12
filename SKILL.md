@@ -72,6 +72,10 @@ Query tools (has-had ones consult BOTH sources — a hit in either = had):
   case-insensitive `beer_name` substring.
 - `untappd_cache_has_had_many` — batch had/not-had for a list of `bids`.
 - `untappd_cache_not_had` — from a list of `bids`, the ones NOT had.
+- `untappd_top_not_had` — from a list of `bids`, the top N NOT-had beers by
+  Untappd rating, with an optional `style` filter ("what should I order off this
+  tap list?"). Uses a `beer_meta` cache; calls `beer/info` only on miss/stale,
+  capped at `api_budget` per run (partial/another_run_needed when exceeded).
 - `untappd_cache_query` — filter cached check-ins by brewery, style, `min_rating`,
   venue, and date range.
 

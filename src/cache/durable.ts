@@ -2,6 +2,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { createHelpfulError } from '@chrischall/mcp-utils';
 import {
   CheckinStoreCore,
+  type BeerMeta,
   type CacheStore,
   type CheckinRow,
   type DistinctBeerRow,
@@ -88,6 +89,12 @@ export class UntappdCacheDO extends DurableObject {
   async query(username: string, filters: QueryFilters): Promise<CheckinRow[]> {
     return this.core.query(username, filters);
   }
+  async getBeerMeta(bids: number[]): Promise<BeerMeta[]> {
+    return this.core.getBeerMeta(bids);
+  }
+  async upsertBeerMeta(rows: BeerMeta[]): Promise<void> {
+    this.core.upsertBeerMeta(rows);
+  }
 }
 
 /** A {@link CacheStore} that forwards every call to an {@link UntappdCacheDO} stub. */
@@ -122,6 +129,12 @@ class DurableCacheStore implements CacheStore {
   }
   query(username: string, filters: QueryFilters): Promise<CheckinRow[]> {
     return this.stub.query(username, filters);
+  }
+  getBeerMeta(bids: number[]): Promise<BeerMeta[]> {
+    return this.stub.getBeerMeta(bids);
+  }
+  upsertBeerMeta(rows: BeerMeta[]): Promise<void> {
+    return this.stub.upsertBeerMeta(rows);
   }
 }
 

@@ -16,6 +16,7 @@ import { registerUtilityTools } from './tools/utilities.js';
 import { registerCacheTools } from './tools/cache.js';
 import { logRegisteredTools } from './tools/diagnostics.js';
 import { UntappdCacheDO, durableCacheProvider } from './cache/durable.js';
+import type { CacheStore } from './cache/store.js';
 
 // Capture the Worker `env` (bindings) + operator username per client instance.
 // We set this in `buildClient` — which the connector ALWAYS calls with `env`
@@ -52,7 +53,10 @@ const { Agent, handler } = createConnector<UntappdProps, UntappdClient>({
     return client;
   },
   tools: [
-    registerBeerTools,
+    // The cache tools need durable per-user storage, and the beer tools seed the
+    // beer-metadata cache — both use the operator's cache DO, resolved from the
+    // WeakMap set in buildClient (keyed by the client so sessions never cross).
+    (server, client) => registerBeerTools(server, client, providerFor(client)),
     registerBreweryTools,
     registerVenueTools,
     registerUserTools,
@@ -63,18 +67,17 @@ const { Agent, handler } = createConnector<UntappdProps, UntappdClient>({
     registerWishlistTools,
     registerCheckinTools,
     registerUtilityTools,
-    // The cache tools need durable per-user storage. Back them with a dedicated
-    // Durable Object keyed by the authenticated operator's username (so the
-    // cache persists across that user's conversations — unlike the session-keyed
-    // MCP agent DO). The env/username come from the WeakMap set in buildClient.
-    (server, client) => {
-      const cx = cacheContext.get(client);
-      registerCacheTools(server, client, durableCacheProvider(cx?.env?.CACHE_DO, cx?.username));
-    },
+    (server, client) => registerCacheTools(server, client, providerFor(client)),
     // Keep last: logs the full registered toolset (count + names) at startup.
     (server) => logRegisteredTools(server, 'worker'),
   ],
 });
+
+/** The operator's Durable Object cache-store provider for a given client instance. */
+function providerFor(client: UntappdClient): () => CacheStore {
+  const cx = cacheContext.get(client);
+  return durableCacheProvider(cx?.env?.CACHE_DO, cx?.username);
+}
 
 // The Durable Object binding (`wrangler.jsonc`'s `MCP_OBJECT` → `UntappdMcpAgent`)
 // resolves this named export.
