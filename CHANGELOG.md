@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.7.0](https://github.com/chrischall/untappd-mcp/compare/v1.6.0...v1.7.0) (2026-07-12)
+
+
+### Features
+
+* add untappd_top_not_had (rank not-had beers off a tap list) ([#61](https://github.com/chrischall/untappd-mcp/issues/61)) ([49c85a6](https://github.com/chrischall/untappd-mcp/commit/49c85a611b915eb99c20b97531eb93ded6171355))
+
+
+### Bug Fixes
+
+* surface top_not_had API errors instead of masking them as empty ([#64](https://github.com/chrischall/untappd-mcp/issues/64)) ([ebd991c](https://github.com/chrischall/untappd-mcp/commit/ebd991ce77af8f610bb82d68b56fca970a067f2d))
+
 ## [1.6.0](https://github.com/chrischall/untappd-mcp/compare/v1.5.0...v1.6.0) (2026-07-12)
 
 
