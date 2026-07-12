@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.6.0](https://github.com/chrischall/untappd-mcp/compare/v1.5.0...v1.6.0) (2026-07-12)
+
+
+### Features
+
+* full has-had coverage via user/beers; fix false backfill_complete ([#55](https://github.com/chrischall/untappd-mcp/issues/55)) ([29381b2](https://github.com/chrischall/untappd-mcp/commit/29381b2e22c55821166de25b1f5875021c1b2068))
+
+
+### Bug Fixes
+
+* converge check-in sync meta-state; avoid needless re-paging ([#58](https://github.com/chrischall/untappd-mcp/issues/58)) ([6bb13a0](https://github.com/chrischall/untappd-mcp/commit/6bb13a0ed1f52ca9287b0bc293752999b1ddf381))
+
+
+### Refactor
+
+* name the check-in coverage drift floor constant ([#60](https://github.com/chrischall/untappd-mcp/issues/60)) ([f893741](https://github.com/chrischall/untappd-mcp/commit/f8937414885077c458bd50fed01cffbce416785f)), closes [#59](https://github.com/chrischall/untappd-mcp/issues/59)
+
 ## [1.5.0](https://github.com/chrischall/untappd-mcp/compare/v1.4.0...v1.5.0) (2026-07-11)
 
 
