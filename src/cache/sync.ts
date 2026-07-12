@@ -67,10 +67,15 @@ async function fetchTotalCheckins(client: UntappdClient, encodedUser: string): P
   }
 }
 
-/** Whether `cached` check-ins covers ~all of `total` (null total = can't verify → assume yes). */
+/**
+ * Whether `cached` check-ins covers ~all of `total` (null total = can't verify →
+ * assume yes). Uses BOTH an absolute drift floor and a relative threshold, so a
+ * handful of new check-ins on a small, fully-backfilled history (e.g. 200 of 205)
+ * is not mistaken for an incomplete backfill and needlessly re-paged.
+ */
 function reachedFullCoverage(cached: number, total: number | null): boolean {
   if (total === null || total <= 0) return true;
-  return cached >= Math.floor(total * COVERAGE_THRESHOLD);
+  return cached >= total - 50 || cached >= Math.floor(total * COVERAGE_THRESHOLD);
 }
 
 export interface SyncCheckinsOptions {
@@ -134,7 +139,10 @@ export async function syncCheckins(
   let oldestMaxId = doReset ? null : (priorState?.oldest_max_id ?? null);
   let catchupMaxId = doReset ? null : (priorState?.catchup_max_id ?? null);
   let catchupInProgress = catchupMaxId !== null;
-  let checkinsTruncated = false;
+  // Restore from prior so a known-truncated account skips Phase 2 (the
+  // `!checkinsTruncated` guard) instead of re-probing the stall every sync.
+  // A force/self-heal reset clears it above, so a changed situation still recovers.
+  let checkinsTruncated = doReset ? false : (priorState?.checkins_truncated ?? false);
 
   const firstFetch = async (maxId: number | undefined): Promise<Page> => {
     try {
@@ -170,6 +178,14 @@ export async function syncCheckins(
         backfillComplete = reachedFullCoverage(await cache.cachedCount(rawUsername), total);
         checkinsTruncated = !backfillComplete;
         oldestMaxId = null;
+        break;
+      }
+      // Stall: the endpoint ignored max_id (truncated account). The new check-ins
+      // on this page already landed; stop catching up and advance the boundary to
+      // the true top so we don't loop against the rate limit every sync.
+      if (maxId !== undefined && page.nextMaxId >= maxId) {
+        caughtUp = true;
+        checkinsTruncated = true;
         break;
       }
       catchupMaxId = page.nextMaxId;

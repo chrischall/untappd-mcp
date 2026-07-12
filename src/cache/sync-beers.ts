@@ -90,7 +90,15 @@ export async function syncUserBeers(
     pages++;
     if (page.total !== null) total = page.total;
     if (page.items.length === 0) {
+      // An empty (e.g. first) page still means the list is fully paged — persist
+      // completion so a subsequent call doesn't re-run the same empty fetch.
       complete = true;
+      await cache.setState(rawUsername, {
+        beers_offset: incremental ? (total ?? offset) : offset,
+        beers_total: total,
+        beers_complete: true,
+        last_synced_at: now(),
+      });
       break;
     }
     const rows = rowsOf(rawUsername, page.items);

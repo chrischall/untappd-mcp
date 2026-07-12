@@ -142,19 +142,38 @@ describe('force_backfill', () => {
 });
 
 describe('syncCheckins incremental + resume', () => {
-  it('catches up new check-ins without re-paging when coverage is intact', async () => {
+  it('catches up new check-ins without re-paging when within the drift floor', async () => {
     const cache = CheckinCache.open(':memory:');
-    const history = makeHistory(205); // ids 205..1
-    await seedCheckins(cache, 'mer', history.slice(5)); // ids 200..1 cached
+    const history = makeHistory(240); // ids 240..1
+    await seedCheckins(cache, 'mer', history.slice(40)); // ids 200..1 cached
     await cache.setState('mer', { newest_checkin_id: 200, backfill_complete: true, total_checkins: 200 });
 
-    const { client, calls } = fakeCheckinsClient(history, { total: 205 });
+    // 200 of 240 = 83% — below the 98% ratio but within the 50-check-in absolute
+    // floor, so it must NOT self-heal/re-page; the cheap Phase 1 catch-up handles it.
+    const { client, calls } = fakeCheckinsClient(history, { total: 240 });
     const summary = await syncCheckins(client, cache, 'mer', 10);
-    expect(summary.forced).toBe(false); // 200/205 is intact coverage — no self-heal
-    expect(summary.rows_added).toBe(5); // just the 5 new check-ins (205..201)
+    expect(summary.forced).toBe(false);
+    expect(summary.rows_added).toBe(40); // just the 40 new check-ins (240..201)
     expect(calls()).toBe(1); // one page, stopped at the cached boundary
     expect(summary.backfill_complete).toBe(true);
-    expect(await cache.cachedCount('mer')).toBe(205);
+    expect(await cache.cachedCount('mer')).toBe(240);
+  });
+
+  it('Phase 1 catch-up converges (does not loop) on a truncated account gaining >50 new', async () => {
+    const cache = CheckinCache.open(':memory:');
+    // Prior: known-truncated account, boundary at 6000.
+    await seedCheckins(cache, 'mer', [makeCheckin(6000, 6000)]);
+    await cache.setState('mer', { newest_checkin_id: 6000, checkins_truncated: true, total_checkins: 12036 });
+    // 300 new check-ins on top (6300..6001); the endpoint only ever serves the top 50.
+    const newHistory = Array.from({ length: 300 }, (_, i) => makeCheckin(6300 - i, 6300 - i));
+    const { client, calls } = fakeCheckinsClient(newHistory, { total: 12036, truncated: true });
+
+    const summary = await syncCheckins(client, cache, 'mer', 10);
+    expect(summary.history_truncated).toBe(true);
+    expect(summary.another_run_needed).toBe(false); // converged, not stuck in catch-up
+    expect(summary.pages_fetched).toBe(2); // stalled on page 2, not looped to maxPages
+    // The new top check-ins still landed.
+    expect((await cache.hasHad('mer', { bid: 6300 })).had).toBe(true);
   });
 
   it('persists progress per page and resumes after an interruption', async () => {
@@ -192,6 +211,18 @@ describe('syncUserBeers (user/beers offset paging)', () => {
     expect(summary.total_distinct_beers).toBe(120);
     expect(summary.backfill_percent).toBe(100);
     expect(summary.another_run_needed).toBe(false);
+  });
+
+  it('persists completion when the user has no distinct beers (empty first page)', async () => {
+    const cache = CheckinCache.open(':memory:');
+    const { client, calls } = fakeBeersClient([]);
+    const r1 = await syncUserBeers(client, cache, 'mer', 10);
+    expect(r1.beers_complete).toBe(true);
+    // State was persisted, so a second call doesn't re-run the empty fetch.
+    expect((await cache.getState('mer'))!.beers_complete).toBe(true);
+    expect(calls()).toBe(1);
+    const r2 = await syncUserBeers(client, cache, 'mer', 10);
+    expect(r2.another_run_needed).toBe(false);
   });
 
   it('resumes from the stored offset across runs', async () => {
