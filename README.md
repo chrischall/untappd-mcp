@@ -82,47 +82,57 @@ Writes (confirm-gated — return a dry-run preview unless called with
 `untappd_wishlist_add`, `untappd_wishlist_remove`, `untappd_delete_checkin`,
 `untappd_add_friend`, `untappd_accept_friend`, `untappd_reject_friend`, `untappd_remove_friend`.
 
-Check-in cache: `untappd_sync_checkins`, `untappd_cache_has_had`,
-`untappd_cache_has_had_many`, `untappd_cache_not_had`, `untappd_cache_query`.
+Check-in cache: `untappd_sync_checkins`, `untappd_sync_user_beers`,
+`untappd_cache_has_had`, `untappd_cache_has_had_many`, `untappd_cache_not_had`,
+`untappd_cache_query`.
 
 ## Check-in cache
 
-The Untappd API only exposes paged, most-recent-first check-in lists (50 per
-page) and has **no** "has this user ever had beer X?" lookup — answering that
-from the API alone means paging an entire history (often 11k+ check-ins) against
-a tight ~100-calls/hour rate limit. These tools maintain a SQLite mirror of a
-user's check-ins so the question is answered instantly, offline, with zero API
-calls. The mirror is a local file on the stdio/desktop server (`node:sqlite`,
-path via `UNTAPPD_CACHE_DB`) and a per-user Durable Object on the remote
-connector — the tools and behaviour are identical either way.
+The Untappd API only exposes paged lists (50 per page) and has **no** "has this
+user ever had beer X?" lookup — answering that from the API alone means paging an
+entire history (often 11k+ check-ins) against a tight ~100-calls/hour rate limit.
+These tools maintain a SQLite mirror so the question is answered instantly,
+offline, with zero API calls. The mirror is a local file on the stdio/desktop
+server (`node:sqlite`, path via `UNTAPPD_CACHE_DB`) and a per-user Durable Object
+on the remote connector — the tools and behaviour are identical either way.
 
-**Recommended workflow — sync first, then query:**
+Two sync sources fill the cache:
 
-1. **Sync** with `untappd_sync_checkins` (omit `username` for your own account).
-   It is incremental (stops as soon as it reaches already-cached check-ins) and
-   resumable: while the initial backfill is incomplete it pages backwards up to
-   `max_pages` per call (default 10) and **persists progress after every page**,
-   so an interrupted run never loses data. The summary reports `rows_added`,
-   `pages_fetched`, a `backfill_percent` estimate, and `another_run_needed` — if
-   that is `true`, just call it again (and again) until it is `false`. That
-   covers both extending the backfill downwards and catching up a burst of new
-   check-ins too large for one run (`catchup_in_progress`). Spreading the work
-   across several runs keeps you under the rate limit.
-2. **Query** the cache with no further API calls:
-   - `untappd_cache_has_had` — has the user had a beer, by exact `bid` or a
-     case-insensitive `beer_name` substring; returns count, best rating, last
-     date, and the matching check-ins.
-   - `untappd_cache_has_had_many` — cross-check a whole list of `bids` in one
-     call (e.g. a venue's menu) → had/not-had per beer.
-   - `untappd_cache_not_had` — given a list of `bids`, return just the ones the
-     user has **not** had — the "what's new to me on this menu?" filter.
-   - `untappd_cache_query` — filter cached check-ins by brewery, style,
-     `min_rating`, venue, and/or date range, with sorting and a limit.
+- **`untappd_sync_user_beers`** pages `user/beers` — the user's **complete
+  distinct-beers list** (thousands of rows, not tens of thousands of check-ins).
+  This is the **cheapest way to get full "has had" coverage** and, unlike
+  `user/checkins`, it pages fully for any public/friend account. **Start here**
+  for has-had questions.
+- **`untappd_sync_checkins`** pages `user/checkins` for detailed check-ins
+  (venue, date, comment). Only your **own** account pages fully — Untappd returns
+  just the ~50 most recent for anyone else and won't page further, which the tool
+  reports as `history_truncated` (it never falsely claims `backfill_complete`).
+  Pass `force_backfill: true` to reset a cache wrongly marked complete and
+  re-page from newest (cached rows are kept). Use this for recent venue/date
+  detail; use `untappd_sync_user_beers` for coverage.
 
-   Every read result carries a `freshness` block (`last_synced_at`,
-   `backfill_complete`, `backfill_percent`) and, when the backfill is
-   incomplete, a `caveat` — so a "not found" can be reported as possibly a false
-   negative for older history until the sync finishes.
+Both are resumable: they fetch `max_pages` per call (default 10), persist
+progress after every page, and set `another_run_needed: true` until done — just
+call again until it's `false`.
+
+**Query** the cache with no further API calls. The has-had tools consult **both**
+sources (a hit in either counts as had):
+
+- `untappd_cache_has_had` — has the user had a beer, by exact `bid` or a
+  case-insensitive `beer_name` substring; returns count, best rating, last date,
+  matching sources, and any detailed check-ins.
+- `untappd_cache_has_had_many` — cross-check a whole list of `bids` in one call
+  (e.g. a venue's menu) → had/not-had per beer.
+- `untappd_cache_not_had` — given a list of `bids`, return just the ones the user
+  has **not** had — the "what's new to me on this menu?" filter.
+- `untappd_cache_query` — filter cached **check-ins** by brewery, style,
+  `min_rating`, venue, and/or date range, with sorting and a limit.
+
+Every read result carries a `freshness` block that reports **each source's
+completeness separately** (`checkins.backfill_complete` / `history_truncated`,
+`beers.complete`, per-source percentages) plus `coverage_complete`, and a
+`caveat` while coverage is incomplete — so a "not found" can be flagged as
+possibly a false negative until the relevant sync finishes.
 
 Syncing **another** user goes through the same authed endpoint as
 `untappd_user_checkins`, so Untappd's privacy rules apply: it only works if that

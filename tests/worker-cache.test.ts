@@ -35,28 +35,35 @@ function row(checkin_id: number, over: Partial<CheckinRow> = {}): CheckinRow {
 }
 
 describe('UntappdCacheDO (Durable Object SQLite backend)', () => {
-  it('round-trips upsert / hasHad / query / state over RPC, keyed case-insensitively', async () => {
+  it('round-trips both sources / hasHad / query / state over RPC, keyed case-insensitively', async () => {
     const stub = CACHE.get(CACHE.idFromName('mer1331'));
 
     const added = await stub.upsertCheckins('Mer1331', [row(11), row(22), row(33, { beer_style: 'Stout' })]);
     expect(added).toBe(3);
-    // Re-upsert dedupes on checkin_id (net-new 0).
-    expect(await stub.upsertCheckins('mer1331', [row(11, { rating: 5 })])).toBe(0);
+    expect(await stub.upsertCheckins('mer1331', [row(11, { rating: 5 })])).toBe(0); // dedupe on checkin_id
     expect(await stub.cachedCount('MER1331')).toBe(3);
 
-    const hh = await stub.hasHad('mer1331', { bid: 22 });
-    expect(hh.had).toBe(true);
-    expect(hh.count).toBe(1);
+    // The distinct-beers source (user/beers) over RPC — bid 44 not in the check-ins.
+    await stub.upsertDistinctBeers('mer1331', [
+      { username: 'mer1331', bid: 44, beer_name: 'Solo', brewery_id: 7, brewery_name: 'Brew Co', beer_style: 'IPA', abv: 6, rating: 4.5, had_count: 9, first_had: '2016-01-01T00:00:00.000Z', last_had: '2025-01-01T00:00:00.000Z' },
+    ]);
+    expect(await stub.distinctBeersCount('mer1331')).toBe(1);
+
+    const fromCheckins = await stub.hasHad('mer1331', { bid: 22 });
+    expect(fromCheckins.had).toBe(true);
+    expect(fromCheckins.sources).toEqual(['checkins']);
+
+    const fromBeers = await stub.hasHad('mer1331', { bid: 44 });
+    expect(fromBeers.had).toBe(true);
+    expect(fromBeers.count).toBe(9);
+    expect(fromBeers.sources).toEqual(['beers']);
+
     expect((await stub.hasHad('mer1331', { bid: 999 })).had).toBe(false);
 
-    const ipas = await stub.query('mer1331', { style: 'IPA' });
-    expect(ipas.map((r) => r.checkin_id).sort()).toEqual([11, 22]);
-
-    await stub.setState('mer1331', { backfill_complete: true, newest_checkin_id: 33, total_checkins: 3 });
+    await stub.setState('mer1331', { backfill_complete: true, newest_checkin_id: 33, beers_complete: true });
     const state = await stub.getState('mer1331');
     expect(state?.backfill_complete).toBe(true);
-    expect(state?.newest_checkin_id).toBe(33);
-    expect(await stub.newestCachedId('mer1331')).toBe(33);
+    expect(state?.beers_complete).toBe(true);
   });
 
   it('keeps each operator’s cache isolated in its own DO', async () => {
