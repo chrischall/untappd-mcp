@@ -369,24 +369,27 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
       // budget (or after a rate limit) is deferred to a later run.
       const toFetch = needFetch.slice(0, budget);
       let deferred = needFetch.length - toFetch.length;
-      let apiCalls = 0;
+      let apiCalls = 0; // beer/info requests SENT (counts against the rate limit, successes or not)
+      let errors = 0; // non-rate-limit failures — so a whole-run outage is distinguishable from "all bad bids"
       let rateLimited = false;
       const fetched: BeerMeta[] = [];
       for (let i = 0; i < toFetch.length; i++) {
         const bid = toFetch[i];
+        apiCalls++;
         try {
           const data = await client.get<{ beer?: unknown }>(`/beer/info/${bid}`, { compact: 'true' });
-          apiCalls++;
           const meta = beerMetaFrom((data as { beer?: unknown }).beer, undefined, nowIso);
           if (meta) fetched.push(meta);
         } catch (e) {
           if (e instanceof RateLimitError) {
-            // Stop calling; the rest is deferred to a later run.
+            // Hit the wall — defer this bid and the remainder to a later run.
             rateLimited = true;
             deferred += toFetch.length - i;
             break;
           }
-          // A single bad/unknown bid shouldn't sink the whole run — skip it.
+          // A single bad/unknown/transient bid shouldn't sink the whole run —
+          // skip it, but count it so a broad outage surfaces as errors > 0.
+          errors++;
         }
       }
       if (fetched.length) await cache.upsertBeerMeta(fetched);
@@ -426,6 +429,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
           not_had: notHad.length,
           style_matched: style !== undefined ? matched.length : null,
           api_calls_used: apiCalls,
+          errors,
           partial,
           another_run_needed: partial,
           ...(rateLimited ? { rate_limited: true } : {}),
