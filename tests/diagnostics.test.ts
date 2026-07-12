@@ -24,6 +24,7 @@ const CACHE_TOOLS = [
   'untappd_cache_has_had_many',
   'untappd_cache_not_had',
   'untappd_cache_query',
+  'untappd_top_not_had',
 ];
 
 describe('healthcheck build diagnostics', () => {
@@ -58,10 +59,10 @@ describe('healthcheck build diagnostics', () => {
     expect(out.server_version).toBe(VERSION);
 
     const tools = out.tools as string[];
-    // The full toolset (incl. the 6 cache tools) is registered — this is the
-    // 43-tool set the remote connector must also expose.
-    expect(tools.length).toBe(43);
-    expect(out.tool_count).toBe(43);
+    // The full toolset (incl. the 7 cache tools) is registered — this is the
+    // 44-tool set the remote connector must also expose.
+    expect(tools.length).toBe(44);
+    expect(out.tool_count).toBe(44);
     for (const name of CACHE_TOOLS) expect(tools).toContain(name);
 
     // The hash is the FNV-1a of the sorted names — stable and self-consistent.

@@ -241,6 +241,10 @@
     {
       "name": "untappd_cache_query",
       "description": "Query cached check-ins by brewery, style, rating, venue, or date (no API call)"
+    },
+    {
+      "name": "untappd_top_not_had",
+      "description": "From a list of beer ids, the top N a user has NOT had, ranked by rating, with a style filter"
     }
   ],
   "compatibility": {

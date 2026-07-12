@@ -1,10 +1,14 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { textResult, toolAnnotations, createHelpfulError } from '@chrischall/mcp-utils';
+import { textResult, toolAnnotations, createHelpfulError, RateLimitError } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
-import type { CacheStore, SyncState } from '../cache/store.js';
+import { beerMetaFrom, type BeerMeta, type CacheStore, type SyncState } from '../cache/store.js';
 import { syncCheckins } from '../cache/sync.js';
 import { syncUserBeers } from '../cache/sync-beers.js';
+
+// Re-fetch cached beer metadata at most this often; a hit newer than this skips
+// the beer/info API call.
+const BEER_META_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 /**
  * A source of the {@link CacheStore} to use for a request. Injected per
@@ -300,6 +304,134 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
       const cache = cacheProvider();
       const rows = await cache.query(user, filters);
       return textResult({ username: user, count: rows.length, filters, results: rows, freshness: await freshness(cache, user) });
+    },
+  );
+
+  server.registerTool(
+    'untappd_top_not_had',
+    {
+      title: 'Top-rated beers a user has NOT had, from a candidate list',
+      description:
+        'The "what should I order off this tap list?" tool. From a list of candidate beer ids, return the top N the ' +
+        'user has NOT yet had, ranked by Untappd global rating, with an optional style filter. Not-had filtering uses ' +
+        'the cache only (both sources, no API call). Beer ratings/styles come from a metadata cache; a beer/info API ' +
+        'call is made only on a cache miss or if the cached metadata is >30 days old, capped at api_budget calls per ' +
+        'run (~100 calls/hour limit) — if more are needed it returns partial: true / another_run_needed: true, so ' +
+        're-running fills the rest. Reports the same freshness/caveat block as untappd_cache_not_had. Omit username ' +
+        'for your own account.',
+      annotations: toolAnnotations({ title: 'Top-rated beers a user has NOT had, from a candidate list', readOnly: false, idempotent: false, openWorld: true }),
+      inputSchema: {
+        username: UsernameArg,
+        bids: z.array(z.number().int().positive()).min(1).max(100).describe('Candidate beer ids (1–100)'),
+        top_n: z.number().int().min(1).max(10).optional().describe('How many top beers to return (default 2, max 10)'),
+        style: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Case-insensitive substring filter; matches EITHER the beer style or its parent style (e.g. "ipa")'),
+        api_budget: z
+          .number()
+          .int()
+          .min(1)
+          .max(100)
+          .optional()
+          .describe('Max beer/info API calls this run for uncached/stale metadata (default 25). Keep modest to respect the ~100 calls/hour rate limit.'),
+      },
+    },
+    async ({ username, bids, top_n, style, api_budget }) => {
+      const user = resolveUser(username, client.loginName);
+      const cache = cacheProvider();
+      const topN = top_n ?? 2;
+      const budget = api_budget ?? 25;
+      const nowMs = Date.now();
+      const nowIso = new Date().toISOString();
+
+      // Dedupe candidates, then filter to not-had using the cache only (no API).
+      const candidates = [...new Set(bids)];
+      const notHad: number[] = [];
+      for (const bid of candidates) {
+        if (!(await cache.hasHad(user, { bid })).had) notHad.push(bid);
+      }
+
+      // Read cached metadata; a hit newer than the TTL is used as-is, otherwise
+      // the bid needs a beer/info fetch.
+      const metaByBid = new Map<number, BeerMeta>();
+      for (const m of await cache.getBeerMeta(notHad)) metaByBid.set(m.bid, m);
+      const haveMeta: BeerMeta[] = [];
+      const needFetch: number[] = [];
+      for (const bid of notHad) {
+        const m = metaByBid.get(bid);
+        if (m && m.fetched_at && nowMs - Date.parse(m.fetched_at) < BEER_META_TTL_MS) haveMeta.push(m);
+        else needFetch.push(bid);
+      }
+
+      // Fetch missing/stale metadata up to the API budget; anything over the
+      // budget (or after a rate limit) is deferred to a later run.
+      const toFetch = needFetch.slice(0, budget);
+      let deferred = needFetch.length - toFetch.length;
+      let apiCalls = 0;
+      let rateLimited = false;
+      const fetched: BeerMeta[] = [];
+      for (let i = 0; i < toFetch.length; i++) {
+        const bid = toFetch[i];
+        try {
+          const data = await client.get<{ beer?: unknown }>(`/beer/info/${bid}`, { compact: 'true' });
+          apiCalls++;
+          const meta = beerMetaFrom((data as { beer?: unknown }).beer, undefined, nowIso);
+          if (meta) fetched.push(meta);
+        } catch (e) {
+          if (e instanceof RateLimitError) {
+            // Stop calling; the rest is deferred to a later run.
+            rateLimited = true;
+            deferred += toFetch.length - i;
+            break;
+          }
+          // A single bad/unknown bid shouldn't sink the whole run — skip it.
+        }
+      }
+      if (fetched.length) await cache.upsertBeerMeta(fetched);
+
+      const available = [...haveMeta, ...fetched];
+      const ratingOf = (m: BeerMeta): number => m.weighted_rating_score ?? m.rating_score ?? 0;
+
+      // Style filter: substring against EITHER the beer style or its parent style.
+      let matched = available;
+      if (style !== undefined) {
+        const s = style.toLowerCase();
+        matched = available.filter(
+          (m) => (m.style?.toLowerCase().includes(s) ?? false) || (m.parent_style?.toLowerCase().includes(s) ?? false),
+        );
+      }
+
+      const ranked = matched
+        .slice()
+        .sort((a, b) => ratingOf(b) - ratingOf(a))
+        .slice(0, topN)
+        .map((m) => ({
+          bid: m.bid,
+          name: m.name,
+          brewery: m.brewery,
+          style: m.style,
+          abv: m.abv,
+          rating: m.weighted_rating_score ?? m.rating_score,
+          rating_count: m.rating_count,
+        }));
+
+      const partial = deferred > 0;
+      return textResult({
+        username: user,
+        ranked,
+        summary: {
+          candidates: candidates.length,
+          not_had: notHad.length,
+          style_matched: style !== undefined ? matched.length : null,
+          api_calls_used: apiCalls,
+          partial,
+          another_run_needed: partial,
+          ...(rateLimited ? { rate_limited: true } : {}),
+        },
+        freshness: await freshness(cache, user),
+      });
     },
   );
 }

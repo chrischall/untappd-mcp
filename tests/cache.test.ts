@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
-import { McpToolError } from '@chrischall/mcp-utils';
+import { McpToolError, RateLimitError } from '@chrischall/mcp-utils';
 import { CheckinCache } from '../src/cache/db.js';
 import { mapCheckinRow, mapBeerRow, type CacheStore, type CheckinRow, type DistinctBeerRow } from '../src/cache/store.js';
 import { syncCheckins } from '../src/cache/sync.js';
 import { syncUserBeers } from '../src/cache/sync-beers.js';
 import { registerCacheTools } from '../src/tools/cache.js';
+import { registerBeerTools } from '../src/tools/beer.js';
 import { UntappdClient } from '../src/client.js';
 import { createTestHarness } from './helpers.js';
 
@@ -345,5 +346,195 @@ describe('cache tools', () => {
   it('has_had errors when neither bid nor beer_name is given', async () => {
     const r = await harness.callTool('untappd_cache_has_had', { username: 'mer' });
     expect((r as { isError?: boolean }).isError).toBe(true);
+  });
+});
+
+// ── beer/info fixtures for untappd_top_not_had ──
+function makeBeerInfo(
+  bid: number,
+  over: { style?: string; parent?: string; weighted?: number; rating?: number; name?: string } = {},
+): unknown {
+  return {
+    beer: {
+      bid,
+      beer_name: over.name ?? `Beer ${bid}`,
+      beer_style: over.style ?? 'IPA - Imperial / Double',
+      parent_style_name: over.parent ?? 'India Pale Ale (IPA)',
+      beer_abv: 8,
+      beer_ibu: 100,
+      weighted_rating_score: over.weighted ?? 4.2,
+      rating_score: over.rating ?? 4.25,
+      rating_count: 1000,
+      brewery: { brewery_id: 5143, brewery_name: 'Test Brewery' },
+    },
+  };
+}
+
+/** Fake client serving /beer/info/{bid}; optionally rate-limits after N calls. */
+function fakeBeerInfoClient(byBid: Record<number, unknown>, opts: { rateLimitAfter?: number } = {}) {
+  let calls = 0;
+  const get = async (path: string) => {
+    const m = path.match(/^\/beer\/info\/(\d+)/);
+    if (m) {
+      calls++;
+      if (opts.rateLimitAfter !== undefined && calls > opts.rateLimitAfter) throw new RateLimitError('Untappd');
+      const info = byBid[Number(m[1])];
+      if (!info) throw new McpToolError('beer not found');
+      return info;
+    }
+    throw new Error(`unexpected path ${path}`);
+  };
+  return { client: { get, get loginName() { return null; } } as unknown as UntappdClient, calls: () => calls };
+}
+
+describe('untappd_top_not_had', () => {
+  const parse = (r: unknown) => JSON.parse((r as { content: { text: string }[] }).content[0].text);
+
+  async function harnessWith(cache: CheckinCache, client: UntappdClient) {
+    return createTestHarness((server) => registerCacheTools(server, client, () => cache));
+  }
+
+  it('cache-hit path makes ZERO API calls and ranks by weighted rating', async () => {
+    const cache = CheckinCache.open(':memory:');
+    // Pre-seed fresh metadata for three not-had candidates.
+    const nowIso = new Date().toISOString();
+    await cache.upsertBeerMeta([
+      mapMeta(701, { weighted: 4.1, nowIso }),
+      mapMeta(702, { weighted: 4.7, nowIso }),
+      mapMeta(703, { weighted: 4.4, nowIso }),
+    ]);
+    const { client, calls } = fakeBeerInfoClient({});
+    const h = await harnessWith(cache, client);
+    try {
+      const out = parse(await h.callTool('untappd_top_not_had', { username: 'mer', bids: [701, 702, 703], top_n: 2 }));
+      expect(calls()).toBe(0); // everything was cached
+      expect(out.summary.api_calls_used).toBe(0);
+      expect((out.ranked as Array<{ bid: number }>).map((r) => r.bid)).toEqual([702, 703]); // top 2 by weighted
+      expect(out.summary.partial).toBe(false);
+      expect(out.freshness).toBeDefined();
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('cold cache respects api_budget and resumes on a second run', async () => {
+    const cache = CheckinCache.open(':memory:');
+    const byBid = {
+      801: makeBeerInfo(801, { weighted: 4.0 }),
+      802: makeBeerInfo(802, { weighted: 4.9 }),
+      803: makeBeerInfo(803, { weighted: 4.5 }),
+      804: makeBeerInfo(804, { weighted: 4.3 }),
+    };
+    const { client, calls } = fakeBeerInfoClient(byBid);
+    const h = await harnessWith(cache, client);
+    try {
+      const r1 = parse(await h.callTool('untappd_top_not_had', { username: 'mer', bids: [801, 802, 803, 804], top_n: 2, api_budget: 2 }));
+      expect(r1.summary.api_calls_used).toBe(2);
+      expect(r1.summary.partial).toBe(true);
+      expect(r1.summary.another_run_needed).toBe(true);
+      expect(calls()).toBe(2);
+
+      // Second run: the first two are now cached, the remaining two are fetched.
+      const r2 = parse(await h.callTool('untappd_top_not_had', { username: 'mer', bids: [801, 802, 803, 804], top_n: 2, api_budget: 2 }));
+      expect(r2.summary.api_calls_used).toBe(2); // only the two uncached ones
+      expect(r2.summary.partial).toBe(false);
+      expect((r2.ranked as Array<{ bid: number }>).map((r) => r.bid)).toEqual([802, 803]); // best two overall
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('style filter matches on the PARENT style, not just the beer style', async () => {
+    const cache = CheckinCache.open(':memory:');
+    const nowIso = new Date().toISOString();
+    await cache.upsertBeerMeta([
+      // beer_style has no "ipa", but the parent style does.
+      mapMeta(901, { weighted: 4.6, style: 'Hazy Pale', parent: 'India Pale Ale (IPA)', nowIso }),
+      mapMeta(902, { weighted: 4.8, style: 'Stout - Imperial', parent: 'Stouts', nowIso }),
+    ]);
+    const { client } = fakeBeerInfoClient({});
+    const h = await harnessWith(cache, client);
+    try {
+      const out = parse(await h.callTool('untappd_top_not_had', { username: 'mer', bids: [901, 902], style: 'ipa', top_n: 5 }));
+      expect(out.summary.style_matched).toBe(1);
+      expect((out.ranked as Array<{ bid: number }>).map((r) => r.bid)).toEqual([901]); // the stout is filtered out
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('returns nothing when every candidate has already been had', async () => {
+    const cache = CheckinCache.open(':memory:');
+    await seedBeers(cache, 'mer', [makeBeer(1001), makeBeer(1002)]);
+    const { client, calls } = fakeBeerInfoClient({});
+    const h = await harnessWith(cache, client);
+    try {
+      const out = parse(await h.callTool('untappd_top_not_had', { username: 'mer', bids: [1001, 1002, 1001] }));
+      expect(out.summary.candidates).toBe(2); // deduped
+      expect(out.summary.not_had).toBe(0);
+      expect(out.ranked).toEqual([]);
+      expect(calls()).toBe(0);
+    } finally {
+      await h.close();
+    }
+  });
+});
+
+function mapMeta(
+  bid: number,
+  o: { weighted?: number; style?: string; parent?: string; nowIso: string },
+) {
+  return {
+    bid,
+    name: `Beer ${bid}`,
+    brewery: 'Test Brewery',
+    brewery_id: 5143,
+    style: o.style ?? 'IPA - Imperial / Double',
+    parent_style: o.parent ?? 'India Pale Ale (IPA)',
+    abv: 8,
+    ibu: 100,
+    weighted_rating_score: o.weighted ?? 4.2,
+    rating_score: 4.25,
+    rating_count: 1000,
+    fetched_at: o.nowIso,
+  };
+}
+
+describe('opportunistic beer_meta seeding', () => {
+  it('untappd_beer_info seeds the metadata cache', async () => {
+    const cache = CheckinCache.open(':memory:');
+    const { client } = fakeBeerInfoClient({ 4499: makeBeerInfo(4499, { name: 'Pliny', weighted: 4.49 }) });
+    const h = await createTestHarness((server) => registerBeerTools(server, client, () => cache));
+    try {
+      await h.callTool('untappd_beer_info', { bid: 4499 });
+      const meta = await cache.getBeerMeta([4499]);
+      expect(meta.length).toBe(1);
+      expect(meta[0].name).toBe('Pliny');
+      expect(meta[0].weighted_rating_score).toBeCloseTo(4.49);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('untappd_search_beer seeds metadata from result items', async () => {
+    const cache = CheckinCache.open(':memory:');
+    const searchData = {
+      beers: {
+        items: [
+          { beer: { bid: 555, beer_name: 'X', beer_style: 'IPA', rating_score: 4.1, rating_count: 10 }, brewery: { brewery_id: 1, brewery_name: 'B' } },
+        ],
+      },
+    };
+    const client = { get: async () => searchData, get loginName() { return null; } } as unknown as UntappdClient;
+    const h = await createTestHarness((server) => registerBeerTools(server, client, () => cache));
+    try {
+      await h.callTool('untappd_search_beer', { query: 'x' });
+      const meta = await cache.getBeerMeta([555]);
+      expect(meta.length).toBe(1);
+      expect(meta[0].rating_score).toBeCloseTo(4.1);
+      expect(meta[0].brewery).toBe('B');
+    } finally {
+      await h.close();
+    }
   });
 });

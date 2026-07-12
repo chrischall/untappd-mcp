@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { textResult, toolAnnotations } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 import { compactBeerSearch, compactCheckins } from '../compact.js';
+import { beerMetaFrom, type BeerMeta, type CacheStore } from '../cache/store.js';
 
 const BidSchema = z.number().int().positive().describe('Untappd beer id (bid)');
 
@@ -11,7 +12,28 @@ const CompactCheckins = z
   .optional()
   .describe('Project each check-in to a slim summary (id, user, beer, rating, comment, venue, toast/comment counts) to save context (default false)');
 
-export function registerBeerTools(server: McpServer, client: UntappdClient): void {
+/**
+ * Opportunistically seed the beer-metadata cache from detail we already fetched,
+ * so untappd_top_not_had can answer for these beers without another API call.
+ * Best-effort: any failure is swallowed so it never affects the read result.
+ */
+async function seedBeerMeta(
+  cache: (() => CacheStore) | undefined,
+  beers: Array<{ beer: unknown; brewery?: unknown }>,
+): Promise<void> {
+  if (!cache) return;
+  try {
+    const now = new Date().toISOString();
+    const rows = beers
+      .map((b) => beerMetaFrom(b.beer, b.brewery, now))
+      .filter((m): m is BeerMeta => m !== null);
+    if (rows.length) await cache().upsertBeerMeta(rows);
+  } catch {
+    /* best-effort seeding — never break the read */
+  }
+}
+
+export function registerBeerTools(server: McpServer, client: UntappdClient, cache?: () => CacheStore): void {
   server.registerTool(
     'untappd_search_beer',
     {
@@ -37,6 +59,10 @@ export function registerBeerTools(server: McpServer, client: UntappdClient): voi
     },
     async ({ query, limit, offset, sort, compact }) => {
       const data = await client.get('/search/beer', { q: query, limit, offset, sort });
+      const items = (data as { beers?: { items?: Array<{ beer?: unknown; brewery?: unknown }> } })?.beers?.items;
+      if (Array.isArray(items)) {
+        await seedBeerMeta(cache, items.map((i) => ({ beer: i.beer, brewery: i.brewery })));
+      }
       return textResult(compact ? compactBeerSearch(data) : data);
     },
   );
@@ -59,6 +85,7 @@ export function registerBeerTools(server: McpServer, client: UntappdClient): voi
     },
     async ({ bid, compact }) => {
       const data = await client.get(`/beer/info/${bid}`, { compact: compact ? 'true' : undefined });
+      await seedBeerMeta(cache, [{ beer: (data as { beer?: unknown })?.beer }]);
       return textResult(data);
     },
   );

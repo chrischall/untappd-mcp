@@ -64,6 +64,14 @@ describe('UntappdCacheDO (Durable Object SQLite backend)', () => {
     const state = await stub.getState('mer1331');
     expect(state?.backfill_complete).toBe(true);
     expect(state?.beers_complete).toBe(true);
+
+    // Beer-metadata cache (global, for untappd_top_not_had) round-trips over RPC.
+    await stub.upsertBeerMeta([
+      { bid: 4499, name: 'Pliny', brewery: 'RR', brewery_id: 5143, style: 'IPA - Imperial / Double', parent_style: 'India Pale Ale (IPA)', abv: 8, ibu: 100, weighted_rating_score: 4.49, rating_score: 4.48, rating_count: 305785, fetched_at: '2026-07-12T00:00:00.000Z' },
+    ]);
+    const meta = await stub.getBeerMeta([4499, 999999]);
+    expect(meta.length).toBe(1);
+    expect(meta[0].weighted_rating_score).toBeCloseTo(4.49);
   });
 
   it('keeps each operator’s cache isolated in its own DO', async () => {

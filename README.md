@@ -84,7 +84,7 @@ Writes (confirm-gated — return a dry-run preview unless called with
 
 Check-in cache: `untappd_sync_checkins`, `untappd_sync_user_beers`,
 `untappd_cache_has_had`, `untappd_cache_has_had_many`, `untappd_cache_not_had`,
-`untappd_cache_query`.
+`untappd_cache_query`, `untappd_top_not_had`.
 
 ## Check-in cache
 
@@ -125,6 +125,14 @@ sources (a hit in either counts as had):
   (e.g. a venue's menu) → had/not-had per beer.
 - `untappd_cache_not_had` — given a list of `bids`, return just the ones the user
   has **not** had — the "what's new to me on this menu?" filter.
+- `untappd_top_not_had` — from a list of `bids`, return the **top N not-had
+  beers ranked by Untappd global rating**, with an optional `style` filter (the
+  "what should I order off this tap list?" tool). Not-had filtering is
+  cache-only; beer ratings come from a metadata cache (`beer_meta`) that's seeded
+  opportunistically by `untappd_beer_info` / `untappd_search_beer` and topped up
+  via `beer/info` only on a cache miss or entries older than 30 days — capped at
+  `api_budget` calls/run (default 25), returning `partial: true` /
+  `another_run_needed: true` when more are needed.
 - `untappd_cache_query` — filter cached **check-ins** by brewery, style,
   `min_rating`, venue, and/or date range, with sorting and a limit.
 
