@@ -444,6 +444,47 @@ describe('untappd_top_not_had', () => {
     }
   });
 
+  it('degrades to partial (not failure) on a rate-limit error mid-run', async () => {
+    const cache = CheckinCache.open(':memory:');
+    const byBid = {
+      850: makeBeerInfo(850, { weighted: 4.5 }),
+      851: makeBeerInfo(851, { weighted: 4.6 }),
+      852: makeBeerInfo(852, { weighted: 4.7 }),
+    };
+    // Budget is generous, but the API rate-limits after the first call.
+    const { client, calls } = fakeBeerInfoClient(byBid, { rateLimitAfter: 1 });
+    const h = await harnessWith(cache, client);
+    try {
+      const out = parse(await h.callTool('untappd_top_not_had', { username: 'mer', bids: [850, 851, 852], top_n: 5, api_budget: 25 }));
+      expect(out.summary.api_calls_used).toBe(2); // requests sent: one success + the 429
+      expect(out.summary.partial).toBe(true);
+      expect(out.summary.another_run_needed).toBe(true);
+      expect(out.summary.rate_limited).toBe(true);
+      expect(out.summary.errors).toBe(0); // a rate limit isn't a per-bid error
+      expect((out.ranked as Array<{ bid: number }>).length).toBe(1); // ranks what it got, no throw
+      expect(calls()).toBe(2); // one success + the one that threw
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('surfaces errors > 0 (not an empty success) when beer/info fails for every bid', async () => {
+    const cache = CheckinCache.open(':memory:');
+    // A cold cache where every beer/info fails (e.g. an outage) must be
+    // distinguishable from "the cache says all candidates were already had".
+    const { client } = fakeBeerInfoClient({}); // no bids known → every fetch throws
+    const h = await harnessWith(cache, client);
+    try {
+      const out = parse(await h.callTool('untappd_top_not_had', { username: 'mer', bids: [111, 222, 333] }));
+      expect(out.summary.not_had).toBe(3);
+      expect(out.summary.api_calls_used).toBe(3);
+      expect(out.summary.errors).toBe(3);
+      expect(out.ranked).toEqual([]);
+    } finally {
+      await h.close();
+    }
+  });
+
   it('style filter matches on the PARENT style, not just the beer style', async () => {
     const cache = CheckinCache.open(':memory:');
     const nowIso = new Date().toISOString();
