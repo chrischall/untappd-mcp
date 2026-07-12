@@ -1,7 +1,7 @@
 {
   "name": "untappd-mcp",
   "displayName": "Untappd",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "MCP server for Untappd — search beers/breweries/venues, read check-ins and wishlists, and post check-ins, toasts, and comments",
   "author": {
     "name": "Chris Hall",
