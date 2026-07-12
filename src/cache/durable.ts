@@ -4,6 +4,7 @@ import {
   CheckinStoreCore,
   type CacheStore,
   type CheckinRow,
+  type DistinctBeerRow,
   type HasHadResult,
   type QueryFilters,
   type SqlDriver,
@@ -60,11 +61,17 @@ export class UntappdCacheDO extends DurableObject {
   async upsertCheckins(username: string, rows: CheckinRow[]): Promise<number> {
     return this.core.upsertCheckins(username, rows);
   }
+  async upsertDistinctBeers(username: string, rows: DistinctBeerRow[]): Promise<number> {
+    return this.core.upsertDistinctBeers(username, rows);
+  }
   async cachedCount(username: string): Promise<number> {
     return this.core.cachedCount(username);
   }
-  async distinctBeerCount(username: string): Promise<number> {
-    return this.core.distinctBeerCount(username);
+  async distinctBeersCount(username: string): Promise<number> {
+    return this.core.distinctBeersCount(username);
+  }
+  async checkinsBeerCount(username: string): Promise<number> {
+    return this.core.checkinsBeerCount(username);
   }
   async newestCachedId(username: string): Promise<number | null> {
     return this.core.newestCachedId(username);
@@ -89,11 +96,17 @@ class DurableCacheStore implements CacheStore {
   upsertCheckins(username: string, rows: CheckinRow[]): Promise<number> {
     return this.stub.upsertCheckins(username, rows);
   }
+  upsertDistinctBeers(username: string, rows: DistinctBeerRow[]): Promise<number> {
+    return this.stub.upsertDistinctBeers(username, rows);
+  }
   cachedCount(username: string): Promise<number> {
     return this.stub.cachedCount(username);
   }
-  distinctBeerCount(username: string): Promise<number> {
-    return this.stub.distinctBeerCount(username);
+  distinctBeersCount(username: string): Promise<number> {
+    return this.stub.distinctBeersCount(username);
+  }
+  checkinsBeerCount(username: string): Promise<number> {
+    return this.stub.checkinsBeerCount(username);
   }
   newestCachedId(username: string): Promise<number | null> {
     return this.stub.newestCachedId(username);

@@ -54,25 +54,27 @@ question is answered instantly with **no** API calls. On the stdio server the
 mirror is a local file (`UNTAPPD_CACHE_DB`, default `~/.untappd-mcp/checkins.db`);
 on the remote connector it's a per-user Durable Object. Same tools either way.
 
-**Sync first, then query:**
+**Sync first, then query.** Two sources; both resumable (`max_pages`/call,
+progress saved per page, `another_run_needed` until done). Omit `username` for
+your own account; another user must be public or your friend.
 
-- `untappd_sync_checkins` — fetch check-ins into the cache. Incremental (stops at
-  already-cached check-ins) and resumable: while the backfill is incomplete it
-  pages backwards up to `max_pages` per call (default 10) and saves progress
-  after every page. If the returned `another_run_needed` is true, call it again
-  until it is false (covers both the backfill and catching up large bursts of
-  new check-ins). Omit `username` for your own account;
-  syncing another user needs their account public or a friend (friends-only, same
-  as `untappd_user_checkins`).
+- `untappd_sync_user_beers` — **start here for has-had questions.** Pages the
+  user's COMPLETE distinct-beers list (cheap, and pages fully for anyone).
+- `untappd_sync_checkins` — detailed check-ins (venue/date). Only your OWN
+  account pages fully; for anyone else Untappd returns just the recent ~50 and
+  the result reports `history_truncated` (it won't falsely claim
+  `backfill_complete`). `force_backfill: true` resets a cache wrongly marked
+  complete and re-pages (rows kept).
+
+Query tools (has-had ones consult BOTH sources — a hit in either = had):
+
 - `untappd_cache_has_had` — has the user had a beer? By exact `bid` or a
   case-insensitive `beer_name` substring.
-- `untappd_cache_has_had_many` — batch had/not-had for a list of `bids` in one
-  call (venue-menu cross-check).
-- `untappd_cache_not_had` — given a list of `bids`, return only the ones the user
-  has NOT had ("what's new to me on this menu?").
+- `untappd_cache_has_had_many` — batch had/not-had for a list of `bids`.
+- `untappd_cache_not_had` — from a list of `bids`, the ones NOT had.
 - `untappd_cache_query` — filter cached check-ins by brewery, style, `min_rating`,
-  venue, and date range, with sort + limit.
+  venue, and date range.
 
-Every cache read returns a `freshness` block (and a `caveat` when the backfill is
-incomplete) so you can flag that a "not found" may be a false negative until the
-sync finishes.
+Every cache read returns a `freshness` block reporting each source's completeness
+separately (plus `coverage_complete` and a `caveat` when incomplete), so you can
+flag a "not found" as possibly a false negative until the relevant sync finishes.

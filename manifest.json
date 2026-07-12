@@ -220,11 +220,15 @@
     },
     {
       "name": "untappd_sync_checkins",
-      "description": "Sync a user's check-ins into a local SQLite cache (incremental + resumable backfill)"
+      "description": "Sync a user's detailed check-ins into the cache (incremental + resumable backfill; force_backfill to reset)"
+    },
+    {
+      "name": "untappd_sync_user_beers",
+      "description": "Sync a user's complete distinct-beers list into the cache (cheapest full has-had coverage; resumable)"
     },
     {
       "name": "untappd_cache_has_had",
-      "description": "Check if a user has had a beer, from the local cache (no API call)"
+      "description": "Check if a user has had a beer, from the cache — both sources (no API call)"
     },
     {
       "name": "untappd_cache_has_had_many",

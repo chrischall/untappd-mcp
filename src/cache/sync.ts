@@ -3,6 +3,10 @@ import type { UntappdClient } from '../client.js';
 import { mapCheckinRow, type CacheStore, type CheckinRow } from './store.js';
 
 const PAGE_LIMIT = 50; // Untappd's max page size for /user/checkins.
+// Backfill counts as complete only when the cache holds ~this fraction of the
+// API's reported total_checkins — allowing drift for deleted check-ins. Below
+// this after reaching the end means the endpoint refused to page (truncated).
+const COVERAGE_THRESHOLD = 0.98;
 
 export interface SyncSummary {
   username: string;
@@ -15,6 +19,10 @@ export interface SyncSummary {
   backfill_complete: boolean;
   /** True when a burst of new check-ins exceeded this run's page budget. */
   catchup_in_progress: boolean;
+  /** True when user/checkins refused to page the full history (non-self accounts). */
+  history_truncated: boolean;
+  /** True when this run reset the sync state (force_backfill or self-heal). */
+  forced: boolean;
   another_run_needed: boolean;
   last_synced_at: string;
   note: string;
@@ -48,7 +56,7 @@ function rowsOf(username: string, items: unknown[]): CheckinRow[] {
   return rows;
 }
 
-/** Best-effort stats.total_checkins for the % estimate; null if it can't be read. */
+/** Best-effort stats.total_checkins; null if it can't be read. */
 async function fetchTotalCheckins(client: UntappdClient, encodedUser: string): Promise<number | null> {
   try {
     const info = await client.get<{ user?: { stats?: { total_checkins?: number } } }>(`/user/info/${encodedUser}`);
@@ -59,45 +67,75 @@ async function fetchTotalCheckins(client: UntappdClient, encodedUser: string): P
   }
 }
 
+/** Whether `cached` check-ins covers ~all of `total` (null total = can't verify → assume yes). */
+function reachedFullCoverage(cached: number, total: number | null): boolean {
+  if (total === null || total <= 0) return true;
+  return cached >= Math.floor(total * COVERAGE_THRESHOLD);
+}
+
+export interface SyncCheckinsOptions {
+  maxPages?: number;
+  /**
+   * Reset the sync state (clear backfill_complete + cursors) while KEEPING cached
+   * rows, then page the whole history backward from newest. Recovers a cache
+   * wrongly marked complete. Resumable across runs like a normal backfill.
+   */
+  force?: boolean;
+}
+
 /**
- * Sync a user's Untappd check-ins into the local cache.
+ * Sync a user's Untappd check-ins into the cache from user/checkins.
  *
- * - **Incremental**: on a repeat sync, page from the top and stop as soon as a
- *   check-in at or below the stored `newest_checkin_id` appears (already cached).
- * - **Backfill**: while `backfill_complete` is false, resume paging backwards
- *   from the stored `oldest_max_id`, up to `maxPages` pages per invocation so a
- *   single run stays well under the rate limit. State is persisted after EVERY
- *   page, so an interrupted run (rate limit, crash) resumes exactly where it
- *   stopped and never loses fetched data.
- *
- * `maxPages` is the TOTAL page budget for the invocation (incremental +
- * backfill), so the call can never fetch more than `maxPages` pages.
+ * Incremental catch-up of new check-ins, then a resumable backward backfill.
+ * `backfill_complete` is set ONLY when the cache holds ~all of the API's reported
+ * total_checkins — so a sync that stops early (the endpoint returns just the ~50
+ * most recent for non-self accounts and won't page) reports `history_truncated`
+ * instead of falsely claiming completion. Such a cache is healed automatically on
+ * the next run, or explicitly via `force`.
  */
 export async function syncCheckins(
   client: UntappdClient,
   cache: CacheStore,
   rawUsername: string,
-  maxPages = 10,
+  options: SyncCheckinsOptions | number = {},
 ): Promise<SyncSummary> {
-  const encodedUser = encodeURIComponent(rawUsername);
-  const prior = await cache.getState(rawUsername);
-  const priorNewest = prior?.newest_checkin_id ?? null;
+  // Back-compat: a bare number is the maxPages positional argument.
+  const opts: SyncCheckinsOptions = typeof options === 'number' ? { maxPages: options } : options;
+  const maxPages = opts.maxPages ?? 10;
+  const force = opts.force ?? false;
 
+  const encodedUser = encodeURIComponent(rawUsername);
+  const now = () => new Date().toISOString();
+
+  const priorState = await cache.getState(rawUsername);
+  const total = await fetchTotalCheckins(client, encodedUser);
+  const cachedAtStart = await cache.cachedCount(rawUsername);
+
+  // Self-heal a cache wrongly flagged complete (the historical bug): if state
+  // claims done but coverage is well short of total, treat it like a forced reset.
+  const selfHeal = !force && !!priorState?.backfill_complete && !reachedFullCoverage(cachedAtStart, total);
+  const doReset = force || selfHeal;
+  if (doReset) {
+    await cache.setState(rawUsername, {
+      newest_checkin_id: null,
+      oldest_max_id: null,
+      catchup_max_id: null,
+      backfill_complete: false,
+      checkins_truncated: false,
+      last_synced_at: now(),
+    });
+  }
+
+  const priorNewest = doReset ? null : (priorState?.newest_checkin_id ?? null);
   let pages = 0;
   let added = 0;
   let newest = priorNewest;
-  let backfillComplete = prior?.backfill_complete ?? false;
-  let oldestMaxId = prior?.oldest_max_id ?? null;
-  // Resume cursor for an unfinished top catch-up. Non-null → a prior run advanced
-  // partway through a burst of new check-ins but ran out of page budget before
-  // reconnecting to the cached block; this run resumes from here.
-  let catchupMaxId = prior?.catchup_max_id ?? null;
+  let backfillComplete = doReset ? false : (priorState?.backfill_complete ?? false);
+  let oldestMaxId = doReset ? null : (priorState?.oldest_max_id ?? null);
+  let catchupMaxId = doReset ? null : (priorState?.catchup_max_id ?? null);
   let catchupInProgress = catchupMaxId !== null;
-  const now = () => new Date().toISOString();
+  let checkinsTruncated = false;
 
-  // Wrap the very first fetch so a private/non-friend account produces a clear,
-  // actionable error instead of a raw upstream failure. Rate limits are
-  // preserved as-is (they're meaningful and any prior progress is saved).
   const firstFetch = async (maxId: number | undefined): Promise<Page> => {
     try {
       return await fetchPage(client, encodedUser, maxId);
@@ -110,12 +148,6 @@ export async function syncCheckins(
   };
 
   // ── Phase 1: incremental catch-up of the new-top region (resumable) ──
-  // Only meaningful once we have a cached block (priorNewest set). Pages from the
-  // top (or a resumed cursor) DOWN until it reconnects to the cached block —
-  // i.e. a page whose oldest id <= priorNewest. Crucially, `newest_checkin_id`
-  // is NOT advanced until that reconnection happens: if the run exhausts its page
-  // budget first, the boundary stays put and a resume cursor is saved, so a burst
-  // of more than maxPages*50 new check-ins can never strand a permanent gap.
   if (priorNewest !== null) {
     let maxId: number | undefined = catchupMaxId ?? undefined;
     let caughtUp = false;
@@ -134,21 +166,17 @@ export async function syncCheckins(
         break;
       }
       if (page.nextMaxId === null) {
-        // Paged all the way to the true bottom via the top — the whole history
-        // is now contiguous, so the backfill is complete too.
         caughtUp = true;
-        backfillComplete = true;
+        backfillComplete = reachedFullCoverage(await cache.cachedCount(rawUsername), total);
+        checkinsTruncated = !backfillComplete;
         oldestMaxId = null;
         break;
       }
       catchupMaxId = page.nextMaxId;
-      // Persist the resume cursor after EVERY page; the boundary stays put.
       await cache.setState(rawUsername, { catchup_max_id: catchupMaxId, last_synced_at: now() });
       maxId = page.nextMaxId;
     }
     if (caughtUp) {
-      // Contiguous from the true newest down to the old block: advance the
-      // boundary and clear the catch-up cursor.
       newest = await cache.newestCachedId(rawUsername);
       catchupMaxId = null;
       catchupInProgress = false;
@@ -156,6 +184,7 @@ export async function syncCheckins(
         newest_checkin_id: newest,
         catchup_max_id: null,
         backfill_complete: backfillComplete,
+        checkins_truncated: checkinsTruncated,
         oldest_max_id: oldestMaxId,
         last_synced_at: now(),
       });
@@ -165,43 +194,52 @@ export async function syncCheckins(
   }
 
   // ── Phase 2: backfill older history (resumable) ──
-  // Skipped while a catch-up is still in progress (that already spent the budget).
-  if (!backfillComplete && !catchupInProgress) {
-    // First-ever sync starts from the top (undefined); a resumed backfill picks
-    // up from the stored cursor.
+  if (!backfillComplete && !catchupInProgress && !checkinsTruncated) {
     let maxId: number | undefined = oldestMaxId ?? undefined;
     for (; pages < maxPages; ) {
-      const first = pages === 0; // true only on a first-ever sync (phase 1 was skipped)
+      const first = pages === 0;
       const page: Page = first ? await firstFetch(maxId) : await fetchPage(client, encodedUser, maxId);
       pages++;
       if (page.items.length === 0) {
-        backfillComplete = true;
+        // Reached the end — but only "complete" if coverage is ~full.
+        backfillComplete = reachedFullCoverage(await cache.cachedCount(rawUsername), total);
+        checkinsTruncated = !backfillComplete;
+        break;
+      }
+      // Stall detection: a correct backward page advances the cursor to an OLDER
+      // id. If the endpoint ignores max_id (non-self accounts) the cursor stops
+      // moving — treat that as truncation, not progress.
+      if (maxId !== undefined && page.nextMaxId !== null && page.nextMaxId >= maxId) {
+        checkinsTruncated = true;
         break;
       }
       const rows = rowsOf(rawUsername, page.items);
       added += await cache.upsertCheckins(rawUsername, rows);
-      if (newest === null) newest = rows[0].checkin_id; // first-ever sync sets the boundary
+      if (newest === null) newest = rows[0].checkin_id;
       oldestMaxId = page.nextMaxId;
-      if (page.nextMaxId === null) backfillComplete = true;
-      // Persist progress after EVERY page so an interruption never loses work.
+      if (page.nextMaxId === null) {
+        backfillComplete = reachedFullCoverage(await cache.cachedCount(rawUsername), total);
+        checkinsTruncated = !backfillComplete;
+      }
       await cache.setState(rawUsername, {
         newest_checkin_id: newest,
         oldest_max_id: oldestMaxId,
         backfill_complete: backfillComplete,
+        checkins_truncated: checkinsTruncated,
         last_synced_at: now(),
       });
-      if (backfillComplete) break;
+      if (backfillComplete || checkinsTruncated) break;
       maxId = page.nextMaxId ?? undefined;
     }
   }
 
-  const total = await fetchTotalCheckins(client, encodedUser);
   const cached = await cache.cachedCount(rawUsername);
   await cache.setState(rawUsername, {
     newest_checkin_id: newest,
     oldest_max_id: oldestMaxId,
     catchup_max_id: catchupMaxId,
     backfill_complete: backfillComplete,
+    checkins_truncated: checkinsTruncated,
     total_checkins: total,
     last_synced_at: now(),
   });
@@ -212,26 +250,31 @@ export async function syncCheckins(
       : backfillComplete && !catchupInProgress
         ? 100
         : null;
-  // Another run is needed while EITHER frontier is unfinished: the bottom
-  // backfill, or an in-progress top catch-up of a large burst of new check-ins.
-  const anotherRunNeeded = !backfillComplete || catchupInProgress;
+  // Re-running user/checkins only helps while there is more of the OWN history to
+  // page. A truncated (non-self) history can't advance that way — the caller
+  // should switch to untappd_sync_user_beers for has-had coverage.
+  const anotherRunNeeded = catchupInProgress || (!backfillComplete && !checkinsTruncated);
 
-  const note = catchupInProgress
-    ? 'More new check-ins remain than fit in this run — run untappd_sync_checkins again to finish catching up the newest check-ins.'
-    : backfillComplete
-      ? 'Full history is cached. Re-run occasionally to pick up new check-ins.'
-      : `Backfill incomplete — run untappd_sync_checkins again to fetch the next ${maxPages} pages of older check-ins.`;
+  const note = checkinsTruncated
+    ? 'Untappd only returns the most recent check-ins for this account (history_truncated), so the full check-in history cannot be paged. Use untappd_sync_user_beers to cache the complete distinct-beers list for has-had coverage.'
+    : catchupInProgress
+      ? 'More new check-ins remain than fit in this run — run untappd_sync_checkins again to finish catching up.'
+      : backfillComplete
+        ? 'Full check-in history is cached. Re-run occasionally to pick up new check-ins.'
+        : `Backfill incomplete — run untappd_sync_checkins again to fetch the next ${maxPages} pages of older check-ins.`;
 
   return {
     username: rawUsername,
     rows_added: added,
     pages_fetched: pages,
     cached_checkins: cached,
-    distinct_beers: await cache.distinctBeerCount(rawUsername),
+    distinct_beers: await cache.checkinsBeerCount(rawUsername),
     total_checkins: total,
     backfill_percent: backfillPercent,
     backfill_complete: backfillComplete,
     catchup_in_progress: catchupInProgress,
+    history_truncated: checkinsTruncated,
+    forced: doReset,
     another_run_needed: anotherRunNeeded,
     last_synced_at: now(),
     note,
