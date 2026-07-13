@@ -84,6 +84,12 @@ function reachedFullCoverage(cached: number, total: number | null): boolean {
 }
 
 export interface SyncCheckinsOptions {
+  /**
+   * Page budget for THIS run, applied independently to each phase: up to
+   * `maxPages` pages for the Phase-1 catch-up and, separately, up to
+   * `maxPages` pages for the Phase-2 backfill (so a busy catch-up can never
+   * starve the backfill of its own budget in the same run).
+   */
   maxPages?: number;
   /**
    * Reset the sync state (clear backfill_complete + cursors) while KEEPING cached
@@ -159,14 +165,33 @@ export async function syncCheckins(
       });
     }
   };
+  // Only the very first network call of the whole run gets the friendlier
+  // wrapped error; every call after that uses the plain fetch.
+  let usedFirstFetch = false;
+  const nextFetch = async (maxId: number | undefined): Promise<Page> => {
+    if (!usedFirstFetch) {
+      usedFirstFetch = true;
+      return firstFetch(maxId);
+    }
+    return fetchPage(client, encodedUser, maxId);
+  };
 
   // ── Phase 1: incremental catch-up of the new-top region (resumable) ──
+  // Phase 1 and Phase 2 each get their OWN up-to-`maxPages` budget (rather than
+  // sharing one `pages` counter) so Phase 1's mandatory "is there anything new
+  // above the cached top?" page can never fully starve Phase 2's backfill of
+  // budget. Sharing a single counter meant a large-enough catch-up burst (or a
+  // small maxPages) left Phase 2 with zero pages EVERY run, forever: the gap
+  // below oldest_max_id was never re-fetched, backfill_complete never became
+  // true, and has_had silently false-negatived every bid in that unhealed gap.
   if (priorNewest !== null) {
     let maxId: number | undefined = catchupMaxId ?? undefined;
     let caughtUp = false;
-    for (; pages < maxPages; ) {
-      const page: Page = pages === 0 ? await firstFetch(maxId) : await fetchPage(client, encodedUser, maxId);
+    let phase1Pages = 0;
+    for (; phase1Pages < maxPages; ) {
+      const page: Page = await nextFetch(maxId);
       pages++;
+      phase1Pages++;
       if (page.items.length === 0) {
         caughtUp = true;
         break;
@@ -214,13 +239,14 @@ export async function syncCheckins(
     }
   }
 
-  // ── Phase 2: backfill older history (resumable) ──
+  // ── Phase 2: backfill older history (resumable), own page budget ──
   if (!backfillComplete && !catchupInProgress && !checkinsTruncated) {
     let maxId: number | undefined = oldestMaxId ?? undefined;
-    for (; pages < maxPages; ) {
-      const first = pages === 0;
-      const page: Page = first ? await firstFetch(maxId) : await fetchPage(client, encodedUser, maxId);
+    let phase2Pages = 0;
+    for (; phase2Pages < maxPages; ) {
+      const page: Page = await nextFetch(maxId);
       pages++;
+      phase2Pages++;
       if (page.items.length === 0) {
         // Reached the end — but only "complete" if coverage is ~full.
         backfillComplete = reachedFullCoverage(await cache.cachedCount(rawUsername), total);

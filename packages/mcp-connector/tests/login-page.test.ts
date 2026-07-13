@@ -62,6 +62,15 @@ describe('renderLoginPage', () => {
     expect(html).toContain('--accent-ink: #141414');
   });
 
+  it('picks dark ink on a mid-range accent (L≈0.33), not the WCAG-crossover-violating white', () => {
+    // #0ea5e9 has relative luminance ~0.329 — comfortably above the WCAG
+    // AA contrast crossover (~0.179 for white-vs-black text) but below the
+    // old, too-high 0.5 threshold. White text on this background reads
+    // poorly; dark text is the correct, more-readable choice.
+    const html = renderLoginPage({ ...auth, accent: '#0ea5e9' });
+    expect(html).toContain('--accent-ink: #141414');
+  });
+
   it('falls back to the neutral accent when none/invalid is given', () => {
     expect(renderLoginPage(auth)).toContain('--accent: #4f46e5');
     expect(renderLoginPage({ ...auth, accent: 'red; }evil' })).toContain('--accent: #4f46e5');

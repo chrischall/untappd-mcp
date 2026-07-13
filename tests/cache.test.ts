@@ -200,6 +200,39 @@ describe('syncCheckins incremental + resume', () => {
     expect(summary.another_run_needed).toBe(true);
     expect(summary.backfill_percent).toBe(42); // 50/120
   });
+
+  it('heals a burst of new check-ins bigger than max_pages*50 across repeated runs, without a permanent gap', async () => {
+    const cache = CheckinCache.open(':memory:');
+    // Fully-backfilled prior cache: ids 1..100.
+    const oldHistory = makeHistory(100);
+    await seedCheckins(cache, 'mer', oldHistory);
+    await cache.setState('mer', { newest_checkin_id: 100, backfill_complete: true, total_checkins: 100 });
+
+    // Burst: 120 NEW check-ins land on top (ids 220..101) — bigger than
+    // max_pages(1) * PAGE_LIMIT(50) = 50, so no single run's budget covers it.
+    const newTop = Array.from({ length: 120 }, (_, i) => makeCheckin(220 - i, 220 - i));
+    const fullHistory = [...newTop, ...oldHistory];
+    const { client } = fakeCheckinsClient(fullHistory, { total: 220 });
+
+    let summary = await syncCheckins(client, cache, 'mer', 1);
+    let runs = 1;
+    // Regression: Phase 1's mandatory "is there anything new?" page used to
+    // starve Phase 2 of its entire page budget every run, so the gap below
+    // oldest_max_id was NEVER healed no matter how many times sync re-ran.
+    while (summary.another_run_needed && runs < 30) {
+      summary = await syncCheckins(client, cache, 'mer', 1);
+      runs++;
+    }
+
+    expect(runs).toBeLessThan(30); // must actually converge, not loop forever
+    expect(summary.backfill_complete).toBe(true);
+    expect(summary.another_run_needed).toBe(false);
+    expect(await cache.cachedCount('mer')).toBe(220);
+    // No silent false negatives anywhere in the previously-unreached gap.
+    for (const bid of [220, 200, 150, 101]) {
+      expect((await cache.hasHad('mer', { bid })).had).toBe(true);
+    }
+  });
 });
 
 describe('syncUserBeers (user/beers offset paging)', () => {
