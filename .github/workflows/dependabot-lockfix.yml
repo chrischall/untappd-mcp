@@ -16,7 +16,10 @@ on:
   pull_request_target:
     types: [opened, synchronize]
 
-permissions: {}
+# The reusable's job requests `contents: read` (checkout); a called workflow
+# can only downgrade the caller's grant, so `{}` here startup-fails every run.
+permissions:
+  contents: read
 
 concurrency:
   group: dependabot-lockfix-${{ github.event.pull_request.number }}
