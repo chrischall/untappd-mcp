@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.7.1](https://github.com/chrischall/untappd-mcp/compare/v1.7.0...v1.7.1) (2026-07-13)
+
+
+### Bug Fixes
+
+* **ci:** grant contents: read to the lockfix stub ([#65](https://github.com/chrischall/untappd-mcp/issues/65)) ([c822ecc](https://github.com/chrischall/untappd-mcp/commit/c822ecc89ff9ba48558da0cf942b0aebd872f34c))
+* WCAG-crossover ink threshold + heal unrecoverable check-in cache gap ([#67](https://github.com/chrischall/untappd-mcp/issues/67)) ([82e7868](https://github.com/chrischall/untappd-mcp/commit/82e78689cf93a9d23b1a5c16d945f915e8bdd082))
+
 ## [1.7.0](https://github.com/chrischall/untappd-mcp/compare/v1.6.0...v1.7.0) (2026-07-12)
 
 
