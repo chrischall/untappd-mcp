@@ -215,6 +215,9 @@ describe('syncCheckins incremental + resume', () => {
     const { client } = fakeCheckinsClient(fullHistory, { total: 220 });
 
     let summary = await syncCheckins(client, cache, 'mer', 1);
+    // Contract: a single call must never fetch more than max_pages pages, even
+    // though it juggles two phases (the reason auto-review FAILed the 2× fix).
+    expect(summary.pages_fetched).toBeLessThanOrEqual(1);
     let runs = 1;
     // Regression: Phase 1's mandatory "is there anything new?" page used to
     // starve Phase 2 of its entire page budget every run, so the gap below
@@ -222,6 +225,7 @@ describe('syncCheckins incremental + resume', () => {
     while (summary.another_run_needed && runs < 30) {
       summary = await syncCheckins(client, cache, 'mer', 1);
       runs++;
+      expect(summary.pages_fetched).toBeLessThanOrEqual(1); // never exceed max_pages
     }
 
     expect(runs).toBeLessThan(30); // must actually converge, not loop forever
@@ -232,6 +236,61 @@ describe('syncCheckins incremental + resume', () => {
     for (const bid of [220, 200, 150, 101]) {
       expect((await cache.hasHad('mer', { bid })).had).toBe(true);
     }
+  });
+
+  it('splits the shared budget so BOTH phases progress in one run, total ≤ max_pages', async () => {
+    const cache = CheckinCache.open(':memory:');
+    // Prior: partially backfilled (ids 300..251 cached), backfill NOT complete,
+    // newest boundary at 300 — so both catch-up (Phase 1) and backfill (Phase 2)
+    // have work pending on the same run.
+    const oldHistory = makeHistory(300); // ids 300..1
+    await seedCheckins(cache, 'mer', oldHistory.slice(0, 50)); // ids 300..251
+    await cache.setState('mer', { newest_checkin_id: 300, oldest_max_id: 251, backfill_complete: false, total_checkins: 340 });
+
+    // 40 new check-ins on top (ids 340..301).
+    const newTop = Array.from({ length: 40 }, (_, i) => makeCheckin(340 - i, 340 - i));
+    const fullHistory = [...newTop, ...oldHistory]; // ids 340..1
+    const { client, calls } = fakeCheckinsClient(fullHistory, { total: 340 });
+
+    const before = await cache.cachedCount('mer'); // 50
+    const summary = await syncCheckins(client, cache, 'mer', 4);
+    // With max_pages=4: Phase 1 gets ceil(4/2)=2, Phase 2 gets 2 — total ≤ 4.
+    expect(summary.pages_fetched).toBeLessThanOrEqual(4);
+    expect(calls()).toBeLessThanOrEqual(4);
+    // Catch-up landed the new top (Phase 1 progressed)…
+    expect((await cache.hasHad('mer', { bid: 340 })).had).toBe(true);
+    // …AND the backfill advanced below the old oldest boundary (Phase 2 progressed).
+    expect(await cache.cachedCount('mer')).toBeGreaterThan(before + 40);
+    expect((await cache.hasHad('mer', { bid: 250 })).had).toBe(true); // freshly backfilled
+  });
+
+  it('does not permanently starve catch-up either (Phase 1 converges under max_pages=1)', async () => {
+    const cache = CheckinCache.open(':memory:');
+    // Prior: an unfinished backfill (so Phase 2 always wants budget) PLUS a burst
+    // of new check-ins on top (so Phase 1 always wants budget). With max_pages=1
+    // the two must ALTERNATE or one starves. Assert catch-up (Phase 1) reaches
+    // the newest check-in, i.e. it is not the starved phase.
+    const oldHistory = makeHistory(200); // ids 200..1
+    await seedCheckins(cache, 'mer', oldHistory.slice(0, 50)); // ids 200..151
+    await cache.setState('mer', { newest_checkin_id: 200, oldest_max_id: 151, backfill_complete: false, total_checkins: 260 });
+
+    const newTop = Array.from({ length: 60 }, (_, i) => makeCheckin(260 - i, 260 - i)); // ids 260..201
+    const fullHistory = [...newTop, ...oldHistory];
+    const { client } = fakeCheckinsClient(fullHistory, { total: 260 });
+
+    let summary = await syncCheckins(client, cache, 'mer', 1);
+    let runs = 1;
+    while (summary.another_run_needed && runs < 40) {
+      expect(summary.pages_fetched).toBeLessThanOrEqual(1);
+      summary = await syncCheckins(client, cache, 'mer', 1);
+      runs++;
+    }
+    expect(runs).toBeLessThan(40);
+    expect(summary.backfill_complete).toBe(true);
+    // Newest (Phase 1's job) AND oldest (Phase 2's job) both cached — neither starved.
+    expect((await cache.hasHad('mer', { bid: 260 })).had).toBe(true);
+    expect((await cache.hasHad('mer', { bid: 1 })).had).toBe(true);
+    expect(await cache.cachedCount('mer')).toBe(260);
   });
 });
 
