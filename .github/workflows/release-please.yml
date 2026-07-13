@@ -48,14 +48,6 @@ jobs:
         with:
           ref: ${{ needs.release-please.outputs.tag_name }}
 
-      # The shared mcp-publish action resolves SKILL.md at the repo root,
-      # but the plugin layout keeps it at skills/untappd-mcp/SKILL.md so
-      # plugin skills load. Stage a copy at the root of this ephemeral CI
-      # checkout so .skill packaging, the ClawHub publish, and the .skill
-      # release asset keep working. Drop once mcp-publish@main resolves
-      # skills/*/SKILL.md itself.
-      - name: Stage SKILL.md at root for mcp-publish
-        run: cp skills/untappd-mcp/SKILL.md SKILL.md
 
       - uses: chrischall/workflows/.github/actions/mcp-publish@main
         with:
