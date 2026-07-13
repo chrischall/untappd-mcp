@@ -23,7 +23,11 @@ function inkOn(hex: string): string {
   const b = parseInt(h.slice(4, 6), 16) / 255;
   const lin = (c: number) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
   const L = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
-  return L > 0.5 ? '#141414' : '#ffffff';
+  // 0.179 is the WCAG contrast crossover: the luminance above which black
+  // text (#141414) contrasts better than white against the background,
+  // rather than the naive 0.5 midpoint — so mid-range accents (e.g. a
+  // saturated blue at L≈0.3) correctly get dark ink instead of white.
+  return L > 0.179 ? '#141414' : '#ffffff';
 }
 
 /** Best-guess autocomplete so password managers cooperate. */

@@ -97,6 +97,13 @@ export interface SyncState {
   beers_total: number | null;
   /** True once the user/beers sync has paged the whole distinct-beer list. */
   beers_complete: boolean;
+  /**
+   * Fairness flag for the max_pages=1 edge, where the shared per-call page budget
+   * (see sync.ts) can only fund ONE of the catch-up / backfill phases per run.
+   * Records whether the last such tie went to the backfill phase, so the next
+   * tie goes to catch-up and neither phase is permanently starved.
+   */
+  served_backfill_last: boolean;
 }
 
 export interface HasHadResult {
@@ -317,7 +324,8 @@ export const SCHEMA_STATEMENTS = [
      checkins_truncated INTEGER NOT NULL DEFAULT 0,
      beers_offset       INTEGER,
      beers_total        INTEGER,
-     beers_complete     INTEGER NOT NULL DEFAULT 0
+     beers_complete     INTEGER NOT NULL DEFAULT 0,
+     served_backfill_last INTEGER NOT NULL DEFAULT 0
    )`,
 ];
 
@@ -328,6 +336,7 @@ export const MIGRATIONS = [
   'ALTER TABLE sync_state ADD COLUMN beers_offset INTEGER',
   'ALTER TABLE sync_state ADD COLUMN beers_total INTEGER',
   'ALTER TABLE sync_state ADD COLUMN beers_complete INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE sync_state ADD COLUMN served_backfill_last INTEGER NOT NULL DEFAULT 0',
 ];
 
 /**
@@ -443,6 +452,7 @@ export class CheckinStoreCore {
       beers_offset: num(row.beers_offset),
       beers_total: num(row.beers_total),
       beers_complete: Number(row.beers_complete) === 1,
+      served_backfill_last: Number(row.served_backfill_last) === 1,
     };
   }
 
@@ -468,21 +478,23 @@ export class CheckinStoreCore {
       beers_offset: pick('beers_offset', null),
       beers_total: pick('beers_total', null),
       beers_complete: pick('beers_complete', false),
+      served_backfill_last: pick('served_backfill_last', false),
     };
     this.db.run(
       `INSERT INTO sync_state
-         (username, oldest_max_id, newest_checkin_id, catchup_max_id, last_synced_at, backfill_complete, total_checkins, checkins_truncated, beers_offset, beers_total, beers_complete)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         (username, oldest_max_id, newest_checkin_id, catchup_max_id, last_synced_at, backfill_complete, total_checkins, checkins_truncated, beers_offset, beers_total, beers_complete, served_backfill_last)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(username) DO UPDATE SET
          oldest_max_id=excluded.oldest_max_id, newest_checkin_id=excluded.newest_checkin_id,
          catchup_max_id=excluded.catchup_max_id, last_synced_at=excluded.last_synced_at,
          backfill_complete=excluded.backfill_complete, total_checkins=excluded.total_checkins,
          checkins_truncated=excluded.checkins_truncated, beers_offset=excluded.beers_offset,
-         beers_total=excluded.beers_total, beers_complete=excluded.beers_complete`,
+         beers_total=excluded.beers_total, beers_complete=excluded.beers_complete,
+         served_backfill_last=excluded.served_backfill_last`,
       [
         key, next.oldest_max_id, next.newest_checkin_id, next.catchup_max_id, next.last_synced_at,
         next.backfill_complete ? 1 : 0, next.total_checkins, next.checkins_truncated ? 1 : 0,
-        next.beers_offset, next.beers_total, next.beers_complete ? 1 : 0,
+        next.beers_offset, next.beers_total, next.beers_complete ? 1 : 0, next.served_backfill_last ? 1 : 0,
       ],
     );
   }
