@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.7.2](https://github.com/chrischall/untappd-mcp/compare/v1.7.1...v1.7.2) (2026-07-13)
+
+
+### Bug Fixes
+
+* **ci:** stage skills/untappd-mcp/SKILL.md at root for mcp-publish ([#71](https://github.com/chrischall/untappd-mcp/issues/71)) ([d711125](https://github.com/chrischall/untappd-mcp/commit/d711125e43b8d52997cbcba5cf596ef1dd8c96ab))
+* **plugin:** move SKILL.md into skills/ directory so plugin skills load ([#69](https://github.com/chrischall/untappd-mcp/issues/69)) ([dc649da](https://github.com/chrischall/untappd-mcp/commit/dc649dac146b885972514b6315226b49b2799876))
+
 ## [1.7.1](https://github.com/chrischall/untappd-mcp/compare/v1.7.0...v1.7.1) (2026-07-13)
 
 
