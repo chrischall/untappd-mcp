@@ -7,7 +7,7 @@
   },
   "metadata": {
     "description": "MCP server for Untappd — beers, breweries, venues, check-ins, wishlists, and your friend feed",
-    "version": "1.7.2"
+    "version": "1.7.3"
   },
   "plugins": [
     {
@@ -15,7 +15,7 @@
       "displayName": "Untappd",
       "source": "./",
       "description": "MCP server for Untappd — search beers/breweries/venues, read profiles/check-ins/wishlists, and post check-ins, toasts, and comments",
-      "version": "1.7.2",
+      "version": "1.7.3",
       "author": {
         "name": "Chris Hall"
       },
