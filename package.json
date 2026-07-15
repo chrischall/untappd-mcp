@@ -43,7 +43,7 @@
     "worker:test": "vitest run --config vitest.workers.config.ts"
   },
   "dependencies": {
-    "@chrischall/mcp-utils": "^0.12.0",
+    "@chrischall/mcp-utils": "^0.13.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "ai": "^7.0.19",
     "dotenv": "^17.4.0",
