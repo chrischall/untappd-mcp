@@ -31,7 +31,18 @@ describe('Untappd Cloudflare connector — handshake', () => {
     // throw "Invalid client" for) a client when one is present, and
     // registering a real OAuth client via /register isn't needed to verify
     // the login page itself renders correctly.
-    const res = await SELF.fetch('https://example.com/authorize?response_type=code&state=abc');
+    //
+    // `redirect_uri` IS required though, even without a client. As of
+    // workers-oauth-provider 0.8.x, parseAuthRequest calls
+    // validateRedirectUriScheme() unconditionally, and that rejects any value
+    // with no scheme — including the empty string an absent param becomes:
+    //   const colonIndex = normalized.indexOf(':');
+    //   if (colonIndex === -1) throw new Error('Invalid redirect URI');
+    // 0.0.x only screened for dangerous schemes, so omitting it used to pass.
+    const res = await SELF.fetch(
+      'https://example.com/authorize?response_type=code&state=abc' +
+        '&redirect_uri=' + encodeURIComponent('https://example.com/callback'),
+    );
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/html');
     const html = await res.text();
