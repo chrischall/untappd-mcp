@@ -52,8 +52,9 @@ Two auth quirks worth knowing:
   a *pre-seeded* token from the OAuth props and **no username/password** (by
   design — the connector's privacy note promises the password isn't stored). So
   the client's 401 → drop-token → re-login path cannot re-login: it falls through
-  to `missingCredsError()` and the hosted user sees a confusing "UNTAPPD_USERNAME
-  is not configured" message when what actually happened is *their token went
+  to `missingCredsError()` and the hosted user sees a confusing "Untappd
+  credentials are not configured — missing …" message when what actually
+  happened is *their token went
   stale and they must re-authorize the connector*. If you touch that path, fix
   the message for the connector case rather than adding stored passwords.
 
@@ -126,7 +127,7 @@ Non-obvious behaviours that were each fixed the hard way:
   completeness **separately** plus a `caveat`, so a "not had" can be flagged as a
   possible false negative. New cache read tools must include it.
 - Usernames are keyed **lowercased**; other stored fields keep their original casing.
-- `escapeLike` strips `%`/`_` from user input (the LIKE patterns set no ESCAPE clause).
+- `escapeLike` replaces `%`/`_` in user input with a space (the LIKE patterns set no ESCAPE clause).
 
 ## Hosted connector (Cloudflare Worker)
 
