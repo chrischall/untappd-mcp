@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.7.4](https://github.com/chrischall/untappd-mcp/compare/v1.7.3...v1.7.4) (2026-07-19)
+
+
+### Bug Fixes
+
+* **ci:** run the Workers test pool in CI ([#78](https://github.com/chrischall/untappd-mcp/issues/78)) ([e5c4e1a](https://github.com/chrischall/untappd-mcp/commit/e5c4e1aacd41ccd64438aac9b87f49aca6866777))
+* **deps:** move to workers-oauth-provider 0.8.x ([#82](https://github.com/chrischall/untappd-mcp/issues/82)) ([4118a97](https://github.com/chrischall/untappd-mcp/commit/4118a9744da563de508b9683c2012a7963eb710d))
+
+
+### Documentation
+
+* add CLAUDE.md ([#79](https://github.com/chrischall/untappd-mcp/issues/79)) ([7d6defd](https://github.com/chrischall/untappd-mcp/commit/7d6defdced60a3ab6df1eab34e26a8e48273334e))
+
 ## [1.7.3](https://github.com/chrischall/untappd-mcp/compare/v1.7.2...v1.7.3) (2026-07-15)
 
 
