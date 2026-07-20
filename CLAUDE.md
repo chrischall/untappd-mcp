@@ -19,7 +19,7 @@ npm run build        # tsc → dist/, then esbuild bundle → dist/bundle.js
 npm test             # vitest run — the NODE pool (12 files / 125 tests, 2026-07-19)
 npm run worker:test  # vitest --config vitest.workers.config.ts — the WORKERS pool
 npm run worker:dev   # wrangler dev
-npm run worker:deploy # wrangler deploy — manual, operator-only; docs/DEPLOY-CONNECTOR.md
+npm run worker:deploy # wrangler deploy — local path; CI also deploys on release (docs/DEPLOY-CONNECTOR.md)
 ```
 
 Both suites pass on `main` as of 2026-07-19. There is **no coverage threshold**
@@ -159,7 +159,11 @@ Never key that DO by the subject being queried.
 - `untappd_healthcheck` reports version + tool count + a stable FNV-1a hash of
   the sorted tool names. That's how you confirm which build a connector is
   actually serving (a stale deploy looks fine otherwise).
-- Deploy is **manual and operator-only** — no CI/CD path. `docs/DEPLOY-CONNECTOR.md`.
+- Deploy is **automatic on release** — `release-please.yml`'s `deploy-connector`
+  job calls the shared `chrischall/workflows` reusable deploy workflow, pinned to
+  the release tag. `Actions → deploy-connector → Run workflow` deploys any ref on
+  demand, and `npm run worker:deploy` still works locally.
+  `docs/DEPLOY-CONNECTOR.md`.
 
 ## The two test pools (the constraint that bites)
 
@@ -243,7 +247,9 @@ write-verification, transport archetypes, testing traps) live in
 Repo-specific: `ci.yml` runs in **status-gate mode** — an un-armed PR is blocked
 by a yellow `ci-gated: pending` commit status rather than a red job, and the
 ruleset requires the `ci-gated` context (not `ci / ci`). Deploying the Worker
-connector is **not** part of any release: `release-please.yml` hands off to
-`chrischall/workflows`' `mcp-publish` for the package artifacts and never
-touches Cloudflare — `npm run worker:deploy` stays a manual operator step,
-so a shipped version number does not mean the live connector was updated.
+connector **is** part of a release: alongside the `mcp-publish` hand-off for the
+package artifacts, `release-please.yml`'s `deploy-connector` job calls
+`chrischall/workflows`' reusable connector-deploy workflow at the release tag. It
+is deliberately not gated on `publish`, so a registry hiccup will not leave the
+connector stale; `Actions → deploy-connector → Run workflow` redeploys any ref on
+demand if the release deploy fails.
