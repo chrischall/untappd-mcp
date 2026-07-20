@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.5](https://github.com/chrischall/untappd-mcp/compare/v1.7.4...v1.7.5) (2026-07-20)
+
+
+### Documentation
+
+* name both Cloudflare secrets in the deploy stub's comments ([#85](https://github.com/chrischall/untappd-mcp/issues/85)) ([c0218ba](https://github.com/chrischall/untappd-mcp/commit/c0218ba4d563c7393b84dd3488faeaa0b82d07af)), closes [#84](https://github.com/chrischall/untappd-mcp/issues/84)
+
 ## [1.7.4](https://github.com/chrischall/untappd-mcp/compare/v1.7.3...v1.7.4) (2026-07-19)
 
 
