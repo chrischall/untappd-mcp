@@ -3,9 +3,13 @@
 This is the operator runbook for standing up `untappd-mcp` as a hosted
 Cloudflare Worker — a "remote connector" that anyone you share the URL with can
 add to claude.ai (web, desktop, or mobile), each logging in with their own
-Untappd account. It's a manual, one-time (per operator) process; there is no
-CI/CD path for it, and none of the steps below can be done by an agent since
-they require your own Cloudflare account.
+Untappd account. Standing it up is a manual, one-time (per operator) process:
+none of the steps below can be done by an agent, since they require your own
+Cloudflare account. Once it's standing, though, deploys are automated — the
+`deploy-connector` job in `.github/workflows/release-please.yml` redeploys the
+Worker on every release, pinned to the release tag, and
+`.github/workflows/deploy-connector.yml` gives an on-demand
+**Actions → deploy-connector → Run workflow** path for any ref.
 
 If you just want the server on your own machine talking only to your own
 Untappd account, you don't need any of this — see the main
@@ -82,6 +86,11 @@ https://untappd-connector.<your-subdomain>.workers.dev
 ```
 
 Note that URL — it's what you'll share and what gets added as a connector.
+
+You only need to run this deploy by hand once, to get the Worker created under
+your account. From then on CI redeploys it on release (and on demand from the
+Actions tab); `npm run worker:deploy` stays available for pushing an unreleased
+working tree from your own machine.
 
 > **Check-in cache Durable Object.** The connector's `untappd_sync_checkins` /
 > `untappd_cache_*` tools store each user's synced history in a `UntappdCacheDO`
