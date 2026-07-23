@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.7.6](https://github.com/chrischall/untappd-mcp/compare/v1.7.5...v1.7.6) (2026-07-23)
+
+
+### Bug Fixes
+
+* **deps-dev:** bump the dev-dependencies group with 4 updates ([#87](https://github.com/chrischall/untappd-mcp/issues/87)) ([25e999a](https://github.com/chrischall/untappd-mcp/commit/25e999a64c092fcc04945ef93ea4673fbd35fe1a))
+* **deps:** bump the production-dependencies group with 2 updates ([#88](https://github.com/chrischall/untappd-mcp/issues/88)) ([a3ae197](https://github.com/chrischall/untappd-mcp/commit/a3ae1978dbdeba0f9021a0b5cffb5a2778e96249))
+
+
+### Documentation
+
+* add efficient tap-list "what's new to a user" recipe ([#90](https://github.com/chrischall/untappd-mcp/issues/90)) ([f0d0d99](https://github.com/chrischall/untappd-mcp/commit/f0d0d9910051c6e0c3f2ac947bd8f3d5828a4386))
+
 ## [1.7.5](https://github.com/chrischall/untappd-mcp/compare/v1.7.4...v1.7.5) (2026-07-20)
 
 
