@@ -130,27 +130,49 @@ describe('read tools', () => {
     });
   });
 
+  it('venue_menu walks multiple full pages from the top and converges on real coverage', async () => {
+    // Each page returns exactly section_limit (1) sections, so it is never
+    // mistaken for the end until coverage is genuinely reached on page 2.
+    get.mockResolvedValueOnce(oneMenu(4, [[10, 11]])); // page 1 @ offset 0
+    get.mockResolvedValueOnce(oneMenu(4, [[12, 13]])); // page 2 @ offset 1 → 4/4 covered
+    const r = await harness.callTool('untappd_venue_menu', { venue_id: 5, section_limit: 1 });
+    expect(get).toHaveBeenNthCalledWith(1, '/venue/info/5', { section_limit: 1, section_offset: 0, menu_id: undefined, sort: undefined });
+    expect(get).toHaveBeenNthCalledWith(2, '/venue/info/5', { section_limit: 1, section_offset: 1, menu_id: undefined, sort: undefined });
+    expect(get).toHaveBeenCalledTimes(2);
+    const out = parse(r as never);
+    expect(out.total_count).toBe(4);
+    expect(out.returned).toBe(4);
+    expect(out.truncated).toBe(false);
+    expect(out.another_run_needed).toBe(false);
+  });
+
   it('venue_menu spends its max_pages budget then reports another_run_needed with a resume offset', async () => {
+    // Full pages (1 section each at section_limit 1) never signal end, so the
+    // run stops on the page budget, not on coverage.
     get.mockResolvedValueOnce(oneMenu(6, [[10, 11]])); // page 1 @ offset 0
-    get.mockResolvedValueOnce(oneMenu(6, [[12, 13]])); // page 2 @ offset 2 — budget exhausted here
-    const r = await harness.callTool('untappd_venue_menu', { venue_id: 5, section_limit: 2, max_pages: 2 });
-    expect(get).toHaveBeenNthCalledWith(1, '/venue/info/5', { section_limit: 2, section_offset: 0, menu_id: undefined, sort: undefined });
-    expect(get).toHaveBeenNthCalledWith(2, '/venue/info/5', { section_limit: 2, section_offset: 2, menu_id: undefined, sort: undefined });
+    get.mockResolvedValueOnce(oneMenu(6, [[12, 13]])); // page 2 @ offset 1 — budget exhausted here
+    const r = await harness.callTool('untappd_venue_menu', { venue_id: 5, section_limit: 1, max_pages: 2 });
+    expect(get).toHaveBeenNthCalledWith(1, '/venue/info/5', { section_limit: 1, section_offset: 0, menu_id: undefined, sort: undefined });
+    expect(get).toHaveBeenNthCalledWith(2, '/venue/info/5', { section_limit: 1, section_offset: 1, menu_id: undefined, sort: undefined });
     expect(get).toHaveBeenCalledTimes(2); // stops at the page budget — no unbounded loop
     const out = parse(r as never);
     expect(out.returned).toBe(4);
     expect(out.another_run_needed).toBe(true);
-    expect(out.next_section_offset).toBe(4);
+    expect(out.next_section_offset).toBe(2);
     expect(out.truncated).toBe(false);
   });
 
-  it('venue_menu resumes from section_offset and reaches full coverage', async () => {
-    get.mockResolvedValueOnce(oneMenu(6, [[14, 15]])); // resume page @ offset 4 completes coverage
+  it('venue_menu resuming a tail stops at the end of the section list without false truncation', async () => {
+    // A resumed run (section_offset > 0) returns fewer than the whole-menu
+    // total_count by design; a short page ends it and it must NOT be truncated.
+    get.mockResolvedValueOnce(oneMenu(6, [[14, 15]])); // final section @ offset 4
     const r = await harness.callTool('untappd_venue_menu', { venue_id: 5, section_limit: 2, section_offset: 4 });
     expect(get).toHaveBeenNthCalledWith(1, '/venue/info/5', { section_limit: 2, section_offset: 4, menu_id: undefined, sort: undefined });
+    expect(get).toHaveBeenCalledTimes(1);
     const out = parse(r as never);
     expect(out.returned).toBe(2);
     expect(out.another_run_needed).toBe(false);
+    expect(out.truncated).toBe(false); // resumed tail is not a shortfall
   });
 
   it('venue_menu with menu_id targets that menu\'s own count, not the venue-wide total', async () => {
@@ -169,18 +191,17 @@ describe('read tools', () => {
     expect((out.beers as Array<Record<string, unknown>>).every((b) => b.menu === 'Draft')).toBe(true);
   });
 
-  it('venue_menu flags truncated and stops when the upstream ignores paging', async () => {
-    // Every call returns the same first section — dedup makes the 2nd page add
-    // nothing, so it must stop (no infinite loop) and report the shortfall.
-    get.mockResolvedValue(oneMenu(23, [[10, 11]]));
+  it('venue_menu flags truncated when the upstream returns fewer sections than total_count needs', async () => {
+    // Asked for 50 sections but got 1 (2 beers) against a total_count of 23 —
+    // a short page is the end of the list, so it stops in one call (no probing
+    // second call) and reports the shortfall as truncated.
+    get.mockResolvedValueOnce(oneMenu(23, [[10, 11]]));
     const r = await harness.callTool('untappd_venue_menu', { venue_id: 7 });
     const out = parse(r as never);
     expect(out.returned).toBe(2);
     expect(out.truncated).toBe(true);
-    expect(out.another_run_needed).toBe(false); // not resumable — resuming returns the same section
-    expect(get).toHaveBeenCalledTimes(2); // 1 page of progress + 1 that added nothing
-    get.mockReset();
-    get.mockResolvedValue(undefined as never);
+    expect(out.another_run_needed).toBe(false); // list ended — not resumable
+    expect(get).toHaveBeenCalledTimes(1); // a short page is the end; no wasted probe
   });
 
   it('user_checkins uses an explicit username and passes max_id', async () => {
