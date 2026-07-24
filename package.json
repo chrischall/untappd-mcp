@@ -1,6 +1,6 @@
 {
   "name": "untappd-mcp",
-  "version": "1.7.6",
+  "version": "1.8.0",
   "mcpName": "io.github.chrischall/untappd-mcp",
   "description": "Untappd MCP server for Claude — developed and maintained by AI (Claude Code)",
   "author": "Claude Code (AI) <https://www.anthropic.com/claude>",
