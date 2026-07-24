@@ -24,10 +24,12 @@ Run `untappd_healthcheck` to confirm login works.
 - `untappd_search_beer` / `untappd_beer_info` — find beers, then get full detail by bid.
 - `untappd_search_brewery` / `untappd_brewery_info` — breweries.
 - `untappd_search_venue` / `untappd_venue_info` — bars, breweries, restaurants.
-- `untappd_venue_menu` — a venue's COMPLETE verified beer menu, flattened. Use
-  instead of `venue_info` for "what's on tap" — `venue_info` returns only the
-  first section of each menu and under-reports large boards; this pages every
-  section and flags `truncated` if it can't reach full coverage.
+- `untappd_venue_menu` — a venue's verified beer menu, flattened. Use instead of
+  `venue_info` for "what's on tap" — `venue_info` returns only the first section
+  of each menu and under-reports large boards. This pages sections under a
+  per-call `max_pages` budget (like the sync tools) and is resumable: it returns
+  `another_run_needed` + `next_section_offset` when the budget runs out, or
+  `truncated` if the upstream stops returning sections short of coverage.
 - `untappd_user_info` — a user's profile (omit `username` for your own).
 - `untappd_user_checkins` — recent check-ins (page with `max_id`).
 - `untappd_user_wishlist` — wishlist beers.

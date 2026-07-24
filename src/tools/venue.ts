@@ -46,57 +46,67 @@ export function registerVenueTools(server: McpServer, client: UntappdClient): vo
   server.registerTool(
     'untappd_venue_menu',
     {
-      title: "Get a venue's full verified beer menu",
+      title: "Get a venue's verified beer menu (section-paged)",
       description:
-        "Return a venue's COMPLETE verified beer menu as a flat, compact list of beers. untappd_venue_info returns only the " +
-        'FIRST section of each menu (Untappd defaults the section list to one), so it silently under-reports any venue whose ' +
-        'menu spans multiple sections — e.g. a 23-beer wall that comes back with 2 items. This tool forwards the ' +
-        'section_limit / section_offset paging params venue/info echoes back but never receives, loops until every section is ' +
-        'collected, and flattens to [{bid, name, brewery, style, abv, price, serving_type, menu, section}]. It reports ' +
-        'total_count vs returned and sets truncated:true when it cannot reach full coverage (e.g. the upstream ignored the ' +
-        'paging params), so a short list is never mistaken for a complete one. Defaults to full coverage. Get an id from ' +
-        'untappd_search_venue. Read-only.',
-      annotations: toolAnnotations({ title: "Get a venue's full verified beer menu", readOnly: true, idempotent: true, openWorld: true }),
+        "Return a venue's verified beer menu as a flat, compact list of beers. untappd_venue_info returns only the FIRST " +
+        'section of each menu (Untappd defaults the section list to one), so it silently under-reports any venue whose menu ' +
+        'spans multiple sections — e.g. a 23-beer wall that comes back with 2 items. This tool forwards the ' +
+        'section_limit / section_offset paging params venue/info echoes back but never receives, walks sections up to a ' +
+        'per-call max_pages budget (respecting the ~100 calls/hour limit — it does NOT loop to completion in one call), and ' +
+        'flattens to [{bid, name, brewery, style, abv, price, serving_type, menu, section}]. Like the sync tools it is ' +
+        'resumable: when the budget runs out before full coverage it returns another_run_needed:true plus next_section_offset ' +
+        'to pass back on the next call. truncated:true means the upstream returned no more sections short of total_count ' +
+        '(e.g. it ignored the paging params) — not resumable. Get an id from untappd_search_venue. Read-only.',
+      annotations: toolAnnotations({ title: "Get a venue's verified beer menu (section-paged)", readOnly: true, idempotent: true, openWorld: true }),
       inputSchema: {
         venue_id: z.number().int().positive().describe('Untappd venue id'),
         menu_id: z.number().int().positive().optional().describe('Restrict to a single menu id (from a prior result). Optional.'),
-        section_limit: z.number().int().min(1).max(50).optional().describe('Sections fetched per page (default 50).'),
-        section_offset: z.number().int().min(0).optional().describe('Section offset to start from (default 0).'),
+        section_limit: z.number().int().min(1).max(50).optional().describe('Sections fetched per API call — page size (default 50).'),
+        section_offset: z.number().int().min(0).optional().describe('Section offset to start from; pass a prior next_section_offset to resume (default 0).'),
+        max_pages: z.number().int().min(1).max(10).optional().describe('API calls to spend THIS run — page budget, not page size (default 3). Resume with next_section_offset if another_run_needed.'),
         sort: z.string().optional().describe("Menu sort key (e.g. 'publish_order', 'highest_rated'). Optional."),
       },
     },
-    async ({ venue_id, menu_id, section_limit, section_offset, sort }) => {
+    async ({ venue_id, menu_id, section_limit, section_offset, max_pages, sort }) => {
       // venue/info pages its MENUS with limit/offset, but caps each menu's SECTION
       // list — echoing `section_limit`/`section_offset` back as accepted params
       // (the response even carries a `section_offset ` key with a stray trailing
       // space; the real param name is the clean one the web menu UI sends). We
-      // forward them and walk sections until the flattened beer list covers
-      // `verfied_beers.total_count`, deduping by menu+section+bid so overlapping
-      // or param-ignoring pages can't double-count or loop forever.
+      // forward them and walk sections, deduping by menu+section+bid so overlapping
+      // or param-ignoring pages can't double-count. Per CLAUDE.md's rate-limit
+      // design this spends at most `max_pages` API calls per run and hands the
+      // caller next_section_offset to resume, rather than looping to completion.
       const pageSize = section_limit ?? 50;
+      const budget = max_pages ?? 3;
       let offset = section_offset ?? 0;
-      const MAX_PAGES = 15;
       const seen = new Set<string>();
       const beers: Array<Record<string, unknown>> = [];
       let totalCount = 0;
       let sawMenu = false;
+      let pagesFetched = 0;
+      let exhausted = false; // a page returned no new sections — no point paging further
 
-      for (let page = 0; page < MAX_PAGES; page++) {
+      for (let page = 0; page < budget; page++) {
         const data = await client.get<{ venue?: Record<string, unknown> }>(`/venue/info/${venue_id}`, {
           section_limit: pageSize,
           section_offset: offset,
           menu_id,
           sort,
         });
+        pagesFetched++;
         const vb = (data?.venue as { verfied_beers?: Record<string, unknown> } | undefined)?.verfied_beers;
-        if (!vb) break;
+        if (!vb) {
+          exhausted = true;
+          break;
+        }
         sawMenu = true;
-        if (typeof vb.total_count === 'number') totalCount = vb.total_count;
         let added = 0;
+        let matchedItemCount = 0;
         for (const wrap of (vb.items as Array<{ menu?: Record<string, unknown> }>) ?? []) {
           const menu = wrap?.menu as Record<string, unknown> | undefined;
           if (!menu) continue;
           if (menu_id && menu.menu_id !== menu_id) continue;
+          if (typeof menu.total_item_count === 'number') matchedItemCount += menu.total_item_count;
           const sections = (menu.sections as { items?: unknown[] } | undefined)?.items ?? [];
           for (const section of sections as Array<Record<string, unknown>>) {
             for (const it of (section.items as Array<Record<string, unknown>>) ?? []) {
@@ -121,16 +131,35 @@ export function registerVenueTools(server: McpServer, client: UntappdClient): vo
             }
           }
         }
-        if (added === 0) break; // no new sections — upstream exhausted or ignoring the paging params
-        if (totalCount > 0 && beers.length >= totalCount) break;
+        // Coverage target: with a menu_id filter, aim for THAT menu's own item
+        // count — verfied_beers.total_count spans every menu, so a single-menu
+        // slice could never reach it (it would burn the whole page budget and
+        // wrongly report a shortfall). Without a filter, the venue-wide total.
+        totalCount = menu_id ? matchedItemCount : typeof vb.total_count === 'number' ? vb.total_count : totalCount;
+        if (added === 0) {
+          exhausted = true; // upstream gave no new sections — resuming won't help
+          break;
+        }
         offset += pageSize;
+        if (totalCount > 0 && beers.length >= totalCount) break; // full coverage
       }
 
       if (!sawMenu) {
-        return textResult({ venue_id, total_count: 0, returned: 0, truncated: false, beers: [], note: 'No verified menu on this venue.' });
+        return textResult({ venue_id, total_count: 0, returned: 0, pages_fetched: pagesFetched, another_run_needed: false, truncated: false, beers: [], note: 'No verified menu on this venue.' });
       }
-      const truncated = totalCount > 0 && beers.length < totalCount;
-      return textResult({ venue_id, total_count: totalCount, returned: beers.length, truncated, beers });
+      const covered = totalCount > 0 && beers.length >= totalCount;
+      const another_run_needed = !covered && !exhausted; // stopped only because the page budget ran out
+      const truncated = !covered && exhausted; // upstream returned no more sections short of total_count
+      return textResult({
+        venue_id,
+        total_count: totalCount,
+        returned: beers.length,
+        pages_fetched: pagesFetched,
+        another_run_needed,
+        ...(another_run_needed ? { next_section_offset: offset } : {}),
+        truncated,
+        beers,
+      });
     },
   );
 

@@ -73,45 +73,43 @@ describe('read tools', () => {
     expect(get).toHaveBeenCalledWith('/venue/info/1', { compact: 'true' });
   });
 
-  // Build a venue/info payload whose beer menu is split across the given
-  // sections (each an array of bids). Mirrors the real verfied_beers shape.
-  function venuePayload(totalCount: number, sections: number[][]) {
+  // Build one menu whose beers are split across the given sections (each an
+  // array of bids). total_item_count is the menu's own beer count. Mirrors the
+  // real verfied_beers[].menu shape.
+  function beerMenu(menuId: number, menuName: string, sections: number[][]) {
     return {
-      venue: {
-        verfied_beers: {
-          total_count: totalCount,
-          items: [
-            {
-              menu: {
-                menu_id: 152166240,
-                menu_name: 'Beer Menu',
-                sections: {
-                  count: sections.length,
-                  items: sections.map((bids, i) => ({
-                    section_id: 900 + i,
-                    section_name: `Section ${i} `,
-                    total_count: bids.length,
-                    count: bids.length,
-                    items: bids.map((bid) => ({
-                      price: { value: '8.00 USD' },
-                      serving_type: '16oz Draft',
-                      beer: { bid, beer_name: `Beer ${bid}`, beer_style: 'IPA', beer_abv: 6 },
-                      brewery: { brewery_name: `Brewery ${bid}` },
-                    })),
-                  })),
-                },
-              },
-            },
-          ],
+      menu: {
+        menu_id: menuId,
+        menu_name: menuName,
+        total_item_count: sections.reduce((n, s) => n + s.length, 0),
+        sections: {
+          count: sections.length,
+          items: sections.map((bids, i) => ({
+            section_id: menuId * 100 + i,
+            section_name: `Section ${i} `,
+            total_count: bids.length,
+            count: bids.length,
+            items: bids.map((bid) => ({
+              price: { value: '8.00 USD' },
+              serving_type: '16oz Draft',
+              beer: { bid, beer_name: `Beer ${bid}`, beer_style: 'IPA', beer_abv: 6 },
+              brewery: { brewery_name: `Brewery ${bid}` },
+            })),
+          })),
         },
       },
     };
   }
+  const venuePayload = (totalCount: number, menus: ReturnType<typeof beerMenu>[]) => ({
+    venue: { verfied_beers: { total_count: totalCount, items: menus } },
+  });
+  const oneMenu = (totalCount: number, sections: number[][]) =>
+    venuePayload(totalCount, [beerMenu(152166240, 'Beer Menu', sections)]);
 
   it('venue_menu forwards section paging params and flattens every section to full coverage (venue 11123816 → 23)', async () => {
     // The 23-beer oracle: one page (section_limit 50) returns all sections.
     const bids = Array.from({ length: 23 }, (_, i) => 1000 + i);
-    get.mockResolvedValueOnce(venuePayload(23, [bids.slice(0, 8), bids.slice(8, 16), bids.slice(16)]));
+    get.mockResolvedValueOnce(oneMenu(23, [bids.slice(0, 8), bids.slice(8, 16), bids.slice(16)]));
     const r = await harness.callTool('untappd_venue_menu', { venue_id: 11123816 });
     expect(get).toHaveBeenCalledWith('/venue/info/11123816', {
       section_limit: 50,
@@ -124,6 +122,7 @@ describe('read tools', () => {
     expect(out.total_count).toBe(23);
     expect(out.returned).toBe(23);
     expect(out.truncated).toBe(false);
+    expect(out.another_run_needed).toBe(false);
     expect((out.beers as unknown[]).length).toBe(23);
     expect((out.beers as Array<Record<string, unknown>>)[0]).toEqual({
       bid: 1000, name: 'Beer 1000', brewery: 'Brewery 1000', style: 'IPA', abv: 6,
@@ -131,25 +130,54 @@ describe('read tools', () => {
     });
   });
 
-  it('venue_menu loops section_offset across pages until total_count is covered', async () => {
-    get.mockResolvedValueOnce(venuePayload(4, [[10, 11]])); // page 1: section at offset 0
-    get.mockResolvedValueOnce(venuePayload(4, [[12, 13]])); // page 2: section at offset 2
-    const r = await harness.callTool('untappd_venue_menu', { venue_id: 5, section_limit: 2 });
+  it('venue_menu spends its max_pages budget then reports another_run_needed with a resume offset', async () => {
+    get.mockResolvedValueOnce(oneMenu(6, [[10, 11]])); // page 1 @ offset 0
+    get.mockResolvedValueOnce(oneMenu(6, [[12, 13]])); // page 2 @ offset 2 — budget exhausted here
+    const r = await harness.callTool('untappd_venue_menu', { venue_id: 5, section_limit: 2, max_pages: 2 });
     expect(get).toHaveBeenNthCalledWith(1, '/venue/info/5', { section_limit: 2, section_offset: 0, menu_id: undefined, sort: undefined });
     expect(get).toHaveBeenNthCalledWith(2, '/venue/info/5', { section_limit: 2, section_offset: 2, menu_id: undefined, sort: undefined });
+    expect(get).toHaveBeenCalledTimes(2); // stops at the page budget — no unbounded loop
     const out = parse(r as never);
     expect(out.returned).toBe(4);
+    expect(out.another_run_needed).toBe(true);
+    expect(out.next_section_offset).toBe(4);
     expect(out.truncated).toBe(false);
   });
 
-  it('venue_menu flags truncated and stops instead of looping when the upstream ignores paging', async () => {
+  it('venue_menu resumes from section_offset and reaches full coverage', async () => {
+    get.mockResolvedValueOnce(oneMenu(6, [[14, 15]])); // resume page @ offset 4 completes coverage
+    const r = await harness.callTool('untappd_venue_menu', { venue_id: 5, section_limit: 2, section_offset: 4 });
+    expect(get).toHaveBeenNthCalledWith(1, '/venue/info/5', { section_limit: 2, section_offset: 4, menu_id: undefined, sort: undefined });
+    const out = parse(r as never);
+    expect(out.returned).toBe(2);
+    expect(out.another_run_needed).toBe(false);
+  });
+
+  it('venue_menu with menu_id targets that menu\'s own count, not the venue-wide total', async () => {
+    // Two menus, venue-wide total_count 8; asking for just menu 100 (4 beers)
+    // must reach coverage on page 1 — not chase 8 and burn the page budget.
+    get.mockResolvedValueOnce(
+      venuePayload(8, [beerMenu(100, 'Draft', [[1, 2, 3, 4]]), beerMenu(200, 'Bottles', [[5, 6, 7, 8]])]),
+    );
+    const r = await harness.callTool('untappd_venue_menu', { venue_id: 9, menu_id: 100 });
+    expect(get).toHaveBeenCalledTimes(1); // covered immediately — no wasted calls
+    const out = parse(r as never);
+    expect(out.total_count).toBe(4);
+    expect(out.returned).toBe(4);
+    expect(out.another_run_needed).toBe(false);
+    expect(out.truncated).toBe(false);
+    expect((out.beers as Array<Record<string, unknown>>).every((b) => b.menu === 'Draft')).toBe(true);
+  });
+
+  it('venue_menu flags truncated and stops when the upstream ignores paging', async () => {
     // Every call returns the same first section — dedup makes the 2nd page add
     // nothing, so it must stop (no infinite loop) and report the shortfall.
-    get.mockResolvedValue(venuePayload(23, [[10, 11]]));
+    get.mockResolvedValue(oneMenu(23, [[10, 11]]));
     const r = await harness.callTool('untappd_venue_menu', { venue_id: 7 });
     const out = parse(r as never);
     expect(out.returned).toBe(2);
     expect(out.truncated).toBe(true);
+    expect(out.another_run_needed).toBe(false); // not resumable — resuming returns the same section
     expect(get).toHaveBeenCalledTimes(2); // 1 page of progress + 1 that added nothing
     get.mockReset();
     get.mockResolvedValue(undefined as never);
