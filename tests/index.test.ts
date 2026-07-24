@@ -49,6 +49,7 @@ describe('tool registry', () => {
       'untappd_brewery_beers',
       'untappd_search_venue',
       'untappd_venue_info',
+      'untappd_venue_menu',
       'untappd_venue_activity',
       'untappd_venue_by_foursquare',
       'untappd_user_info',
@@ -81,6 +82,6 @@ describe('tool registry', () => {
     ].sort();
 
     expect(allNames).toEqual(expected);
-    expect(tools).toHaveLength(37);
+    expect(tools).toHaveLength(38);
   });
 });

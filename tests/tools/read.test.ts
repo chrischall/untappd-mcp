@@ -73,6 +73,88 @@ describe('read tools', () => {
     expect(get).toHaveBeenCalledWith('/venue/info/1', { compact: 'true' });
   });
 
+  // Build a venue/info payload whose beer menu is split across the given
+  // sections (each an array of bids). Mirrors the real verfied_beers shape.
+  function venuePayload(totalCount: number, sections: number[][]) {
+    return {
+      venue: {
+        verfied_beers: {
+          total_count: totalCount,
+          items: [
+            {
+              menu: {
+                menu_id: 152166240,
+                menu_name: 'Beer Menu',
+                sections: {
+                  count: sections.length,
+                  items: sections.map((bids, i) => ({
+                    section_id: 900 + i,
+                    section_name: `Section ${i} `,
+                    total_count: bids.length,
+                    count: bids.length,
+                    items: bids.map((bid) => ({
+                      price: { value: '8.00 USD' },
+                      serving_type: '16oz Draft',
+                      beer: { bid, beer_name: `Beer ${bid}`, beer_style: 'IPA', beer_abv: 6 },
+                      brewery: { brewery_name: `Brewery ${bid}` },
+                    })),
+                  })),
+                },
+              },
+            },
+          ],
+        },
+      },
+    };
+  }
+
+  it('venue_menu forwards section paging params and flattens every section to full coverage (venue 11123816 → 23)', async () => {
+    // The 23-beer oracle: one page (section_limit 50) returns all sections.
+    const bids = Array.from({ length: 23 }, (_, i) => 1000 + i);
+    get.mockResolvedValueOnce(venuePayload(23, [bids.slice(0, 8), bids.slice(8, 16), bids.slice(16)]));
+    const r = await harness.callTool('untappd_venue_menu', { venue_id: 11123816 });
+    expect(get).toHaveBeenCalledWith('/venue/info/11123816', {
+      section_limit: 50,
+      section_offset: 0,
+      menu_id: undefined,
+      sort: undefined,
+    });
+    expect(get).toHaveBeenCalledTimes(1); // full coverage reached in one call
+    const out = parse(r as never);
+    expect(out.total_count).toBe(23);
+    expect(out.returned).toBe(23);
+    expect(out.truncated).toBe(false);
+    expect((out.beers as unknown[]).length).toBe(23);
+    expect((out.beers as Array<Record<string, unknown>>)[0]).toEqual({
+      bid: 1000, name: 'Beer 1000', brewery: 'Brewery 1000', style: 'IPA', abv: 6,
+      price: '8.00 USD', serving_type: '16oz Draft', menu: 'Beer Menu', section: 'Section 0',
+    });
+  });
+
+  it('venue_menu loops section_offset across pages until total_count is covered', async () => {
+    get.mockResolvedValueOnce(venuePayload(4, [[10, 11]])); // page 1: section at offset 0
+    get.mockResolvedValueOnce(venuePayload(4, [[12, 13]])); // page 2: section at offset 2
+    const r = await harness.callTool('untappd_venue_menu', { venue_id: 5, section_limit: 2 });
+    expect(get).toHaveBeenNthCalledWith(1, '/venue/info/5', { section_limit: 2, section_offset: 0, menu_id: undefined, sort: undefined });
+    expect(get).toHaveBeenNthCalledWith(2, '/venue/info/5', { section_limit: 2, section_offset: 2, menu_id: undefined, sort: undefined });
+    const out = parse(r as never);
+    expect(out.returned).toBe(4);
+    expect(out.truncated).toBe(false);
+  });
+
+  it('venue_menu flags truncated and stops instead of looping when the upstream ignores paging', async () => {
+    // Every call returns the same first section — dedup makes the 2nd page add
+    // nothing, so it must stop (no infinite loop) and report the shortfall.
+    get.mockResolvedValue(venuePayload(23, [[10, 11]]));
+    const r = await harness.callTool('untappd_venue_menu', { venue_id: 7 });
+    const out = parse(r as never);
+    expect(out.returned).toBe(2);
+    expect(out.truncated).toBe(true);
+    expect(get).toHaveBeenCalledTimes(2); // 1 page of progress + 1 that added nothing
+    get.mockReset();
+    get.mockResolvedValue(undefined as never);
+  });
+
   it('user_checkins uses an explicit username and passes max_id', async () => {
     get.mockResolvedValueOnce({ checkins: { items: [] } });
     await harness.callTool('untappd_user_checkins', { username: 'someone', limit: 3, max_id: 999 });
