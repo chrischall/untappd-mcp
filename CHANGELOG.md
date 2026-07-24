@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.8.0](https://github.com/chrischall/untappd-mcp/compare/v1.7.6...v1.8.0) (2026-07-24)
+
+
+### Features
+
+* **venue:** add untappd_venue_menu for full section-paged menus ([#91](https://github.com/chrischall/untappd-mcp/issues/91)) ([1e4e2ba](https://github.com/chrischall/untappd-mcp/commit/1e4e2ba1f80808fef138b280ae1857aa4c86c403))
+
+
+### Bug Fixes
+
+* **venue:** drive venue_menu paging by section availability, not beer count ([#94](https://github.com/chrischall/untappd-mcp/issues/94)) ([d9d52af](https://github.com/chrischall/untappd-mcp/commit/d9d52aff76a2f7072ec6784e385a5738536f5cac))
+
 ## [1.7.6](https://github.com/chrischall/untappd-mcp/compare/v1.7.5...v1.7.6) (2026-07-23)
 
 
