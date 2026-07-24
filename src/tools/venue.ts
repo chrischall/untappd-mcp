@@ -76,15 +76,23 @@ export function registerVenueTools(server: McpServer, client: UntappdClient): vo
       // or param-ignoring pages can't double-count. Per CLAUDE.md's rate-limit
       // design this spends at most `max_pages` API calls per run and hands the
       // caller next_section_offset to resume, rather than looping to completion.
+      //
+      // Termination is driven by SECTION availability, not a running beer count:
+      // a page that returns fewer sections than we asked for is the end of the
+      // list. That's what makes resuming correct — this tool is stateless across
+      // calls, so on a resumed tail (section_offset > 0) `beers.length` covers
+      // only this run and can never equal the whole-menu total, which would
+      // otherwise mislabel a finished tail as truncated.
       const pageSize = section_limit ?? 50;
       const budget = max_pages ?? 3;
-      let offset = section_offset ?? 0;
+      const startOffset = section_offset ?? 0;
+      let offset = startOffset;
       const seen = new Set<string>();
       const beers: Array<Record<string, unknown>> = [];
       let totalCount = 0;
       let sawMenu = false;
       let pagesFetched = 0;
-      let exhausted = false; // a page returned no new sections — no point paging further
+      let reachedEnd = false; // hit full coverage, or the section list ran out
 
       for (let page = 0; page < budget; page++) {
         const data = await client.get<{ venue?: Record<string, unknown> }>(`/venue/info/${venue_id}`, {
@@ -96,12 +104,13 @@ export function registerVenueTools(server: McpServer, client: UntappdClient): vo
         pagesFetched++;
         const vb = (data?.venue as { verfied_beers?: Record<string, unknown> } | undefined)?.verfied_beers;
         if (!vb) {
-          exhausted = true;
+          reachedEnd = true; // no menu payload — nothing more to page
           break;
         }
         sawMenu = true;
         let added = 0;
         let matchedItemCount = 0;
+        let sectionsReturned = 0;
         for (const wrap of (vb.items as Array<{ menu?: Record<string, unknown> }>) ?? []) {
           const menu = wrap?.menu as Record<string, unknown> | undefined;
           if (!menu) continue;
@@ -109,6 +118,7 @@ export function registerVenueTools(server: McpServer, client: UntappdClient): vo
           if (typeof menu.total_item_count === 'number') matchedItemCount += menu.total_item_count;
           const sections = (menu.sections as { items?: unknown[] } | undefined)?.items ?? [];
           for (const section of sections as Array<Record<string, unknown>>) {
+            sectionsReturned++;
             for (const it of (section.items as Array<Record<string, unknown>>) ?? []) {
               const beer = it?.beer as Record<string, unknown> | undefined;
               if (!beer || typeof beer.bid !== 'number') continue;
@@ -136,20 +146,26 @@ export function registerVenueTools(server: McpServer, client: UntappdClient): vo
         // slice could never reach it (it would burn the whole page budget and
         // wrongly report a shortfall). Without a filter, the venue-wide total.
         totalCount = menu_id ? matchedItemCount : typeof vb.total_count === 'number' ? vb.total_count : totalCount;
-        if (added === 0) {
-          exhausted = true; // upstream gave no new sections — resuming won't help
+        offset += pageSize;
+        if (totalCount > 0 && beers.length >= totalCount) {
+          reachedEnd = true; // full coverage from this walk
           break;
         }
-        offset += pageSize;
-        if (totalCount > 0 && beers.length >= totalCount) break; // full coverage
+        if (sectionsReturned < pageSize || added === 0) {
+          reachedEnd = true; // a short (or all-duplicate) page is the end of the section list
+          break;
+        }
       }
 
       if (!sawMenu) {
         return textResult({ venue_id, total_count: 0, returned: 0, pages_fetched: pagesFetched, another_run_needed: false, truncated: false, beers: [], note: 'No verified menu on this venue.' });
       }
       const covered = totalCount > 0 && beers.length >= totalCount;
-      const another_run_needed = !covered && !exhausted; // stopped only because the page budget ran out
-      const truncated = !covered && exhausted; // upstream returned no more sections short of total_count
+      const another_run_needed = !reachedEnd; // stopped only because the page budget ran out mid-list
+      // Only a walk that started at the top of the list can judge a genuine
+      // shortfall as truncated; a resumed tail legitimately returns fewer than
+      // the whole-menu total_count and is not truncated.
+      const truncated = reachedEnd && !covered && startOffset === 0 && totalCount > 0;
       return textResult({
         venue_id,
         total_count: totalCount,
