@@ -60,9 +60,9 @@ describe('healthcheck build diagnostics', () => {
 
     const tools = out.tools as string[];
     // The full toolset (incl. the 7 cache tools) is registered — this is the
-    // 44-tool set the remote connector must also expose.
-    expect(tools.length).toBe(44);
-    expect(out.tool_count).toBe(44);
+    // 45-tool set the remote connector must also expose.
+    expect(tools.length).toBe(45);
+    expect(out.tool_count).toBe(45);
     for (const name of CACHE_TOOLS) expect(tools).toContain(name);
 
     // The hash is the FNV-1a of the sorted names — stable and self-consistent.
