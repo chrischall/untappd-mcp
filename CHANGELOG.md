@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/chrischall/untappd-mcp/compare/v1.7.6...v1.8.0) (2026-07-24)
+
+
+### Features
+
+* **venue:** add untappd_venue_menu for full section-paged menus ([#91](https://github.com/chrischall/untappd-mcp/issues/91)) ([1e4e2ba](https://github.com/chrischall/untappd-mcp/commit/1e4e2ba1f80808fef138b280ae1857aa4c86c403))
+
 ## [1.7.6](https://github.com/chrischall/untappd-mcp/compare/v1.7.5...v1.7.6) (2026-07-23)
 
 
