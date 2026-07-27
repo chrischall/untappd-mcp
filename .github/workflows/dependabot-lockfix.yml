@@ -1,11 +1,10 @@
 name: Dependabot lockfix
 
 # Thin stub — the logic lives in chrischall/workflows.
-# The root package-lock.json embeds @chrischall/mcp-connector's dependency
-# tree (a `file:` dep), so a dependabot bump inside packages/mcp-connector
-# leaves the root lock stale and `npm ci` fails EUSAGE (e.g. #40). This
-# resyncs the root lock on dependabot PRs and pushes it back with the PAT
-# so CI retriggers.
+# The root package-lock.json embeds a `file:` package's dependency tree, so
+# a dependabot bump inside that package leaves the root lock stale and
+# `npm ci` fails EUSAGE. This resyncs the root lock on dependabot PRs and
+# pushes it back with the PAT so CI retriggers.
 #
 # pull_request_target so the PAT secret is available on dependabot-triggered
 # runs; the reusable double-guards to PRs authored AND triggered by
