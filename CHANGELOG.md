@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.8.1](https://github.com/chrischall/untappd-mcp/compare/v1.8.0...v1.8.1) (2026-07-27)
+
+
+### Bug Fixes
+
+* **deps-dev:** bump the dev-dependencies group with 2 updates ([#98](https://github.com/chrischall/untappd-mcp/issues/98)) ([ba4ac18](https://github.com/chrischall/untappd-mcp/commit/ba4ac1852f493f489766eb72c2ab15ccf718f142))
+* **deps:** bump ai in the production-dependencies group ([#99](https://github.com/chrischall/untappd-mcp/issues/99)) ([f25b92c](https://github.com/chrischall/untappd-mcp/commit/f25b92cc9d2f3650d7ae27d96e81c7d86e612463))
+* **deps:** require @chrischall/mcp-connector &gt;=1.1.1 ([#101](https://github.com/chrischall/untappd-mcp/issues/101)) ([669e7c1](https://github.com/chrischall/untappd-mcp/commit/669e7c1ac721edd4c4e439256823dc64e5747ef5))
+
 ## [1.8.0](https://github.com/chrischall/untappd-mcp/compare/v1.7.6...v1.8.0) (2026-07-24)
 
 
