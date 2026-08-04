@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.8.3](https://github.com/chrischall/untappd-mcp/compare/v1.8.2...v1.8.3) (2026-08-04)
+
+
+### Bug Fixes
+
+* **deps-dev:** bump postcss from 8.5.20 to 8.5.25 ([#113](https://github.com/chrischall/untappd-mcp/issues/113)) ([443672f](https://github.com/chrischall/untappd-mcp/commit/443672fb587d81c3e433fe72aa78c45d572b5461))
+* **deps:** bump fast-uri from 3.1.4 to 3.1.5 ([#112](https://github.com/chrischall/untappd-mcp/issues/112)) ([862ed2d](https://github.com/chrischall/untappd-mcp/commit/862ed2d2ad6f3f3f7ee5c0fee5090ae5121ff8c1))
+* **deps:** bump hono from 4.12.31 to 4.13.0 ([#111](https://github.com/chrischall/untappd-mcp/issues/111)) ([91b77b8](https://github.com/chrischall/untappd-mcp/commit/91b77b82b0aaf8ad13e6e45e62a5fffdd3b2ea5e))
+* **deps:** bump ip-address from 10.2.0 to 10.4.0 ([#109](https://github.com/chrischall/untappd-mcp/issues/109)) ([c1f0eff](https://github.com/chrischall/untappd-mcp/commit/c1f0eff74bebca6d927c68ad43d759ac88033786))
+
 ## [1.8.2](https://github.com/chrischall/untappd-mcp/compare/v1.8.1...v1.8.2) (2026-07-29)
 
 
