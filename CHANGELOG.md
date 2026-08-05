@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.8.4](https://github.com/chrischall/untappd-mcp/compare/v1.8.3...v1.8.4) (2026-08-05)
+
+
+### Bug Fixes
+
+* **deps-dev:** bump the dev-dependencies group with 3 updates ([#115](https://github.com/chrischall/untappd-mcp/issues/115)) ([6f69497](https://github.com/chrischall/untappd-mcp/commit/6f69497bcf2c1b8d2bb1b0d58700378184292faa))
+* **deps:** bump the production-dependencies group with 2 updates ([#116](https://github.com/chrischall/untappd-mcp/issues/116)) ([e59d23c](https://github.com/chrischall/untappd-mcp/commit/e59d23cf0d0001a5f0e6f9ef71454910fdd2051e))
+
 ## [1.8.3](https://github.com/chrischall/untappd-mcp/compare/v1.8.2...v1.8.3) (2026-08-04)
 
 
