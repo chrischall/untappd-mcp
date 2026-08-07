@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.8.5](https://github.com/chrischall/untappd-mcp/compare/v1.8.4...v1.8.5) (2026-08-07)
+
+
+### Bug Fixes
+
+* **deps:** bump ai in the production-dependencies group ([#121](https://github.com/chrischall/untappd-mcp/issues/121)) ([62decb4](https://github.com/chrischall/untappd-mcp/commit/62decb449841454d979a11a86a81bb10e34fa857))
+
+
+### Refactor
+
+* **connector:** retire the standalone Cloudflare Worker connector ([#118](https://github.com/chrischall/untappd-mcp/issues/118)) ([f696a54](https://github.com/chrischall/untappd-mcp/commit/f696a54ae75947d740107ce2cb4b142f5c95d527))
+
+
+### Documentation
+
+* correct the guidance the last change outdated ([#124](https://github.com/chrischall/untappd-mcp/issues/124)) ([b3d2b20](https://github.com/chrischall/untappd-mcp/commit/b3d2b20bee24a95e3a196e5cbc1b4478fd1b5ed3))
+
 ## [1.8.4](https://github.com/chrischall/untappd-mcp/compare/v1.8.3...v1.8.4) (2026-08-05)
 
 
