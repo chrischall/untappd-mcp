@@ -58,7 +58,7 @@ The API can't answer "has this user ever had beer X?" without paging their whole
 history (50/page, rate-limited). These tools keep a SQLite mirror so that
 question is answered instantly with **no** API calls. On the stdio server the
 mirror is a local file (`UNTAPPD_CACHE_DB`, default `~/.untappd-mcp/checkins.db`);
-on the remote connector it's a per-user Durable Object. Same tools either way.
+the store is injectable, so another deployment can back it differently. Same tools either way.
 
 **Sync first, then query.** Two sources; both resumable (`max_pages`/call,
 progress saved per page, `another_run_needed` until done). Omit `username` for

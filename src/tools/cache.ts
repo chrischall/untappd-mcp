@@ -13,7 +13,7 @@ const BEER_META_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 /**
  * A source of the {@link CacheStore} to use for a request. Injected per
  * entrypoint so this module stays platform-neutral: the stdio server passes a
- * `node:sqlite` file cache; the Cloudflare connector passes a Durable Object
+ * `node:sqlite` file cache; another deployment could pass a different
  * cache scoped to the authenticated operator.
  */
 export type CacheProvider = () => CacheStore;
@@ -93,8 +93,8 @@ async function freshness(cache: CacheStore, username: string): Promise<Record<st
 
 /**
  * Register the check-in cache tools. `cacheProvider` supplies the backing store
- * (a `node:sqlite` file on the stdio server, a Durable Object on the remote
- * connector) and is required so this module imports no platform-specific code.
+ * (a `node:sqlite` file here) and is required so this module imports no
+ * platform-specific code.
  */
 export function registerCacheTools(server: McpServer, client: UntappdClient, cacheProvider: CacheProvider): void {
   server.registerTool(

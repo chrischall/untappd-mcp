@@ -112,9 +112,8 @@ export interface XauthOptions {
 /**
  * Performs the one-shot Untappd xauth login POST (username/password →
  * access token). Standalone so it can be reused both by `UntappdClient`'s
- * own on-demand login and by the Cloudflare-connector login flow
- * (`src/untappd-auth.ts`), which authenticates a user before a client even
- * exists — without duplicating the request/parsing logic.
+ * own on-demand login and by any login flow that authenticates a user before
+ * a client even exists — without duplicating the request/parsing logic.
  */
 export async function xauthLogin(creds: XauthCredentials, opts: XauthOptions = {}): Promise<string> {
   const fetchImpl = opts.fetchImpl ?? fetch;

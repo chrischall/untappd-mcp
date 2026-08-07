@@ -136,7 +136,7 @@ describe('UntappdClient', () => {
   });
 });
 
-describe('xauthLogin (standalone helper used by the Cloudflare connector login)', () => {
+describe('xauthLogin (standalone helper used by a hosted login flow)', () => {
   it('performs the xauth POST and returns the access token', async () => {
     const { impl, calls } = mockFetch([xauth()]);
     const token = await xauthLogin(

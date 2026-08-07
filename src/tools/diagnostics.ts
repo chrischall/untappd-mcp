@@ -3,7 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 // Small helpers so the live build's exact toolset is visible from the client
 // (via untappd_healthcheck) and from server logs (a startup line). This is how
 // you confirm a deploy actually shipped the tools you expect — e.g. that the
-// remote connector is exposing the cache tools, not a stale 37-tool build.
+// server is exposing the cache tools, not a stale 37-tool build.
 
 /** The names of every tool registered on `server`, sorted. Defensive if the SDK internal shape drifts. */
 export function registeredToolNames(server: McpServer): string[] {

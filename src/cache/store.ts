@@ -14,9 +14,9 @@
 //    anyone — this is what gives full "has had" coverage.
 //
 // The SQL lives here ONCE, over a tiny synchronous {@link SqlDriver}, so the same
-// schema/queries back both engines: `node:sqlite` on the stdio server and a
-// Durable Object's SQLite on the connector. This module imports nothing
-// platform-specific.
+// schema/queries back any engine: `node:sqlite` is the one that ships, and a
+// different deployment can adapt another driver to the same surface. This
+// module imports nothing platform-specific.
 
 /** One real check-in row. Mirrors the `checkins` table columns. */
 export interface CheckinRow {

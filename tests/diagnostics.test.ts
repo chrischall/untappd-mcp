@@ -60,7 +60,7 @@ describe('healthcheck build diagnostics', () => {
 
     const tools = out.tools as string[];
     // The full toolset (incl. the 7 cache tools) is registered — this is the
-    // 45-tool set the remote connector must also expose.
+    // 45-tool set the server must expose.
     expect(tools.length).toBe(45);
     expect(out.tool_count).toBe(45);
     for (const name of CACHE_TOOLS) expect(tools).toContain(name);

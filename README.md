@@ -52,21 +52,6 @@ your own app's traffic with an HTTPS proxy:
 
 Keep these values private; do not commit them.
 
-## Remote connector
-
-This server can also run as a hosted Cloudflare Worker — an unlisted, shareable
-"remote connector" you add to claude.ai (Settings → Connectors) instead of
-running it locally. It works on Claude web, desktop, and mobile alike, since
-connectors added on any of those sync to the rest. Each person you share it
-with logs in with their *own* Untappd username and password; the operator only
-ever supplies the shared Untappd app credentials, never anyone's personal
-login. The `.mcpb` / stdio install above remains the desktop-only alternative
-if you'd rather run it locally against just your own account.
-
-Setting this up requires a Cloudflare account and is a manual, one-time
-process for whoever hosts it — see
-[`docs/DEPLOY-CONNECTOR.md`](docs/DEPLOY-CONNECTOR.md) for the full runbook.
-
 ## Tools
 
 Reads: `untappd_search_beer`, `untappd_beer_info`, `untappd_beer_activity`,
@@ -92,9 +77,9 @@ The Untappd API only exposes paged lists (50 per page) and has **no** "has this
 user ever had beer X?" lookup — answering that from the API alone means paging an
 entire history (often 11k+ check-ins) against a tight ~100-calls/hour rate limit.
 These tools maintain a SQLite mirror so the question is answered instantly,
-offline, with zero API calls. The mirror is a local file on the stdio/desktop
-server (`node:sqlite`, path via `UNTAPPD_CACHE_DB`) and a per-user Durable Object
-on the remote connector — the tools and behaviour are identical either way.
+offline, with zero API calls. The mirror is a local file
+(`node:sqlite`, path via `UNTAPPD_CACHE_DB`); the store is injectable, so another
+deployment can back it differently without the tools changing.
 
 Two sync sources fill the cache:
 
@@ -147,13 +132,9 @@ Syncing **another** user goes through the same authed endpoint as
 account is public or your friend. Otherwise the sync returns a clear error
 telling you to add them as a friend first.
 
-On the remote connector each logged-in user gets their **own** durable cache
-(keyed by their account), holding only the check-ins their account was allowed
-to fetch — one user can never read another's cache. See
-[`docs/DEPLOY-CONNECTOR.md`](docs/DEPLOY-CONNECTOR.md) for the one-time deploy
-step this adds. `untappd_healthcheck` reports the running version and the exact
-tool set (count + names + a stable hash), so you can confirm which build a
-connector is serving.
+A cache holds only the check-ins the account it belongs to was allowed to
+fetch. `untappd_healthcheck` reports the running version and the exact tool set
+(count + names + a stable hash), so you can confirm which build is serving.
 
 ## Development
 
