@@ -93,8 +93,8 @@ async function freshness(cache: CacheStore, username: string): Promise<Record<st
 
 /**
  * Register the check-in cache tools. `cacheProvider` supplies the backing store
- * (a `node:sqlite` file on the stdio server, a Durable Object on the remote
- * store) and is required so this module imports no platform-specific code.
+ * (a `node:sqlite` file here) and is required so this module imports no
+ * platform-specific code.
  */
 export function registerCacheTools(server: McpServer, client: UntappdClient, cacheProvider: CacheProvider): void {
   server.registerTool(

@@ -8,18 +8,13 @@ and payload shape in this repo was reverse-engineered from the iPad app's
 traffic, so treat undocumented field names as observations, not contracts.
 
 **Dual-target.** The same tool registrars back two entry points:
-`src/index.ts` (stdio, the npm/mcpb package) and `src/worker.ts` (a hosted
-Cloudflare Worker "remote connector" for claude.ai, live at
-`connector.untappd.nullnet.app`, built on `@chrischall/mcp-connector`).
+`src/index.ts` (stdio, the npm/mcpb package).
 
 ## Commands
 
 ```bash
 npm run build        # tsc → dist/, then esbuild bundle → dist/bundle.js
 npm test             # vitest run — the NODE pool (12 files / 125 tests, 2026-07-19)
-npm run worker:test  # vitest --config vitest.workers.config.ts — the WORKERS pool
-npm run worker:dev   # wrangler dev
-npm run worker:deploy # wrangler deploy — local path; CI also deploys on release (docs/DEPLOY-CONNECTOR.md)
 ```
 
 Both suites pass on `main` as of 2026-07-19. There is **no coverage threshold**
@@ -48,15 +43,13 @@ Two auth quirks worth knowing:
 - **2FA accounts cannot log in.** xauth returns no token and sets
   `two_factor_enabled`; `xauthLogin` turns that into an explicit error. There is
   no second factor path.
-- **On the Worker, tokens are one-way.** `buildClient` constructs the client with
-  a *pre-seeded* token from the OAuth props and **no username/password** (by
-  design — the connector's privacy note promises the password isn't stored). So
-  the client's 401 → drop-token → re-login path cannot re-login: it falls through
-  to `missingCredsError()` and the hosted user sees a confusing "Untappd
-  credentials are not configured — missing …" message when what actually
-  happened is *their token went
-  stale and they must re-authorize the connector*. If you touch that path, fix
-  the message for the connector case rather than adding stored passwords.
+- **A pre-seeded token is one-way.** A deployment that constructs the client
+  with a token but **no username/password** cannot use the client's
+  401 → drop-token → re-login path: it falls through to `missingCredsError()`
+  and the user sees a confusing "Untappd credentials are not configured —
+  missing …" message when what actually happened is *their token went stale and
+  they must re-authenticate*. If you touch that path, fix the message for that
+  case rather than adding stored passwords.
 
 ## Untappd v4 API quirks
 
@@ -92,9 +85,9 @@ Two auth quirks worth knowing:
 
 `src/cache/` is a SQLite mirror with **one copy of the SQL** (`store.ts`,
 `CheckinStoreCore`) over a tiny synchronous `SqlDriver`, so the same schema and
-queries back both engines: `node:sqlite` on stdio (`db.ts`) and Durable Object
-SQLite on the connector (`durable.ts`). `store.ts` imports nothing
-platform-specific — keep it that way or the connector breaks.
+queries back any engine: `node:sqlite` is the one that ships (`db.ts`).
+`store.ts` imports nothing platform-specific — keep it that way, so a different
+deployment can back the same schema with a different driver.
 
 Three tables and two independent sources:
 
@@ -129,71 +122,6 @@ Non-obvious behaviours that were each fixed the hard way:
 - Usernames are keyed **lowercased**; other stored fields keep their original casing.
 - `escapeLike` replaces `%`/`_` in user input with a space (the LIKE patterns set no ESCAPE clause).
 
-## Hosted connector (Cloudflare Worker)
-
-`src/worker.ts` wires the same registrars into `@chrischall/mcp-connector`'s
-OAuth + `McpAgent` harness. Two Durable Objects: `MCP_OBJECT` →
-`UntappdMcpAgent` (the harness's per-session agent, ephemeral) and `CACHE_DO` →
-`UntappdCacheDO` — a **separate, durable** cache keyed by
-`idFromName(operatorUsername.toLowerCase())`, so one cache follows a user across
-conversations and holds only check-ins *their* account was allowed to fetch.
-Never key that DO by the subject being queried.
-
-- **The env/username reach the cache registrar via a `WeakMap` keyed on the
-  client instance**, set in `buildClient`, *not* through a registrar context
-  argument. That's deliberate: a context arg depends on the connector build
-  forwarding it, and a stale bundle silently dropping it is exactly what once
-  made every cache tool throw `Cannot read properties of undefined (reading 'env')`.
-- The provider is **deferred** (built per tool call) so a missing `CACHE_DO`
-  binding surfaces as a clear error on a cache tool instead of breaking client
-  construction and taking the API tools down with it.
-- Connector deps (`@chrischall/mcp-connector`, `agents`,
-  `@cloudflare/workers-oauth-provider`) are **devDependencies** — the Worker is
-  bundled by wrangler and isn't part of the published npm package.
-- `UNTAPPD_CLIENT_ID`/`_SECRET` are wrangler **secrets** (operator-level, shared
-  by all connector users); each user supplies only their own username/password on
-  the login page. `wrangler.jsonc` carries a real `OAUTH_KV` id — the deploy doc
-  still describes it as a placeholder to fill in.
-- `untappd_checkin`'s `photo_path` reads a **local** file, so photo attachment is
-  effectively stdio-only: a hosted user's path doesn't exist on the Worker.
-- `untappd_healthcheck` reports version + tool count + a stable FNV-1a hash of
-  the sorted tool names. That's how you confirm which build a connector is
-  actually serving (a stale deploy looks fine otherwise).
-- Deploy is **automatic on release** — `release-please.yml`'s `deploy-connector`
-  job calls the shared `chrischall/workflows` reusable deploy workflow, pinned to
-  the release tag. `Actions → deploy-connector → Run workflow` deploys any ref on
-  demand, and `npm run worker:deploy` still works locally.
-  `docs/DEPLOY-CONNECTOR.md`.
-
-## The two test pools (the constraint that bites)
-
-Worker code imports `cloudflare:workers` and **cannot load in the node pool**.
-The split is enforced in three places, and all three must agree:
-
-1. `vitest.config.ts` `test.exclude`s `tests/worker.test.ts` and
-   `tests/worker-cache.test.ts` (they import the virtual `cloudflare:test` module).
-2. `vitest.workers.config.ts` `include`s exactly those two, running them in the
-   real Workers runtime (Miniflare) against `wrangler.jsonc`'s bindings.
-3. `tsconfig.json` `exclude`s `src/worker.ts`, `src/untappd-auth.ts`, and
-   `src/cache/durable.ts`, so `tsc` never emits them into the published `dist/`.
-
-**Worker-only modules must never be imported, even transitively, by any test the
-node pool runs** — one such import fails the whole node suite at load time with
-an unresolvable `cloudflare:workers`. When adding a
-Worker-side test, add it to *both* config lists.
-
-Two traps inside that:
-
-- `src/untappd-auth.ts` **is** node-loadable (its only connector import is
-  `import type`) and `tests/untappd-auth.test.ts` runs it in the node pool — but
-  it's tsconfig-excluded, so **`tsc` never typechecks it**. A type error there
-  surfaces only at `wrangler deploy`. Same for `src/cache/durable.ts`.
-- CI historically ran **only** the node pool, so a connector regression could
-  merge green. PR #78 (`fix(ci): run the Workers test pool in CI`) chains
-  `npm run worker:test` onto `ci.yml`'s `test-command`; as of 2026-07-19 that PR
-  is still **open**, so `main`'s `ci.yml` still says `test-command: npm test`.
-  Until it lands, run `npm run worker:test` by hand before touching the Worker.
-
 ## Environment (stdio)
 
 ```
@@ -209,21 +137,17 @@ UNTAPPD_CACHE_DB       optional  Cache SQLite path (default ~/.untappd-mcp/check
 
 The app-mimicking constants in `client.ts` (`appVersion`, device fields,
 User-Agent) are **not secrets** — they're overridable so a future app-version
-bump doesn't need a code change. On the Worker these env fallbacks are inert:
-credentials arrive from the Cloudflare bindings via `ClientOptions`.
+bump doesn't need a code change. Where credentials arrive through
+`ClientOptions` instead, these env fallbacks are inert.
 
 ## Gotchas
 
 - **ESM + NodeNext**: relative imports need `.js` extensions even from `.ts`.
 - **stdio transport**: stdout is JSON-RPC only; all logging goes to stderr.
-  `client.ts` guards its `.env` load on `import.meta.url` because in the Workers
-  runtime it's undefined and there is no local `.env`.
-- **Adding or renaming a registrar means editing BOTH `src/index.ts` and
-  `src/worker.ts`** — they list the registrars independently. Nothing is carved
-  out of the hosted build; the tool surfaces are meant to be identical.
-- `src/worker.ts` must never import `src/index.ts` (shebang + top-level
-  `await runMcp()`). Both import `VERSION` from `src/version.ts`, which is the
-  single release-please marker; `tests/version-sync.test.ts` guards it.
+  `client.ts` guards its `.env` load on `import.meta.url` because in some
+  runtimes it's undefined and there is no local `.env`.
+- `VERSION` comes from `src/version.ts`, the single release-please marker;
+  `tests/version-sync.test.ts` guards it.
 - **Writes are confirm-gated**: without `confirm: true` a write tool returns a
   dry-run preview and makes **no network call**. Keep new writes to that shape.
 - `untappd_checkin` opens the photo blob *before* POSTing the check-in (so a bad
@@ -246,10 +170,4 @@ write-verification, transport archetypes, testing traps) live in
 
 Repo-specific: `ci.yml` runs in **status-gate mode** — an un-armed PR is blocked
 by a yellow `ci-gated: pending` commit status rather than a red job, and the
-ruleset requires the `ci-gated` context (not `ci / ci`). Deploying the Worker
-connector **is** part of a release: alongside the `mcp-publish` hand-off for the
-package artifacts, `release-please.yml`'s `deploy-connector` job calls
-`chrischall/workflows`' reusable connector-deploy workflow at the release tag. It
-is deliberately not gated on `publish`, so a registry hiccup will not leave the
-connector stale; `Actions → deploy-connector → Run workflow` redeploys any ref on
-demand if the release deploy fails.
+ruleset requires the `ci-gated` context (not `ci / ci`).
