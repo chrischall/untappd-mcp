@@ -7,19 +7,17 @@ comment, friend actions). There is no public/official API here: every endpoint
 and payload shape in this repo was reverse-engineered from the iPad app's
 traffic, so treat undocumented field names as observations, not contracts.
 
-**Dual-target.** The same tool registrars back two entry points:
-`src/index.ts` (stdio, the npm/mcpb package).
+**One entry point:** `src/index.ts` (stdio, the npm/mcpb package).
 
 ## Commands
 
 ```bash
 npm run build        # tsc → dist/, then esbuild bundle → dist/bundle.js
-npm test             # vitest run — the NODE pool (12 files / 125 tests, 2026-07-19)
+npm test             # vitest run
 ```
 
-Both suites pass on `main` as of 2026-07-19. There is **no coverage threshold**
-in `vitest.config.ts` (reporters only) — unlike several sibling MCPs, a
-coverage drop will not fail CI here.
+There is **no coverage threshold** in `vitest.config.ts` (reporters only) —
+unlike several sibling MCPs, a coverage drop will not fail CI here.
 
 ## Auth / session model
 
