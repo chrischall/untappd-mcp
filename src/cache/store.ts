@@ -15,7 +15,7 @@
 //
 // The SQL lives here ONCE, over a tiny synchronous {@link SqlDriver}, so the same
 // schema/queries back both engines: `node:sqlite` on the stdio server and a
-// Durable Object's SQLite on the connector. This module imports nothing
+// a different backing store elsewhere. This module imports nothing
 // platform-specific.
 
 /** One real check-in row. Mirrors the `checkins` table columns. */

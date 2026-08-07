@@ -2,7 +2,7 @@
   "name": "untappd-mcp",
   "version": "1.8.4",
   "mcpName": "io.github.chrischall/untappd-mcp",
-  "description": "Untappd MCP server for Claude — developed and maintained by AI (Claude Code)",
+  "description": "Untappd MCP server for Claude \u2014 developed and maintained by AI (Claude Code)",
   "author": "Claude Code (AI) <https://www.anthropic.com/claude>",
   "repository": {
     "type": "git",
@@ -37,10 +37,7 @@
     "dev": "node dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
-    "worker:dev": "wrangler dev",
-    "worker:deploy": "wrangler deploy",
-    "worker:test": "vitest run --config vitest.workers.config.ts"
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@chrischall/mcp-utils": "^0.14.0",
@@ -50,16 +47,10 @@
     "zod": "^4.4.2"
   },
   "devDependencies": {
-    "@chrischall/mcp-connector": "^1.1.1",
-    "@cloudflare/vitest-pool-workers": "^0.20.1",
-    "@cloudflare/workers-oauth-provider": "^0.8.1",
-    "@cloudflare/workers-types": "^5.20260708.1",
     "@types/node": "^26.1.1",
     "@vitest/coverage-v8": "^4.1.2",
-    "agents": "^0.19.0",
     "esbuild": "^0.28.0",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.2",
-    "wrangler": "^4.110.0"
+    "vitest": "^4.1.2"
   }
 }

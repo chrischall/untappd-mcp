@@ -46,7 +46,7 @@ await runMcp({
     (s) => registerCheckinTools(s, client),
     (s) => registerUtilityTools(s, client),
     // The stdio server backs the cache with a local `node:sqlite` file; the
-    // remote Cloudflare connector (src/worker.ts) backs the same cache tools
+    // a hosted deployment backs the same cache tools
     // with a per-user Durable Object instead.
     (s) => registerCacheTools(s, client, nodeCacheProvider),
     // Keep last: logs the full registered toolset (count + names) at startup.

@@ -8,7 +8,7 @@ import { CheckinStoreCore, LocalCacheStore, type SqlDriver, type SqlParam } from
 // The `node:sqlite` backend for the check-in cache — a local on-disk SQLite file
 // used by the stdio/desktop server. The query logic lives in CheckinStoreCore
 // (src/cache/store.ts); this file only adapts `node:sqlite` to the SqlDriver
-// surface and manages the file handle. (The remote Cloudflare connector uses a
+// surface and manages the file handle. (A different deployment could use a
 // Durable Object backend instead — see src/cache/durable.ts.)
 
 /** Adapts a `node:sqlite` DatabaseSync to the driver surface the core needs. */
