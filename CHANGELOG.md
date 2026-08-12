@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.8.6](https://github.com/chrischall/untappd-mcp/compare/v1.8.5...v1.8.6) (2026-08-12)
+
+
+### Bug Fixes
+
+* **deps-dev:** bump the dev-dependencies group with 2 updates ([#126](https://github.com/chrischall/untappd-mcp/issues/126)) ([bbbce40](https://github.com/chrischall/untappd-mcp/commit/bbbce40e05450638ff12eb0eab9c2ac418b0bebe))
+* **deps:** bump @hono/node-server from 1.19.14 to 2.1.0 ([#129](https://github.com/chrischall/untappd-mcp/issues/129)) ([eb577e2](https://github.com/chrischall/untappd-mcp/commit/eb577e2e99fd9dc7f36d2fb9e8dbbb5623d24696))
+* **deps:** bump the production-dependencies group with 2 updates ([#127](https://github.com/chrischall/untappd-mcp/issues/127)) ([babe151](https://github.com/chrischall/untappd-mcp/commit/babe151a518913abb9d9f425c4e580acc7125504))
+
 ## [1.8.5](https://github.com/chrischall/untappd-mcp/compare/v1.8.4...v1.8.5) (2026-08-07)
 
 
