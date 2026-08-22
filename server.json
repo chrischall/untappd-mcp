@@ -6,12 +6,12 @@
     "url": "https://github.com/chrischall/untappd-mcp",
     "source": "github"
   },
-  "version": "1.8.6",
+  "version": "1.8.7",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "untappd-mcp",
-      "version": "1.8.6",
+      "version": "1.8.7",
       "transport": {
         "type": "stdio"
       },
