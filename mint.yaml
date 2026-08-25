@@ -1,0 +1,65 @@
+version: 1
+name: Untappd
+slug: untappd
+summary: >-
+  Search Untappd beers, breweries, and venues; read profiles, check-ins,
+  wishlists, and your friend feed; and post check-ins, toasts, and comments
+  to your account
+env:
+  - name: UNTAPPD_USERNAME
+    required: true
+    help: >-
+      Your Untappd username or login email.
+  - name: UNTAPPD_PASSWORD
+    secret: true
+    required: true
+    help: >-
+      Your Untappd account password (used only for xauth login).
+  - name: UNTAPPD_CLIENT_ID
+    secret: true
+    required: true
+    help: >-
+      Untappd mobile app client id (obtained by intercepting the app; see
+      README).
+  - name: UNTAPPD_CLIENT_SECRET
+    secret: true
+    required: true
+    help: >-
+      Untappd mobile app client secret.
+  - name: UNTAPPD_CACHE_DB
+    required: false
+    help: >-
+      Path to the on-disk check-in cache (defaults to
+      ~/.untappd-mcp/checkins.db). Relates to state.dataDir below.
+  - name: UNTAPPD_DEVICE_ID
+    required: false
+    help: >-
+      A stable UUID that Untappd keys the returned access token to. Any stable
+      value works; set it to pin your own instead of the built-in default.
+  - name: UNTAPPD_USER_AGENT
+    required: false
+    help: >-
+      Overrides the User-Agent sent upstream. Leave unset unless the service
+      requires a specific one.
+  - name: UNTAPPD_UTV
+    required: false
+    help: >-
+      Overrides the Untappd app version string sent with authentication. Leave
+      unset unless a version bump is needed to keep logins working.
+state:
+  dataDir: true
+  reason: >-
+    Persists the saved session/token under $HOME so authentication survives a
+    restart. Without it every cold start re-authenticates, which a hosted
+    child may be unable to do unaided.
+egress:
+  allow:
+    # Only hosts the SERVER process actually fetches. Hosts that appear
+    # solely in a URL this server BUILDS and returns are excluded.
+    - api.untappd.com
+    #
+    # NOTE — this server also reaches at least one host determined at
+    # RUNTIME, which cannot appear as a literal here:
+    #   - a signed upload URL returned by the API (often storage.googleapis.com / s3)
+    # Confirm the concrete host(s) against a live run and add them, or
+    # the isolated tier will block the call.
