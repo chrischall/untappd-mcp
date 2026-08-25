@@ -44,14 +44,17 @@ env:
   - name: UNTAPPD_UTV
     required: false
     help: >-
-      Overrides the Untappd app version string sent with authentication. Leave
-      unset unless a version bump is needed to keep logins working.
+      Overrides the Untappd app version string, which is sent on every request
+      (not only at login). Leave unset unless a version bump is needed to keep
+      the API accepting requests.
 state:
   dataDir: true
   reason: >-
-    Persists the saved session/token under $HOME so authentication survives a
-    restart. Without it every cold start re-authenticates, which a hosted
-    child may be unable to do unaided.
+    Persists the check-in cache SQLite database (UNTAPPD_CACHE_DB, default
+    ~/.untappd-mcp/checkins.db) under $HOME. Without it every cold start begins
+    with an empty cache and has to re-sync from the API. The access token is
+    NOT persisted — it is held in memory only — so this is about avoiding
+    repeated syncs, not about surviving authentication.
 egress:
   allow:
     # Only hosts the SERVER process actually fetches. Hosts that appear
