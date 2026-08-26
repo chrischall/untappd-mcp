@@ -41,7 +41,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@chrischall/mcp-utils": "^0.14.0",
+    "@chrischall/mcp-utils": "^0.15.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "ai": "^7.0.19",
     "dotenv": "^17.4.0",
