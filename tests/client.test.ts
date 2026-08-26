@@ -160,6 +160,42 @@ describe('UntappdClient', () => {
     }
   });
 
+  it('tells a token-only deployment its token went stale, not that it is unconfigured', async () => {
+    // The trap CLAUDE.md names: on a 401 the client drops the token and
+    // re-logins, but a deployment that SUPPLIED the token may have no
+    // username/password to log in with — so it fell through to
+    // missingCredsError() and was told to set the very var it had set.
+    vi.stubEnv('UNTAPPD_USERNAME', '');
+    vi.stubEnv('UNTAPPD_PASSWORD', '');
+    try {
+      const { impl, calls } = mockFetch([json({ meta: { code: 401 } }, 401)]);
+      const client = new UntappdClient({ fetchImpl: impl, token: 'STALE', clientId: 'CID', clientSecret: 'CSEC' });
+      const err = await client.get('/user/info/chris').catch((e: Error) => e);
+      expect(String(err)).toMatch(/expired or been revoked|went stale/i);
+      expect(String(err)).toMatch(/UNTAPPD_ACCESS_TOKEN/);
+      // The old, wrong message must NOT be what they see.
+      expect(String(err)).not.toMatch(/are not configured/i);
+      // And no pointless second request: there is nothing to retry WITH.
+      expect(calls).toHaveLength(1);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('still drops a stale token and re-logins when a password IS configured', async () => {
+    // The recovery path must survive the fix above — this is the case that
+    // CAN re-authenticate, so it should, silently.
+    const { impl, calls } = mockFetch([
+      json({ meta: { code: 401 } }, 401),
+      xauth(),
+      json({ meta: { code: 200 }, response: { user: { uid: 1 } } }),
+    ]);
+    const client = new UntappdClient({ fetchImpl: impl, token: 'STALE', username: 'chris', password: 'pw', clientId: 'CID', clientSecret: 'CSEC' });
+    await client.get('/user/info/chris');
+    expect(calls).toHaveLength(3);            // 401 → xauth → retry
+    expect(calls[2].url).toContain('access_token=');
+  });
+
   it('builds a working write-path client from token + app creds, no password', async () => {
     const { impl, calls } = mockFetch([json({ meta: { code: 200 }, response: { result: 'success' } })]);
     const client = new UntappdClient({ fetchImpl: impl, token: 'TOK', clientId: 'CID', clientSecret: 'CSEC', loginName: 'chris' });
