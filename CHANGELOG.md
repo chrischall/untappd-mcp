@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.9.0](https://github.com/chrischall/untappd-mcp/compare/v1.8.7...v1.9.0) (2026-08-26)
+
+
+### Features
+
+* **auth:** take the access token from UNTAPPD_ACCESS_TOKEN ([#140](https://github.com/chrischall/untappd-mcp/issues/140)) ([210cccc](https://github.com/chrischall/untappd-mcp/commit/210ccccbb2241164baf34413004acf4c23ff14ef))
+
+
+### Bug Fixes
+
+* correct untappd's mint.yaml state.reason and UNTAPPD_UTV help ([#134](https://github.com/chrischall/untappd-mcp/issues/134)) ([f5ee117](https://github.com/chrischall/untappd-mcp/commit/f5ee1177ea2ad95f54c3efb90c8f0c93fc379540)), closes [#133](https://github.com/chrischall/untappd-mcp/issues/133)
+* **deps-dev:** bump @vitest/coverage-v8 in the dev-dependencies group ([#138](https://github.com/chrischall/untappd-mcp/issues/138)) ([34a7aa4](https://github.com/chrischall/untappd-mcp/commit/34a7aa4afc8e558e344b56aae7ee474095b8e671))
+* **deps-dev:** bump vitest from 4.1.10 to 4.1.11 in the vitest group ([#137](https://github.com/chrischall/untappd-mcp/issues/137)) ([d1c4be8](https://github.com/chrischall/untappd-mcp/commit/d1c4be830d5b98221883256f3f561d118726459b))
+* **deps:** bump the production-dependencies group with 2 updates ([#139](https://github.com/chrischall/untappd-mcp/issues/139)) ([dbb2280](https://github.com/chrischall/untappd-mcp/commit/dbb2280e67ed859f9b8a8d27d25fc5ab2c55ea2e))
+
 ## [1.8.7](https://github.com/chrischall/untappd-mcp/compare/v1.8.6...v1.8.7) (2026-08-19)
 
 
