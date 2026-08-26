@@ -26,8 +26,9 @@ it goes stale.
 
 | Variable | Required | Description |
 | --- | --- | --- |
-| `UNTAPPD_USERNAME` | yes | Your Untappd username or login email. |
-| `UNTAPPD_PASSWORD` | yes | Your Untappd password (used only for the xauth login). |
+| `UNTAPPD_ACCESS_TOKEN` | no | An access token you already hold. Supply this and **no password is needed** — the xauth login is skipped entirely. |
+| `UNTAPPD_USERNAME` | if no token | Your Untappd username or login email. |
+| `UNTAPPD_PASSWORD` | if no token | Your Untappd password (used only for the xauth login that mints a token). |
 | `UNTAPPD_CLIENT_ID` | yes | The Untappd mobile app client id (see below). |
 | `UNTAPPD_CLIENT_SECRET` | yes | The Untappd mobile app client secret. |
 | `UNTAPPD_DEVICE_ID` | no | Stable device UUID the token is keyed to (a default is provided). |

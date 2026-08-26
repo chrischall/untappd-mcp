@@ -116,6 +116,50 @@ describe('UntappdClient', () => {
     }
   });
 
+  it('takes the access token from UNTAPPD_ACCESS_TOKEN, so a password is not required', async () => {
+    // The ladder: a consumer who already holds a token should never have to
+    // hand over the password that would mint one. `token` was reachable only
+    // from code, so in practice every deployment supplied the password.
+    vi.stubEnv('UNTAPPD_ACCESS_TOKEN', 'ENVTOK');
+    vi.stubEnv('UNTAPPD_USERNAME', '');
+    vi.stubEnv('UNTAPPD_PASSWORD', '');
+    try {
+      const { impl, calls } = mockFetch([json({ meta: { code: 200 }, response: { user: { uid: 1 } } })]);
+      const client = new UntappdClient({ fetchImpl: impl, clientId: 'CID', clientSecret: 'CSEC' });
+      expect(client.configured).toBe(true);
+      await client.get('/user/info/chris');
+      expect(calls).toHaveLength(1);        // NO xauth login — the password was never needed
+      expect(calls[0].url).toContain('access_token=ENVTOK');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('lets an explicitly passed token beat the environment', async () => {
+    vi.stubEnv('UNTAPPD_ACCESS_TOKEN', 'ENVTOK');
+    try {
+      const { impl, calls } = mockFetch([json({ meta: { code: 200 }, response: { user: { uid: 1 } } })]);
+      const client = new UntappdClient({ fetchImpl: impl, token: 'OPTTOK', clientId: 'CID', clientSecret: 'CSEC' });
+      await client.get('/user/info/chris');
+      expect(calls[0].url).toContain('access_token=OPTTOK');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('names the token path in the missing-credentials error, not just the password path', async () => {
+    for (const k of ['UNTAPPD_ACCESS_TOKEN', 'UNTAPPD_USERNAME', 'UNTAPPD_PASSWORD', 'UNTAPPD_CLIENT_ID', 'UNTAPPD_CLIENT_SECRET']) vi.stubEnv(k, '');
+    try {
+      const { impl } = mockFetch([]);
+      const client = new UntappdClient({ fetchImpl: impl });
+      // Remediation belongs in the MESSAGE: MCP serialization shows the message
+      // and drops `hint`, so a hint-only mention of the token path is invisible.
+      await expect(client.get('/user/info/chris')).rejects.toThrow(/UNTAPPD_ACCESS_TOKEN/);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('builds a working write-path client from token + app creds, no password', async () => {
     const { impl, calls } = mockFetch([json({ meta: { code: 200 }, response: { result: 'success' } })]);
     const client = new UntappdClient({ fetchImpl: impl, token: 'TOK', clientId: 'CID', clientSecret: 'CSEC', loginName: 'chris' });

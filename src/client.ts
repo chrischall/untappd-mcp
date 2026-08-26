@@ -166,13 +166,16 @@ function missingCredsError(): McpToolError {
   const missing = (
     ['UNTAPPD_USERNAME', 'UNTAPPD_PASSWORD', 'UNTAPPD_CLIENT_ID', 'UNTAPPD_CLIENT_SECRET'] as const
   ).filter((k) => !readEnvVar(k));
+  // Both paths in the MESSAGE, not only `hint`: MCP serialization surfaces the
+  // message and drops the hint, so a token path mentioned only there is
+  // invisible exactly when someone is deciding what to configure.
+  const remedy =
+    'Either set UNTAPPD_ACCESS_TOKEN (an access token you already hold — no password needed), or set ' +
+    'UNTAPPD_USERNAME and UNTAPPD_PASSWORD to log in for one. Either way UNTAPPD_CLIENT_ID and ' +
+    'UNTAPPD_CLIENT_SECRET (the Untappd mobile app client credentials) are required. See the README.';
   return createHelpfulError(
-    `Untappd credentials are not configured — missing ${missing.join(', ') || 'credentials'}.`,
-    {
-      hint:
-        'Set UNTAPPD_USERNAME and UNTAPPD_PASSWORD (your Untappd login), plus UNTAPPD_CLIENT_ID and ' +
-        'UNTAPPD_CLIENT_SECRET (the Untappd mobile app client credentials). See the README for how to obtain them.',
-    },
+    `Untappd credentials are not configured — missing ${missing.join(', ') || 'credentials'}. ${remedy}`,
+    { hint: remedy },
   );
 }
 
@@ -197,7 +200,11 @@ export class UntappdClient {
    */
   constructor(opts: ClientOptions = {}) {
     this.fetchImpl = opts.fetchImpl ?? fetch;
-    this.token = opts.token ?? null;
+    // Path 1 of the ladder: a token the consumer already holds. Reachable from
+    // the environment, not just from code — otherwise the only configuration a
+    // deployment can express is "hand over the password", which is the shape
+    // this exists to avoid.
+    this.token = opts.token ?? readEnvVar('UNTAPPD_ACCESS_TOKEN') ?? null;
     this.clientId = opts.clientId ?? readEnvVar('UNTAPPD_CLIENT_ID') ?? null;
     this.clientSecret = opts.clientSecret ?? readEnvVar('UNTAPPD_CLIENT_SECRET') ?? null;
     this.username = opts.username ?? readEnvVar('UNTAPPD_USERNAME') ?? null;
