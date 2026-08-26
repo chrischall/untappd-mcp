@@ -166,13 +166,16 @@ function missingCredsError(): McpToolError {
   const missing = (
     ['UNTAPPD_USERNAME', 'UNTAPPD_PASSWORD', 'UNTAPPD_CLIENT_ID', 'UNTAPPD_CLIENT_SECRET'] as const
   ).filter((k) => !readEnvVar(k));
+  // Both paths in the MESSAGE, not only `hint`: MCP serialization surfaces the
+  // message and drops the hint, so a token path mentioned only there is
+  // invisible exactly when someone is deciding what to configure.
+  const remedy =
+    'Either set UNTAPPD_ACCESS_TOKEN (an access token you already hold — no password needed), or set ' +
+    'UNTAPPD_USERNAME and UNTAPPD_PASSWORD to log in for one. Either way UNTAPPD_CLIENT_ID and ' +
+    'UNTAPPD_CLIENT_SECRET (the Untappd mobile app client credentials) are required. See the README.';
   return createHelpfulError(
-    `Untappd credentials are not configured — missing ${missing.join(', ') || 'credentials'}.`,
-    {
-      hint:
-        'Set UNTAPPD_USERNAME and UNTAPPD_PASSWORD (your Untappd login), plus UNTAPPD_CLIENT_ID and ' +
-        'UNTAPPD_CLIENT_SECRET (the Untappd mobile app client credentials). See the README for how to obtain them.',
-    },
+    `Untappd credentials are not configured — missing ${missing.join(', ') || 'credentials'}. ${remedy}`,
+    { hint: remedy },
   );
 }
 
@@ -189,6 +192,7 @@ export class UntappdClient {
 
   private token: string | null;
   private loginInFlight: Promise<string> | null = null;
+  private tokenIsSupplied: boolean;
 
   /**
    * Defer the config error so the server can still start (and respond to the
@@ -197,7 +201,15 @@ export class UntappdClient {
    */
   constructor(opts: ClientOptions = {}) {
     this.fetchImpl = opts.fetchImpl ?? fetch;
-    this.token = opts.token ?? null;
+    // Path 1 of the ladder: a token the consumer already holds. Reachable from
+    // the environment, not just from code — otherwise the only configuration a
+    // deployment can express is "hand over the password", which is the shape
+    // this exists to avoid.
+    this.token = opts.token ?? readEnvVar('UNTAPPD_ACCESS_TOKEN') ?? null;
+    // Whether that token was GIVEN to us rather than minted by a login. It
+    // decides what a later 401 means: a minted token can simply be re-minted,
+    // a supplied one can only be replaced by whoever supplied it.
+    this.tokenIsSupplied = this.token !== null;
     this.clientId = opts.clientId ?? readEnvVar('UNTAPPD_CLIENT_ID') ?? null;
     this.clientSecret = opts.clientSecret ?? readEnvVar('UNTAPPD_CLIENT_SECRET') ?? null;
     this.username = opts.username ?? readEnvVar('UNTAPPD_USERNAME') ?? null;
@@ -273,6 +285,7 @@ export class UntappdClient {
       userAgent: this.userAgent,
     });
     this.token = token;
+    this.tokenIsSupplied = false;
     return token;
   }
 
@@ -333,8 +346,22 @@ export class UntappdClient {
       body = f.toString();
     }
     const res = await this.send(method, `${BASE_URL}${path}${qs}`, { headers, body });
-    // A 401 means the cached token went stale — drop it and log in once more.
+    // A 401 means the token went stale. Re-minting one needs a login, and a
+    // deployment that SUPPLIED the token may have no username/password to log
+    // in with — that fell through to `missingCredsError()` and told the
+    // operator to set the very variable they had set (CLAUDE.md, "a pre-seeded
+    // token is one-way"). Name what actually happened instead, and don't spend
+    // a second request discovering there is nothing to retry with.
     if (res.status === 401 && !isRetry) {
+      if (this.tokenIsSupplied && !(this.username && this.password)) {
+        throw createHelpfulError(
+          'Untappd rejected the access token (401) — UNTAPPD_ACCESS_TOKEN has expired or been revoked. ' +
+            'Supply a fresh token, or set UNTAPPD_USERNAME and UNTAPPD_PASSWORD so a new one can be minted automatically.',
+          {
+            hint: 'The token is stale, not missing. A pre-seeded token cannot be refreshed without a login.',
+          },
+        );
+      }
       this.token = null;
       return this.request<T>(method, path, opts, true);
     }

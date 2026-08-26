@@ -41,13 +41,17 @@ Two auth quirks worth knowing:
 - **2FA accounts cannot log in.** xauth returns no token and sets
   `two_factor_enabled`; `xauthLogin` turns that into an explicit error. There is
   no second factor path.
-- **A pre-seeded token is one-way.** A deployment that constructs the client
-  with a token but **no username/password** cannot use the client's
-  401 → drop-token → re-login path: it falls through to `missingCredsError()`
-  and the user sees a confusing "Untappd credentials are not configured —
-  missing …" message when what actually happened is *their token went stale and
-  they must re-authenticate*. If you touch that path, fix the message for that
-  case rather than adding stored passwords.
+- **A pre-seeded token is one-way, and the 401 says so.** A deployment
+  configured with a token (`UNTAPPD_ACCESS_TOKEN`, or the `token` option) but
+  **no username/password** cannot use the client's 401 → drop-token → re-login
+  path: there is nothing to log in with. It used to fall through to
+  `missingCredsError()` and tell the operator to set the very variable they had
+  set. `request()` now checks `tokenIsSupplied` before dropping the token and
+  raises "the token has expired or been revoked" instead — naming the real
+  event, and skipping a retry that had nothing to retry with. `tokenIsSupplied`
+  is cleared by `login()`, because a token this client MINTED can simply be
+  re-minted. Keep those two cases distinct if you touch the 401 branch, and
+  don't answer a stale token by adding stored passwords.
 
 ## Untappd v4 API quirks
 
