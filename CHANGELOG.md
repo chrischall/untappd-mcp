@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.2](https://github.com/chrischall/untappd-mcp/compare/v1.9.1...v1.9.2) (2026-09-02)
+
+
+### Bug Fixes
+
+* **deps:** bump qs from 6.15.3 to 6.16.0 ([#154](https://github.com/chrischall/untappd-mcp/issues/154)) ([8963f05](https://github.com/chrischall/untappd-mcp/commit/8963f05a655becc47e7db253acf1b49e32997df9))
+
 ## [1.9.1](https://github.com/chrischall/untappd-mcp/compare/v1.9.0...v1.9.1) (2026-09-02)
 
 
