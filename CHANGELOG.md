@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.9.1](https://github.com/chrischall/untappd-mcp/compare/v1.9.0...v1.9.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* **deps-dev:** bump @types/node in the dev-dependencies group ([#151](https://github.com/chrischall/untappd-mcp/issues/151)) ([b6c188c](https://github.com/chrischall/untappd-mcp/commit/b6c188cd57c76ebb50ea5e80225c388ded59b752))
+* **deps:** bump the production-dependencies group with 3 updates ([#152](https://github.com/chrischall/untappd-mcp/issues/152)) ([7710aa7](https://github.com/chrischall/untappd-mcp/commit/7710aa78e19b1488d146eb7b339919f84831ff16))
+
 ## [1.9.0](https://github.com/chrischall/untappd-mcp/compare/v1.8.7...v1.9.0) (2026-08-26)
 
 
