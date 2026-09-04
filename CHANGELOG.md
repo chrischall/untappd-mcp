@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.0](https://github.com/chrischall/untappd-mcp/compare/v1.9.2...v1.10.0) (2026-09-04)
+
+
+### Features
+
+* **tools:** compact by default, on the fleet `view` vocabulary ([#156](https://github.com/chrischall/untappd-mcp/issues/156)) ([7c79c81](https://github.com/chrischall/untappd-mcp/commit/7c79c81f66562f338e1f543ad74b1038e49239e9))
+
 ## [1.9.2](https://github.com/chrischall/untappd-mcp/compare/v1.9.1...v1.9.2) (2026-09-02)
 
 
