@@ -1,16 +1,11 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { textResult, toolAnnotations } from '@chrischall/mcp-utils';
+import { minifiedResult, resolveView, toolAnnotations, viewParam, viewResult } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
-import { compactBeerSearch, compactCheckins } from '../compact.js';
+import { compactBeerSearch, compactCheckins, UNTAPPD_VIEWS, upstreamCompact } from '../compact.js';
 import { beerMetaFrom, type BeerMeta, type CacheStore } from '../cache/store.js';
 
 const BidSchema = z.number().int().positive().describe('Untappd beer id (bid)');
-
-const CompactCheckins = z
-  .boolean()
-  .optional()
-  .describe('Project each check-in to a slim summary (id, user, beer, rating, comment, venue, toast/comment counts) to save context (default false)');
 
 /**
  * Opportunistically seed the beer-metadata cache from detail we already fetched,
@@ -51,19 +46,17 @@ export function registerBeerTools(server: McpServer, client: UntappdClient, cach
           .enum(['checkin', 'name', 'count'])
           .optional()
           .describe('Sort order: checkin (relevance, default), name, or count'),
-        compact: z
-          .boolean()
-          .optional()
-          .describe('Project each result to a slim summary (bid, name, brewery, style, abv, ibu, counts) to save context (default false)'),
+        view: viewParam(UNTAPPD_VIEWS, { note: 'compact projects each check-in to {id, user, beer, brewery, venue, rating, comment, toast/comment counts}; "full" returns Untappd\'s whole ~5 KB record.' }),
       },
     },
-    async ({ query, limit, offset, sort, compact }) => {
+    async ({ query, limit, offset, sort, view }) => {
       const data = await client.get('/search/beer', { q: query, limit, offset, sort });
       const items = (data as { beers?: { items?: Array<{ beer?: unknown; brewery?: unknown }> } })?.beers?.items;
       if (Array.isArray(items)) {
         await seedBeerMeta(cache, items.map((i) => ({ beer: i.beer, brewery: i.brewery })));
       }
-      return textResult(compact ? compactBeerSearch(data) : data);
+      const v = resolveView(view, UNTAPPD_VIEWS);
+      return viewResult(v, v === 'compact' ? compactBeerSearch(data) : data);
     },
   );
 
@@ -73,20 +66,18 @@ export function registerBeerTools(server: McpServer, client: UntappdClient, cach
       title: 'Get Untappd beer detail',
       description:
         'Get full detail for a beer by its Untappd beer id (bid): description, style, ABV, IBU, brewery, rating, ' +
-        'total check-in count, and (unless compact) recent activity. Get a bid from untappd_search_beer. Read-only.',
+        'total check-in count, and — on view:"full" — recent activity. Get a bid from untappd_search_beer. Read-only.',
       annotations: toolAnnotations({ title: 'Get Untappd beer detail', readOnly: true, idempotent: true, openWorld: true }),
       inputSchema: {
         bid: BidSchema,
-        compact: z
-          .boolean()
-          .optional()
-          .describe('Return a slimmer record without the embedded recent-activity lists (default false)'),
+        view: viewParam(UNTAPPD_VIEWS, { note: 'compact projects each check-in to {id, user, beer, brewery, venue, rating, comment, toast/comment counts}; "full" returns Untappd\'s whole ~5 KB record.' }),
       },
     },
-    async ({ bid, compact }) => {
-      const data = await client.get(`/beer/info/${bid}`, { compact: compact ? 'true' : undefined });
+    async ({ bid, view }) => {
+      const v = resolveView(view, UNTAPPD_VIEWS);
+      const data = await client.get(`/beer/info/${bid}`, { compact: upstreamCompact(v) });
       await seedBeerMeta(cache, [{ beer: (data as { beer?: unknown })?.beer }]);
-      return textResult(data);
+      return minifiedResult(data);
     },
   );
 
@@ -102,12 +93,13 @@ export function registerBeerTools(server: McpServer, client: UntappdClient, cach
         bid: BidSchema,
         limit: z.number().int().min(1).max(50).optional().describe('Max check-ins (1–50, default 25)'),
         max_id: z.number().int().positive().optional().describe('Return check-ins older than this id (for paging)'),
-        compact: CompactCheckins,
+        view: viewParam(UNTAPPD_VIEWS, { note: 'compact projects each check-in to {id, user, beer, brewery, venue, rating, comment, toast/comment counts}; "full" returns Untappd\'s whole ~5 KB record.' }),
       },
     },
-    async ({ bid, limit, max_id, compact }) => {
+    async ({ bid, limit, max_id, view }) => {
       const data = await client.get(`/beer/checkins/${bid}`, { limit, max_id });
-      return textResult(compact ? compactCheckins(data) : data);
+      const v = resolveView(view, UNTAPPD_VIEWS);
+      return viewResult(v, v === 'compact' ? compactCheckins(data) : data);
     },
   );
 }

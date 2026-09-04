@@ -41,35 +41,68 @@ describe('read tools', () => {
     expect(get).toHaveBeenCalledWith('/search/beer', { q: 'pliny', limit: 5, offset: 10, sort: undefined });
   });
 
-  it('search_beer compact projects results to slim summaries', async () => {
-    get.mockResolvedValueOnce({ beers: { items: [{ checkin_count: 5, have_had: false, beer: { bid: 9, beer_name: 'A', beer_style: 'IPA', beer_abv: 6 }, brewery: { brewery_name: 'B' } }] } });
-    const r = await harness.callTool('untappd_search_beer', { query: 'a', compact: true });
+  const FAT_BEER = { checkin_count: 5, have_had: false, beer: { bid: 9, beer_name: 'A', beer_style: 'IPA', beer_abv: 6, beer_description: 'x'.repeat(400) }, brewery: { brewery_name: 'B', contact: { twitter: '@b' } } };
+
+  it('search_beer projects results to slim summaries BY DEFAULT — no argument needed', async () => {
+    // The claim this whole change rests on: a caller that asks for nothing gets
+    // the cheap answer. It used to get the ~1.2 KB-per-item raw record unless
+    // it knew to pass compact=true.
+    get.mockResolvedValueOnce({ beers: { items: [FAT_BEER] } });
+    const r = await harness.callTool('untappd_search_beer', { query: 'a' });
     const item = (parse(r as never).beers as any).items[0];
     expect(item).toEqual({ bid: 9, name: 'A', style: 'IPA', abv: 6, ibu: undefined, brewery: 'B', checkin_count: 5, have_had: false });
   });
 
+  it('search_beer returns Untappd’s whole record on view:"full"', async () => {
+    get.mockResolvedValueOnce({ beers: { items: [FAT_BEER] } });
+    const r = await harness.callTool('untappd_search_beer', { query: 'a', view: 'full' });
+    const item = (parse(r as never).beers as any).items[0];
+    expect(item.beer.beer_description).toHaveLength(400);
+    expect(item.brewery.contact.twitter).toBe('@b');
+  });
+
+  it('emits no formatting whitespace, and never touches whitespace inside a value', async () => {
+    // A check-in comment carries newlines the drinker typed. Formatting
+    // whitespace is ours to drop; theirs is content.
+    const comment = 'Great beer.\n\n  Would drink again.   ';
+    get.mockResolvedValueOnce({ checkins: { items: [{ checkin_id: 1, checkin_comment: comment }] } });
+    const r = await harness.callTool('untappd_user_checkins', { username: 'x' });
+    const text = (r as { content: { text: string }[] }).content[0].text;
+    expect(text.split('\n')).toHaveLength(1);
+    expect((parse(r as never).checkins as any).items[0].comment).toBe(comment);
+  });
+
   it('beer_info hits the bid path with compact', async () => {
     get.mockResolvedValueOnce({ beer: { bid: 4499 } });
-    const r = await harness.callTool('untappd_beer_info', { bid: 4499, compact: true });
+    const r = await harness.callTool('untappd_beer_info', { bid: 4499, view: 'compact' });
     expect(get).toHaveBeenCalledWith('/beer/info/4499', { compact: 'true' });
     expect((parse(r as never).beer as { bid: number }).bid).toBe(4499);
   });
 
-  it('beer_info omits compact when false', async () => {
+  it('beer_info asks Untappd for the slim record BY DEFAULT', async () => {
+    // The default is now `view: "compact"`, and on these endpoints that reaches
+    // upstream: Untappd's own `compact=true` drops the embedded activity block,
+    // so the default saves the bandwidth as well as the context.
     get.mockResolvedValueOnce({ beer: {} });
     await harness.callTool('untappd_beer_info', { bid: 1 });
+    expect(get).toHaveBeenCalledWith('/beer/info/1', { compact: 'true' });
+  });
+
+  it('beer_info asks for everything on view:"full"', async () => {
+    get.mockResolvedValueOnce({ beer: {} });
+    await harness.callTool('untappd_beer_info', { bid: 1, view: 'full' });
     expect(get).toHaveBeenCalledWith('/beer/info/1', { compact: undefined });
   });
 
   it('brewery_info hits the id path', async () => {
     get.mockResolvedValueOnce({ brewery: {} });
     await harness.callTool('untappd_brewery_info', { brewery_id: 5143 });
-    expect(get).toHaveBeenCalledWith('/brewery/info/5143', { compact: undefined });
+    expect(get).toHaveBeenCalledWith('/brewery/info/5143', { compact: 'true' });
   });
 
   it('venue_info hits the id path', async () => {
     get.mockResolvedValueOnce({ venue: {} });
-    await harness.callTool('untappd_venue_info', { venue_id: 1, compact: true });
+    await harness.callTool('untappd_venue_info', { venue_id: 1, view: 'compact' });
     expect(get).toHaveBeenCalledWith('/venue/info/1', { compact: 'true' });
   });
 
@@ -213,7 +246,7 @@ describe('read tools', () => {
   it('user_info url-encodes the username', async () => {
     get.mockResolvedValueOnce({ user: {} });
     await harness.callTool('untappd_user_info', { username: 'a b' });
-    expect(get).toHaveBeenCalledWith('/user/info/a%20b', { compact: undefined });
+    expect(get).toHaveBeenCalledWith('/user/info/a%20b', { compact: 'true' });
   });
 
   it('user tool errors clearly when no username and no configured account', async () => {

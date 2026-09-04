@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { textResult, toolAnnotations } from '@chrischall/mcp-utils';
+import { minifiedResult, resolveView, toolAnnotations, viewParam, viewResult } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
-import { compactCheckins } from '../compact.js';
+import { compactCheckins, UNTAPPD_VIEWS, upstreamCompact } from '../compact.js';
 
 export function registerVenueTools(server: McpServer, client: UntappdClient): void {
   server.registerTool(
@@ -20,7 +20,7 @@ export function registerVenueTools(server: McpServer, client: UntappdClient): vo
     },
     async ({ query, limit }) => {
       const data = await client.get('/search/venue', { q: query, limit });
-      return textResult(data);
+      return minifiedResult(data);
     },
   );
 
@@ -30,16 +30,17 @@ export function registerVenueTools(server: McpServer, client: UntappdClient): vo
       title: 'Get Untappd venue detail',
       description:
         'Get full detail for a venue by its Untappd venue id: category, address, contact, rating, total check-ins, ' +
-        'and (unless compact) top beers and recent activity. Get an id from untappd_search_venue. Read-only.',
+        'and — on view:"full" — top beers and recent activity. Get an id from untappd_search_venue. Read-only.',
       annotations: toolAnnotations({ title: 'Get Untappd venue detail', readOnly: true, idempotent: true, openWorld: true }),
       inputSchema: {
         venue_id: z.number().int().positive().describe('Untappd venue id'),
-        compact: z.boolean().optional().describe('Return a slimmer record without embedded activity (default false)'),
+        view: viewParam(UNTAPPD_VIEWS, { note: 'compact also asks Untappd for its own slim record, dropping the embedded activity/list blocks; "full" returns everything.' }),
       },
     },
-    async ({ venue_id, compact }) => {
-      const data = await client.get(`/venue/info/${venue_id}`, { compact: compact ? 'true' : undefined });
-      return textResult(data);
+    async ({ venue_id, view }) => {
+      const v = resolveView(view, UNTAPPD_VIEWS);
+      const data = await client.get(`/venue/info/${venue_id}`, { compact: upstreamCompact(v) });
+      return viewResult(v, data);
     },
   );
 
@@ -158,7 +159,7 @@ export function registerVenueTools(server: McpServer, client: UntappdClient): vo
       }
 
       if (!sawMenu) {
-        return textResult({ venue_id, total_count: 0, returned: 0, pages_fetched: pagesFetched, another_run_needed: false, truncated: false, beers: [], note: 'No verified menu on this venue.' });
+        return minifiedResult({ venue_id, total_count: 0, returned: 0, pages_fetched: pagesFetched, another_run_needed: false, truncated: false, beers: [], note: 'No verified menu on this venue.' });
       }
       const covered = totalCount > 0 && beers.length >= totalCount;
       const another_run_needed = !reachedEnd; // stopped only because the page budget ran out mid-list
@@ -166,7 +167,7 @@ export function registerVenueTools(server: McpServer, client: UntappdClient): vo
       // shortfall as truncated; a resumed tail legitimately returns fewer than
       // the whole-menu total_count and is not truncated.
       const truncated = reachedEnd && !covered && startOffset === 0 && totalCount > 0;
-      return textResult({
+      return minifiedResult({
         venue_id,
         total_count: totalCount,
         returned: beers.length,
@@ -193,7 +194,7 @@ export function registerVenueTools(server: McpServer, client: UntappdClient): vo
     },
     async ({ foursquare_id }) => {
       const data = await client.get(`/venue/foursquare_lookup/${encodeURIComponent(foursquare_id)}`);
-      return textResult(data);
+      return minifiedResult(data);
     },
   );
 
@@ -209,15 +210,13 @@ export function registerVenueTools(server: McpServer, client: UntappdClient): vo
         venue_id: z.number().int().positive().describe('Untappd venue id'),
         limit: z.number().int().min(1).max(50).optional().describe('Max check-ins (1–50, default 25)'),
         max_id: z.number().int().positive().optional().describe('Return check-ins older than this id (for paging)'),
-        compact: z
-          .boolean()
-          .optional()
-          .describe('Project each check-in to a slim summary to save context (default false)'),
+        view: viewParam(UNTAPPD_VIEWS, { note: 'compact projects each check-in to {id, user, beer, brewery, venue, rating, comment, toast/comment counts}; "full" returns Untappd\'s whole ~5 KB record.' }),
       },
     },
-    async ({ venue_id, limit, max_id, compact }) => {
+    async ({ venue_id, limit, max_id, view }) => {
       const data = await client.get(`/venue/checkins/${venue_id}`, { limit, max_id });
-      return textResult(compact ? compactCheckins(data) : data);
+      const v = resolveView(view, UNTAPPD_VIEWS);
+      return viewResult(v, v === 'compact' ? compactCheckins(data) : data);
     },
   );
 }

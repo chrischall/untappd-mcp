@@ -2,7 +2,7 @@
   "name": "untappd-mcp",
   "version": "1.9.2",
   "mcpName": "io.github.chrischall/untappd-mcp",
-  "description": "Untappd MCP server for Claude — developed and maintained by AI (Claude Code)",
+  "description": "Untappd MCP server for Claude \u2014 developed and maintained by AI (Claude Code)",
   "author": "Claude Code (AI) <https://www.anthropic.com/claude>",
   "repository": {
     "type": "git",
@@ -42,7 +42,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@chrischall/mcp-utils": "^0.18.1",
+    "@chrischall/mcp-utils": "^0.21.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "ai": "^7.0.19",
     "dotenv": "^17.4.0",

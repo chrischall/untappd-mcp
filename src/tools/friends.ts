@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { textResult, toolAnnotations, schemaConfirm } from '@chrischall/mcp-utils';
+import { minifiedResult, schemaConfirm, toolAnnotations } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 
 // The endpoint PATHS below are confirmed from the Untappd app's own JS bundle
@@ -75,7 +75,7 @@ export function registerFriendActionTools(server: McpServer, client: UntappdClie
       },
       async ({ target_uid, confirm }) => {
         if (confirm !== true) {
-          return textResult({
+          return minifiedResult({
             dryRun: true,
             action: action.path,
             target_uid,
@@ -83,7 +83,7 @@ export function registerFriendActionTools(server: McpServer, client: UntappdClie
           });
         }
         const data = await client.write<{ result?: string }>('POST', `/friend/${action.path}/${target_uid}`);
-        return textResult({ done: true, action: action.path, target_uid, result: data?.result });
+        return minifiedResult({ done: true, action: action.path, target_uid, result: data?.result });
       },
     );
   }

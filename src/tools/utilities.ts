@@ -1,5 +1,5 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { textResult, toolAnnotations } from '@chrischall/mcp-utils';
+import { minifiedResult, toolAnnotations } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 import { VERSION } from '../version.js';
 import { toolInventory } from './diagnostics.js';
@@ -22,7 +22,7 @@ export function registerUtilityTools(server: McpServer, client: UntappdClient): 
       // so the live build and its toolset can be confirmed from the client.
       const build = { server_version: VERSION, ...toolInventory(server) };
       if (!client.configured) {
-        return textResult({
+        return minifiedResult({
           ok: false,
           configured: false,
           ...build,
@@ -30,7 +30,7 @@ export function registerUtilityTools(server: McpServer, client: UntappdClient): 
         });
       }
       const feed = await client.get<{ checkins?: { count?: number } }>('/checkin/recent', { limit: 1 });
-      return textResult({
+      return minifiedResult({
         ok: true,
         configured: true,
         account: client.loginName,

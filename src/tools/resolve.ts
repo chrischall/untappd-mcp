@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { textResult, toolAnnotations, createHelpfulError } from '@chrischall/mcp-utils';
+import { createHelpfulError, minifiedResult, toolAnnotations } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 
 export interface ResolvedUrl {
@@ -76,7 +76,7 @@ export function registerResolveTools(server: McpServer, client: UntappdClient): 
           hint: 'Expected an untappd.com link like /b/<slug>/<bid>, /w/<slug>/<id>, /v/<slug>/<id>, or /user/<name>.',
         });
       }
-      return textResult(resolved);
+      return minifiedResult(resolved);
     },
   );
 
@@ -110,7 +110,7 @@ export function registerResolveTools(server: McpServer, client: UntappdClient): 
                 ? `/checkin/view/${resolved.id}`
                 : `/user/info/${encodeURIComponent(resolved.username!)}`;
       const detail = await client.get(path);
-      return textResult({ resolved, detail });
+      return minifiedResult({ resolved, detail });
     },
   );
 }

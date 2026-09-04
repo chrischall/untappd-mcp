@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { extname } from 'node:path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { textResult, toolAnnotations, schemaConfirm, fileBlob, McpToolError, createHelpfulError, messageOf } from '@chrischall/mcp-utils';
+import { McpToolError, createHelpfulError, fileBlob, messageOf, minifiedResult, schemaConfirm, toolAnnotations } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 
 const CheckinIdSchema = z.number().int().positive().describe('Untappd check-in id');
@@ -47,7 +47,7 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
     },
     async ({ checkin_id, confirm }) => {
       if (confirm !== true) {
-        return textResult({
+        return minifiedResult({
           dryRun: true,
           action: 'toast',
           checkin_id,
@@ -55,7 +55,7 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
         });
       }
       const data = await client.write<{ result?: string; like_type?: string }>('POST', `/checkin/toast/${checkin_id}`);
-      return textResult({ toggled: true, checkin_id, result: data?.result, like_type: data?.like_type });
+      return minifiedResult({ toggled: true, checkin_id, result: data?.result, like_type: data?.like_type });
     },
   );
 
@@ -75,7 +75,7 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
     },
     async ({ checkin_id, comment, confirm }) => {
       if (confirm !== true) {
-        return textResult({
+        return minifiedResult({
           dryRun: true,
           action: 'add_comment',
           checkin_id,
@@ -84,7 +84,7 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
         });
       }
       const data = await client.write('POST', `/checkin/addcomment/${checkin_id}`, { form: { comment } });
-      return textResult({ posted: true, checkin_id, response: data });
+      return minifiedResult({ posted: true, checkin_id, response: data });
     },
   );
 
@@ -103,7 +103,7 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
     },
     async ({ comment_id, confirm }) => {
       if (confirm !== true) {
-        return textResult({
+        return minifiedResult({
           dryRun: true,
           action: 'delete_comment',
           comment_id,
@@ -111,7 +111,7 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
         });
       }
       const data = await client.write<{ result?: string }>('POST', `/checkin/deletecomment/${comment_id}`);
-      return textResult({ deleted: true, comment_id, result: data?.result });
+      return minifiedResult({ deleted: true, comment_id, result: data?.result });
     },
   );
 
@@ -130,7 +130,7 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
     },
     async ({ checkin_id, confirm }) => {
       if (confirm !== true) {
-        return textResult({
+        return minifiedResult({
           dryRun: true,
           action: 'delete_checkin',
           checkin_id,
@@ -138,7 +138,7 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
         });
       }
       const data = await client.write<{ result?: string }>('POST', `/checkin/delete/${checkin_id}`);
-      return textResult({ deleted: true, checkin_id, result: data?.result });
+      return minifiedResult({ deleted: true, checkin_id, result: data?.result });
     },
   );
 
@@ -194,7 +194,7 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
         platform: 'ios',
       };
       if (confirm !== true) {
-        return textResult({
+        return minifiedResult({
           dryRun: true,
           action: 'checkin',
           form,
@@ -236,7 +236,7 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
           photo_error = `Check-in ${data?.checkin_id} was created, but Untappd returned no photo upload URL, so no photo was attached.`;
         }
       }
-      return textResult({
+      return minifiedResult({
         checked_in: true,
         checkin_id: data?.checkin_id,
         photo_attached,

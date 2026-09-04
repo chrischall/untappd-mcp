@@ -1,10 +1,16 @@
-// Opt-in slim projections for the fat reverse-engineered list responses. A
+// DEFAULT slim projections for the fat reverse-engineered list responses. A
 // single check-in record is ~5 KB and a beer search item ~1.2 KB, so a page of
 // 25 is a lot of agent context. These project each item down to the fields an
 // agent usually needs, keyed off DOCUMENTED fields only, and derive nothing it
 // can't. Every projector degrades safely: if the expected `<container>.items`
 // array isn't present (the undocumented API drifted), it warns to stderr and
 // returns the RAW response rather than an empty/wrong projection.
+//
+// These were opt-in until the fleet adopted the `view` vocabulary
+// (@chrischall/mcp-utils): the schema said `compact: false` and the tool
+// descriptions asked the caller to please pass `compact=true`. An efficiency
+// that has to be requested is one that usually is not. `view` defaults to
+// `compact` now; `view: "full"` is the way back to the raw record.
 
 type Dict = Record<string, unknown>;
 
@@ -97,3 +103,34 @@ export const compactCheckins = (resp: unknown): unknown => projectItems(resp, 'c
 export const compactBeerSearch = (resp: unknown): unknown => projectItems(resp, 'beers', compactBeerResult);
 export const compactWishlist = (resp: unknown): unknown => projectItems(resp, 'beers', compactWishlistBeer);
 export const compactUserBeers = (resp: unknown): unknown => projectItems(resp, 'beers', compactUserBeer);
+
+/**
+ * The rungs this server honours (`@chrischall/mcp-utils`' `view` vocabulary,
+ * and `chrischall/workflows` `docs/fleet-conventions.md`, "Response shape").
+ *
+ * No `raw`: nothing here re-serialises or normalises a payload, so `full`
+ * already IS the upstream response and a third rung would be a value that
+ * silently aliases to another.
+ *
+ * `compact` is the DEFAULT now, where it used to be `compact: false` with the
+ * tool descriptions asking to please pass `compact=true`. A single check-in
+ * record is ~5 KB and a beer-search item ~1.2 KB, so a default page of 25 was
+ * costing a caller upwards of 100 KB to learn what someone drank — and the
+ * caller paying for it was the one least able to know a slim rung existed.
+ */
+export const UNTAPPD_VIEWS = ['compact', 'full'] as const;
+
+/**
+ * Does this rung ALSO ask Untappd for less?
+ *
+ * `/user/info`, `/beer/info`, `/brewery/info` and `/venue/info` take their own
+ * `compact=true`, which drops the embedded activity and list blocks server
+ * side. That used to be a second, unrelated meaning of the same parameter name
+ * in this repo — one `compact` projecting locally, another forwarded upstream.
+ * They are the same intent, so one `view` now drives both: `compact` asks
+ * Untappd for the slim record AND projects what comes back, which saves the
+ * bandwidth as well as the context.
+ */
+export function upstreamCompact(view: string): 'true' | undefined {
+  return view === 'compact' ? 'true' : undefined;
+}

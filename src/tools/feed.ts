@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { textResult, toolAnnotations } from '@chrischall/mcp-utils';
+import { minifiedResult, resolveView, toolAnnotations, viewParam, viewResult } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
-import { compactCheckins } from '../compact.js';
+import { compactCheckins, UNTAPPD_VIEWS } from '../compact.js';
 
 export function registerFeedTools(server: McpServer, client: UntappdClient): void {
   server.registerTool(
@@ -16,15 +16,13 @@ export function registerFeedTools(server: McpServer, client: UntappdClient): voi
       inputSchema: {
         limit: z.number().int().min(1).max(50).optional().describe('Max check-ins (1–50, default 25)'),
         max_id: z.number().int().positive().optional().describe('Return check-ins older than this id (for paging)'),
-        compact: z
-          .boolean()
-          .optional()
-          .describe('Project each check-in to a slim summary to save context (default false)'),
+        view: viewParam(UNTAPPD_VIEWS, { note: 'compact projects each check-in to {id, user, beer, brewery, venue, rating, comment, toast/comment counts}; "full" returns Untappd\'s whole ~5 KB record.' }),
       },
     },
-    async ({ limit, max_id, compact }) => {
+    async ({ limit, max_id, view }) => {
       const data = await client.get('/checkin/recent', { limit, max_id });
-      return textResult(compact ? compactCheckins(data) : data);
+      const v = resolveView(view, UNTAPPD_VIEWS);
+      return viewResult(v, v === 'compact' ? compactCheckins(data) : data);
     },
   );
 
@@ -42,7 +40,7 @@ export function registerFeedTools(server: McpServer, client: UntappdClient): voi
     },
     async ({ checkin_id }) => {
       const data = await client.get(`/checkin/view/${checkin_id}`);
-      return textResult(data);
+      return minifiedResult(data);
     },
   );
 }
