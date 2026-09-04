@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { minifiedResult, resolveView, toolAnnotations, viewParam, viewResult } from '@chrischall/mcp-utils';
+import { resolveView, toolAnnotations, viewParam, viewResult } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 import { compactBeerSearch, compactCheckins, UNTAPPD_VIEWS, upstreamCompact } from '../compact.js';
 import { beerMetaFrom, type BeerMeta, type CacheStore } from '../cache/store.js';
@@ -46,7 +46,7 @@ export function registerBeerTools(server: McpServer, client: UntappdClient, cach
           .enum(['checkin', 'name', 'count'])
           .optional()
           .describe('Sort order: checkin (relevance, default), name, or count'),
-        view: viewParam(UNTAPPD_VIEWS, { note: 'compact projects each check-in to {id, user, beer, brewery, venue, rating, comment, toast/comment counts}; "full" returns Untappd\'s whole ~5 KB record.' }),
+        view: viewParam(UNTAPPD_VIEWS, { note: 'compact projects each match to {bid, name, style, abv, ibu, brewery, checkin_count, have_had}; "full" returns Untappd\'s whole ~1.2 KB search item, including the long beer_description and the nested brewery record.' }),
       },
     },
     async ({ query, limit, offset, sort, view }) => {
@@ -70,14 +70,17 @@ export function registerBeerTools(server: McpServer, client: UntappdClient, cach
       annotations: toolAnnotations({ title: 'Get Untappd beer detail', readOnly: true, idempotent: true, openWorld: true }),
       inputSchema: {
         bid: BidSchema,
-        view: viewParam(UNTAPPD_VIEWS, { note: 'compact projects each check-in to {id, user, beer, brewery, venue, rating, comment, toast/comment counts}; "full" returns Untappd\'s whole ~5 KB record.' }),
+        // No local projection here: compact is forwarded to Untappd as its OWN
+        // `compact=true`, which drops the embedded recent-activity block server
+        // side. What comes back is passed through on both rungs.
+        view: viewParam(UNTAPPD_VIEWS, { note: 'compact asks Untappd for its own slim record, dropping the embedded recent-activity (media/check-in) block server side; "full" returns the whole record including that activity. No local projection — the beer fields themselves are identical on both rungs.' }),
       },
     },
     async ({ bid, view }) => {
       const v = resolveView(view, UNTAPPD_VIEWS);
       const data = await client.get(`/beer/info/${bid}`, { compact: upstreamCompact(v) });
       await seedBeerMeta(cache, [{ beer: (data as { beer?: unknown })?.beer }]);
-      return minifiedResult(data);
+      return viewResult(v, data);
     },
   );
 

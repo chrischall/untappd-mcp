@@ -290,19 +290,29 @@ describe('read tools', () => {
     expect(get).toHaveBeenCalledWith('/checkin/view/1583983210');
   });
 
-  it('user_wishlist compact projects to slim beers', async () => {
-    get.mockResolvedValueOnce({ beers: { items: [{ created_at: 'd', beer: { bid: 5, beer_name: 'W', beer_style: 'Lager' }, brewery: { brewery_name: 'Br' } }] } });
-    const r = await harness.callTool('untappd_user_wishlist', { username: 'x', compact: true });
+  // These two used to pass `compact: true` — an argument the schema now strips,
+  // so they were green for the wrong reason and would have stayed green with
+  // the default reverted. No argument at all is the actual claim. Their shapes
+  // are also what the tools' `view` notes promise, and the notes were wrong:
+  // both described a CHECK-IN record on tools that return beers.
+  it('user_wishlist projects to slim beers BY DEFAULT — no argument needed', async () => {
+    get.mockResolvedValueOnce({ beers: { items: [{ created_at: 'd', beer: { bid: 5, beer_name: 'W', beer_style: 'Lager', beer_abv: 4.5, beer_ibu: 20 }, brewery: { brewery_name: 'Br' } }] } });
+    const r = await harness.callTool('untappd_user_wishlist', { username: 'x' });
     const item = (parse(r as never).beers as any).items[0];
-    expect(item).toMatchObject({ bid: 5, name: 'W', added_at: 'd' });
+    // Exactly the field set the tool's `view` note names.
+    expect(item).toEqual({ bid: 5, name: 'W', style: 'Lager', abv: 4.5, ibu: 20, brewery: 'Br', added_at: 'd' });
     expect(item.beer).toBeUndefined();
   });
 
-  it('user_beers compact projects to slim beers', async () => {
-    get.mockResolvedValueOnce({ beers: { items: [{ count: 2, beer: { bid: 6, beer_name: 'D' }, brewery: { brewery_name: 'Co' } }] } });
-    const r = await harness.callTool('untappd_user_beers', { username: 'x', compact: true });
+  it('user_beers projects to slim beers BY DEFAULT — no argument needed', async () => {
+    get.mockResolvedValueOnce({ beers: { items: [{ count: 2, user_auth_rating_score: 4, rating_score: 3.7, recent_created_at: 'r', beer: { bid: 6, beer_name: 'D', beer_style: 'IPA', beer_abv: 7, beer_ibu: 60 }, brewery: { brewery_name: 'Co' } }] } });
+    const r = await harness.callTool('untappd_user_beers', { username: 'x' });
     const item = (parse(r as never).beers as any).items[0];
-    expect(item).toMatchObject({ bid: 6, name: 'D', your_count: 2 });
+    // Exactly the field set the tool's `view` note names.
+    expect(item).toEqual({
+      bid: 6, name: 'D', style: 'IPA', abv: 7, ibu: 60, brewery: 'Co',
+      your_count: 2, your_rating: 4, global_rating: 3.7, last_had: 'r',
+    });
   });
 
   it('user_venues hits /user/venues with an explicit username', async () => {
@@ -353,8 +363,10 @@ describe('read tools', () => {
     expect(get).toHaveBeenCalledWith('/thepub/local', { lat: 40.7, lng: -74, limit: undefined, radius: 10 });
   });
 
-  // compact wiring is live for every check-in feed tool (not just search_beer):
-  // a fat checkin must come back slimmed when compact: true.
+  // The projection is live for every check-in feed tool (not just search_beer):
+  // a fat checkin must come back slimmed with NO argument at all. These used to
+  // pass `compact: true`, which the schema now strips — so they were green for
+  // the wrong reason, and would have stayed green with the default reverted.
   const FEED_COMPACT: [string, Record<string, unknown>][] = [
     ['untappd_user_checkins', { username: 'someone' }],
     ['untappd_activity_feed', {}],
@@ -363,14 +375,57 @@ describe('read tools', () => {
     ['untappd_local_checkins', { lat: 1, lng: 2 }],
   ];
   for (const [tool, args] of FEED_COMPACT) {
-    it(`${tool} applies the compact projection`, async () => {
+    it(`${tool} applies the compact projection by default`, async () => {
       get.mockResolvedValueOnce({
         checkins: { items: [{ checkin_id: 7, beer: { bid: 3, beer_name: 'X', beer_style: 'IPA' }, user: { user_name: 'u' } }] },
       });
-      const r = await harness.callTool(tool, { ...args, compact: true });
+      const r = await harness.callTool(tool, args);
       const item = ((parse(r as never).checkins as { items: Record<string, unknown>[] }).items)[0];
       expect(item).toMatchObject({ checkin_id: 7, user: 'u', beer: { bid: 3, name: 'X', style: 'IPA' } });
       expect(item.beer_name).toBeUndefined(); // proves it was projected, not raw
     });
+  }
+
+  // `view` is OUR vocabulary. It names a response shape, and Untappd has never
+  // heard of it. Where a rung does map onto an upstream flag it goes through
+  // `upstreamCompact()`, which yields the API's own `compact: 'true'` — never
+  // the raw rung name. Two sibling repos shipped the leak by taking `async
+  // (args)` and handing the whole object to the request builder, so this
+  // asserts the property directly rather than trusting the destructuring to
+  // stay put.
+  const VIEW_TOOLS: [string, Record<string, unknown>][] = [
+    ['untappd_search_beer', { query: 'a' }],
+    ['untappd_beer_info', { bid: 1 }],
+    ['untappd_beer_activity', { bid: 1 }],
+    ['untappd_brewery_info', { brewery_id: 1 }],
+    ['untappd_venue_info', { venue_id: 1 }],
+    ['untappd_venue_activity', { venue_id: 1 }],
+    ['untappd_user_info', { username: 'someone' }],
+    ['untappd_user_checkins', { username: 'someone' }],
+    ['untappd_user_wishlist', { username: 'someone' }],
+    ['untappd_user_beers', { username: 'someone' }],
+    ['untappd_activity_feed', {}],
+    ['untappd_local_checkins', { lat: 1, lng: 2 }],
+  ];
+  for (const [tool, args] of VIEW_TOOLS) {
+    for (const view of ['compact', 'full'] as const) {
+      it(`${tool} never sends the raw \`view\` string upstream (view: "${view}")`, async () => {
+        get.mockResolvedValueOnce({});
+        await harness.callTool(tool, { ...args, view });
+        expect(get).toHaveBeenCalled();
+        for (const call of get.mock.calls) {
+          const params = call[1] as Record<string, unknown> | undefined;
+          expect(String(call[0])).not.toContain('view');
+          if (params === undefined) continue;
+          expect(Object.keys(params)).not.toContain('view');
+          expect(Object.values(params)).not.toContain('compact');
+          expect(Object.values(params)).not.toContain('full');
+          // The one legitimate mapping, and it is Untappd's spelling, not ours.
+          if ('compact' in params) {
+            expect(params.compact).toBe(view === 'compact' ? 'true' : undefined);
+          }
+        }
+      });
+    }
   }
 });

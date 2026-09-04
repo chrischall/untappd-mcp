@@ -79,7 +79,7 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
           .enum(['date', 'name', 'brewery', 'style', 'rating', 'abv'])
           .optional()
           .describe('Sort order (default date added, newest first)'),
-        view: viewParam(UNTAPPD_VIEWS, { note: 'compact projects each check-in to {id, user, beer, brewery, venue, rating, comment, toast/comment counts}; "full" returns Untappd\'s whole ~5 KB record.' }),
+        view: viewParam(UNTAPPD_VIEWS, { note: 'compact projects each wishlisted beer to {bid, name, style, abv, ibu, brewery, added_at}; "full" returns Untappd\'s whole ~1.2 KB beer record per entry, including the long beer_description and the nested brewery record.' }),
       },
     },
     async ({ username, limit, offset, sort, view }) => {
@@ -105,7 +105,7 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
           .enum(['date', 'checkin', 'highest_rated', 'lowest_rated', 'name', 'this_month', 'highest_abv'])
           .optional()
           .describe('Sort order (default date, most recent first)'),
-        view: viewParam(UNTAPPD_VIEWS, { note: 'compact projects each check-in to {id, user, beer, brewery, venue, rating, comment, toast/comment counts}; "full" returns Untappd\'s whole ~5 KB record.' }),
+        view: viewParam(UNTAPPD_VIEWS, { note: 'compact projects each distinct beer to {bid, name, style, abv, ibu, brewery, your_count, your_rating, global_rating, last_had}; "full" returns Untappd\'s whole ~1.2 KB beer record per entry, including the long beer_description and the nested brewery record.' }),
       },
     },
     async ({ username, limit, offset, sort, view }) => {
