@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { textResult, toolAnnotations, schemaConfirm } from '@chrischall/mcp-utils';
+import { minifiedResult, schemaConfirm, toolAnnotations } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 
 const BidSchema = z.number().int().positive().describe('Untappd beer id (bid) — from untappd_search_beer');
@@ -21,7 +21,7 @@ export function registerWishlistTools(server: McpServer, client: UntappdClient):
     },
     async ({ bid, confirm }) => {
       if (confirm !== true) {
-        return textResult({
+        return minifiedResult({
           dryRun: true,
           action: 'wishlist_add',
           bid,
@@ -29,7 +29,7 @@ export function registerWishlistTools(server: McpServer, client: UntappdClient):
         });
       }
       const data = await client.write<{ result?: string }>('GET', '/user/wishlist/add', { query: { bid } });
-      return textResult({ added: true, bid, result: data?.result });
+      return minifiedResult({ added: true, bid, result: data?.result });
     },
   );
 
@@ -48,7 +48,7 @@ export function registerWishlistTools(server: McpServer, client: UntappdClient):
     },
     async ({ bid, confirm }) => {
       if (confirm !== true) {
-        return textResult({
+        return minifiedResult({
           dryRun: true,
           action: 'wishlist_remove',
           bid,
@@ -56,7 +56,7 @@ export function registerWishlistTools(server: McpServer, client: UntappdClient):
         });
       }
       const data = await client.write<{ result?: string }>('GET', '/user/wishlist/delete', { query: { bid } });
-      return textResult({ removed: true, bid, result: data?.result });
+      return minifiedResult({ removed: true, bid, result: data?.result });
     },
   );
 }

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { textResult, toolAnnotations, createHelpfulError, RateLimitError } from '@chrischall/mcp-utils';
+import { RateLimitError, createHelpfulError, minifiedResult, toolAnnotations } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 import { beerMetaFrom, type BeerMeta, type CacheStore, type SyncState } from '../cache/store.js';
 import { syncCheckins } from '../cache/sync.js';
@@ -131,7 +131,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         maxPages: max_pages ?? 10,
         force: force_backfill ?? false,
       });
-      return textResult(summary);
+      return minifiedResult(summary);
     },
   );
 
@@ -161,7 +161,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
     async ({ username, max_pages }) => {
       const user = resolveUser(username, client.loginName);
       const summary = await syncUserBeers(client, cacheProvider(), user, max_pages ?? 10);
-      return textResult(summary);
+      return minifiedResult(summary);
     },
   );
 
@@ -189,7 +189,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
       const user = resolveUser(username, client.loginName);
       const cache = cacheProvider();
       const result = await cache.hasHad(user, { bid, beerName: beer_name });
-      return textResult({ username: user, query: { bid, beer_name }, ...result, freshness: await freshness(cache, user) });
+      return minifiedResult({ username: user, query: { bid, beer_name }, ...result, freshness: await freshness(cache, user) });
     },
   );
 
@@ -221,7 +221,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         if (r.had) hadCount++;
         results.push({ bid, had: r.had, count: r.count, last_date: r.last_date, best_rating: r.best_rating, sources: r.sources });
       }
-      return textResult({
+      return minifiedResult({
         username: user,
         checked: seen.size,
         had: hadCount,
@@ -260,7 +260,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         if ((await cache.hasHad(user, { bid })).had) had.push(bid);
         else notHad.push(bid);
       }
-      return textResult({
+      return minifiedResult({
         username: user,
         checked: seen.size,
         not_had_count: notHad.length,
@@ -303,7 +303,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
       const user = resolveUser(username, client.loginName);
       const cache = cacheProvider();
       const rows = await cache.query(user, filters);
-      return textResult({ username: user, count: rows.length, filters, results: rows, freshness: await freshness(cache, user) });
+      return minifiedResult({ username: user, count: rows.length, filters, results: rows, freshness: await freshness(cache, user) });
     },
   );
 
@@ -421,7 +421,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         }));
 
       const partial = deferred > 0;
-      return textResult({
+      return minifiedResult({
         username: user,
         ranked,
         summary: {

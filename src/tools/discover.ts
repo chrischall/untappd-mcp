@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { textResult, toolAnnotations } from '@chrischall/mcp-utils';
+import { minifiedResult, resolveView, toolAnnotations, viewParam, viewResult } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
-import { compactCheckins } from '../compact.js';
+import { compactCheckins, UNTAPPD_VIEWS } from '../compact.js';
 
 export function registerDiscoverTools(server: McpServer, client: UntappdClient): void {
   server.registerTool(
@@ -17,7 +17,7 @@ export function registerDiscoverTools(server: McpServer, client: UntappdClient):
     },
     async () => {
       const data = await client.get('/beer/trending');
-      return textResult(data);
+      return minifiedResult(data);
     },
   );
 
@@ -36,7 +36,7 @@ export function registerDiscoverTools(server: McpServer, client: UntappdClient):
     },
     async ({ limit, offset }) => {
       const data = await client.get('/notifications', { limit, offset });
-      return textResult(data);
+      return minifiedResult(data);
     },
   );
 
@@ -53,15 +53,13 @@ export function registerDiscoverTools(server: McpServer, client: UntappdClient):
         lng: z.number().min(-180).max(180).describe('Longitude of the location'),
         limit: z.number().int().min(1).max(50).optional().describe('Max check-ins (1–50, default 25)'),
         radius: z.number().int().min(1).max(25).optional().describe('Search radius (default per Untappd)'),
-        compact: z
-          .boolean()
-          .optional()
-          .describe('Project each check-in to a slim summary to save context (default false)'),
+        view: viewParam(UNTAPPD_VIEWS, { note: 'compact projects each check-in to {id, user, beer, brewery, venue, rating, comment, toast/comment counts}; "full" returns Untappd\'s whole ~5 KB record.' }),
       },
     },
-    async ({ lat, lng, limit, radius, compact }) => {
+    async ({ lat, lng, limit, radius, view }) => {
       const data = await client.get('/thepub/local', { lat, lng, limit, radius });
-      return textResult(compact ? compactCheckins(data) : data);
+      const v = resolveView(view, UNTAPPD_VIEWS);
+      return viewResult(v, v === 'compact' ? compactCheckins(data) : data);
     },
   );
 }

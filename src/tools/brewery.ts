@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { textResult, toolAnnotations } from '@chrischall/mcp-utils';
+import { minifiedResult, resolveView, toolAnnotations, viewParam, viewResult } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
+import { UNTAPPD_VIEWS, upstreamCompact } from '../compact.js';
 
 export function registerBreweryTools(server: McpServer, client: UntappdClient): void {
   server.registerTool(
@@ -20,7 +21,7 @@ export function registerBreweryTools(server: McpServer, client: UntappdClient): 
     },
     async ({ query, limit, offset }) => {
       const data = await client.get('/search/brewery', { q: query, limit, offset });
-      return textResult(data);
+      return minifiedResult(data);
     },
   );
 
@@ -34,12 +35,13 @@ export function registerBreweryTools(server: McpServer, client: UntappdClient): 
       annotations: toolAnnotations({ title: 'Get Untappd brewery detail', readOnly: true, idempotent: true, openWorld: true }),
       inputSchema: {
         brewery_id: z.number().int().positive().describe('Untappd brewery id'),
-        compact: z.boolean().optional().describe('Return a slimmer record without embedded activity (default false)'),
+        view: viewParam(UNTAPPD_VIEWS, { note: 'compact also asks Untappd for its own slim record, dropping the embedded activity/list blocks; "full" returns everything.' }),
       },
     },
-    async ({ brewery_id, compact }) => {
-      const data = await client.get(`/brewery/info/${brewery_id}`, { compact: compact ? 'true' : undefined });
-      return textResult(data);
+    async ({ brewery_id, view }) => {
+      const v = resolveView(view, UNTAPPD_VIEWS);
+      const data = await client.get(`/brewery/info/${brewery_id}`, { compact: upstreamCompact(v) });
+      return viewResult(v, data);
     },
   );
 
@@ -63,7 +65,7 @@ export function registerBreweryTools(server: McpServer, client: UntappdClient): 
     },
     async ({ brewery_id, limit, offset, sort }) => {
       const data = await client.get(`/brewery/beer_list/${brewery_id}`, { limit, offset, sort });
-      return textResult(data);
+      return minifiedResult(data);
     },
   );
 }

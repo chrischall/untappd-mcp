@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { textResult, toolAnnotations, createHelpfulError } from '@chrischall/mcp-utils';
+import { createHelpfulError, minifiedResult, resolveView, toolAnnotations, viewParam, viewResult } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
-import { compactCheckins, compactWishlist, compactUserBeers } from '../compact.js';
+import { compactCheckins, compactWishlist, compactUserBeers, UNTAPPD_VIEWS, upstreamCompact } from '../compact.js';
 
 const UsernameArg = z
   .string()
@@ -32,12 +32,13 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
       annotations: toolAnnotations({ title: 'Get Untappd user profile', readOnly: true, idempotent: true, openWorld: true }),
       inputSchema: {
         username: UsernameArg,
-        compact: z.boolean().optional().describe('Return a slimmer record without embedded lists (default false)'),
+        view: viewParam(UNTAPPD_VIEWS, { note: 'compact also asks Untappd for its own slim record, dropping the embedded activity/list blocks; \'full\' returns everything.' }),
       },
     },
-    async ({ username, compact }) => {
-      const data = await client.get(`/user/info/${resolveUser(username, client.loginName)}`, { compact: compact ? 'true' : undefined });
-      return textResult(data);
+    async ({ username, view }) => {
+      const v = resolveView(view, UNTAPPD_VIEWS);
+      const data = await client.get(`/user/info/${resolveUser(username, client.loginName)}`, { compact: upstreamCompact(v) });
+      return viewResult(v, data);
     },
   );
 
@@ -53,15 +54,13 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
         username: UsernameArg,
         limit: z.number().int().min(1).max(50).optional().describe('Max check-ins (1–50, default 25)'),
         max_id: z.number().int().positive().optional().describe('Return check-ins older than this id (for paging)'),
-        compact: z
-          .boolean()
-          .optional()
-          .describe('Project each check-in to a slim summary to save context (default false)'),
+        view: viewParam(UNTAPPD_VIEWS, { note: 'compact projects each check-in to {id, user, beer, brewery, venue, rating, comment, toast/comment counts}; "full" returns Untappd\'s whole ~5 KB record.' }),
       },
     },
-    async ({ username, limit, max_id, compact }) => {
+    async ({ username, limit, max_id, view }) => {
       const data = await client.get(`/user/checkins/${resolveUser(username, client.loginName)}`, { limit, max_id });
-      return textResult(compact ? compactCheckins(data) : data);
+      const v = resolveView(view, UNTAPPD_VIEWS);
+      return viewResult(v, v === 'compact' ? compactCheckins(data) : data);
     },
   );
 
@@ -80,15 +79,13 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
           .enum(['date', 'name', 'brewery', 'style', 'rating', 'abv'])
           .optional()
           .describe('Sort order (default date added, newest first)'),
-        compact: z
-          .boolean()
-          .optional()
-          .describe('Project each beer to a slim summary (bid, name, brewery, style, abv, added_at) to save context (default false)'),
+        view: viewParam(UNTAPPD_VIEWS, { note: 'compact projects each wishlisted beer to {bid, name, style, abv, ibu, brewery, added_at}; "full" returns Untappd\'s whole ~1.2 KB beer record per entry, including the long beer_description and the nested brewery record.' }),
       },
     },
-    async ({ username, limit, offset, sort, compact }) => {
+    async ({ username, limit, offset, sort, view }) => {
       const data = await client.get(`/user/wishlist/${resolveUser(username, client.loginName)}`, { limit, offset, sort });
-      return textResult(compact ? compactWishlist(data) : data);
+      const v = resolveView(view, UNTAPPD_VIEWS);
+      return viewResult(v, v === 'compact' ? compactWishlist(data) : data);
     },
   );
 
@@ -108,15 +105,13 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
           .enum(['date', 'checkin', 'highest_rated', 'lowest_rated', 'name', 'this_month', 'highest_abv'])
           .optional()
           .describe('Sort order (default date, most recent first)'),
-        compact: z
-          .boolean()
-          .optional()
-          .describe('Project each beer to a slim summary (bid, name, brewery, style, abv, ibu, your_count, your_rating, global_rating, last_had) to save context (default false)'),
+        view: viewParam(UNTAPPD_VIEWS, { note: 'compact projects each distinct beer to {bid, name, style, abv, ibu, brewery, your_count, your_rating, global_rating, last_had}; "full" returns Untappd\'s whole ~1.2 KB beer record per entry, including the long beer_description and the nested brewery record.' }),
       },
     },
-    async ({ username, limit, offset, sort, compact }) => {
+    async ({ username, limit, offset, sort, view }) => {
       const data = await client.get(`/user/beers/${resolveUser(username, client.loginName)}`, { limit, offset, sort });
-      return textResult(compact ? compactUserBeers(data) : data);
+      const v = resolveView(view, UNTAPPD_VIEWS);
+      return viewResult(v, v === 'compact' ? compactUserBeers(data) : data);
     },
   );
 
@@ -134,7 +129,7 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
     },
     async ({ username, limit, offset }) => {
       const data = await client.get(`/user/badges/${resolveUser(username, client.loginName)}`, { limit, offset });
-      return textResult(data);
+      return minifiedResult(data);
     },
   );
 
@@ -152,7 +147,7 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
     },
     async ({ username, limit, offset }) => {
       const data = await client.get(`/user/friends/${resolveUser(username, client.loginName)}`, { limit, offset });
-      return textResult(data);
+      return minifiedResult(data);
     },
   );
 
@@ -176,7 +171,7 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
     },
     async ({ username, limit, offset, sort }) => {
       const data = await client.get(`/user/venues/${resolveUser(username, client.loginName)}`, { limit, offset, sort });
-      return textResult(data);
+      return minifiedResult(data);
     },
   );
 
@@ -195,7 +190,7 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
     },
     async ({ limit, offset }) => {
       const data = await client.get('/user/pending', { limit, offset });
-      return textResult(data);
+      return minifiedResult(data);
     },
   );
 }

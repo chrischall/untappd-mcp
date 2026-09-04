@@ -71,9 +71,17 @@ Two auth quirks worth knowing:
 - No "has user X had beer Y" endpoint exists at all. That absence is the entire
   reason the local cache exists.
 - **Fat, drifty payloads.** A check-in record is ~5 KB. `src/compact.ts` holds
-  opt-in slim projections; each one degrades safely — if `<container>.items`
-  isn't where expected it warns to stderr and returns the RAW response rather
-  than an empty projection.
+  the slim projections, reached through the fleet `view` parameter and applied
+  **by default** (`view: 'full'` is the way back to the whole record); each one
+  degrades safely — if `<container>.items` isn't where expected it warns to
+  stderr and returns the RAW response rather than an empty projection.
+- **`view` never leaves this process.** It names a response shape and Untappd
+  has never heard of it. Four `*/info` endpoints take their *own* `compact=true`
+  (it drops the embedded activity/list blocks server side), and that is the one
+  place a rung reaches upstream — through `upstreamCompact()`, which yields
+  Untappd's spelling, never ours. Destructure `view` out of a handler's
+  arguments; never hand the whole argument object to `client.get`.
+  `tests/tools/read.test.ts` asserts this on every view-taking tool.
 - Shape landmines seen live: `venue: []` when a check-in has no venue (hence
   `asDict` in `store.ts`), and rating fields that appear as
   `user_rating_score` *or* `user_auth_rating_score`.
