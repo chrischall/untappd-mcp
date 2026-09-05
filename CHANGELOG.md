@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.1](https://github.com/chrischall/untappd-mcp/compare/v1.10.0...v1.10.1) (2026-09-04)
+
+
+### Documentation
+
+* **skill:** document the `view` response-shape parameter ([#159](https://github.com/chrischall/untappd-mcp/issues/159)) ([101b254](https://github.com/chrischall/untappd-mcp/commit/101b2541115bf8a2e2ffe5e6ec4124f0671ef234))
+
 ## [1.10.0](https://github.com/chrischall/untappd-mcp/compare/v1.9.2...v1.10.0) (2026-09-04)
 
 
