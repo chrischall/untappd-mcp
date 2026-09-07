@@ -59,7 +59,7 @@ and you still get compact. `view: "full"` is the only way back.
 
 Compact comes in two tiers here, and they are not the same thing:
 
-**A hand-written field projection — 8 tools.**
+**A hand-written field projection — 9 tools.**
 
 - Check-ins (`untappd_activity_feed`, `untappd_user_checkins`,
   `untappd_beer_activity`, `untappd_venue_activity`,
@@ -73,6 +73,16 @@ Compact comes in two tiers here, and they are not the same thing:
 - `untappd_user_wishlist`: the same beer core plus `added_at`.
 - `untappd_user_beers`: the same beer core plus `your_count`, `your_rating`,
   `global_rating`, `last_had`.
+- `untappd_brewery_beers`: the same beer core plus `rating`, `rating_count`,
+  `checkin_count`, `have_had`, `your_count`. It has its **own** projector
+  rather than sharing `untappd_search_beer`'s, and the reason is a trap worth
+  knowing: the item shape is identically `{beer:{…}}`-wrapped, but this
+  endpoint spells the two surrounding fields `total_count` / `has_had` where
+  `/search/beer` says `checkin_count` / `have_had`. Sharing the projector
+  would return beers with no check-ins that you had never had, and the
+  drift guard would not fire — the container was where it was expected. Per
+  page it also drops `sorting_options` and the copy of the same brewery
+  object repeated on every row.
 
 **An upstream request for less — 4 tools.** `untappd_user_info`,
 `untappd_beer_info`, `untappd_brewery_info` and `untappd_venue_info` forward
@@ -127,14 +137,8 @@ parameter, because an undeclared key is dropped by zod without a warning:
   for and **no slim option exists**.
 
   `untappd_brewery_beers` **used to be tenth on this list and no longer is**
-  (#161). It now takes a `view` with a projector of its own. It needed one
-  rather than reusing the beer-search projector for a reason worth carrying:
-  the item shape *is* `{beer:{…}}`-wrapped, so the shared `beerCore` fits — but
-  this endpoint spells the two fields around it `total_count` / `has_had`,
-  where `/search/beer` says `checkin_count` / `have_had`. The obvious reuse
-  would have returned a page of beers with no check-ins that you had never had,
-  and the drift guard would not have fired, because the container was exactly
-  where it was expected. The shape was settled against a live capture.
+  (#161) — it takes a `view` now, and its field shape is documented with the
+  other projections above.
 
 ## Write tools (confirm-gated — these post to your public account)
 
