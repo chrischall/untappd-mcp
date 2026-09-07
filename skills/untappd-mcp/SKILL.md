@@ -42,7 +42,7 @@ Most user tools default `username` to your configured account when omitted.
 
 ## Response shape (`view`)
 
-Twelve of this server's 45 tools take `view: "compact" | "full"`, and
+Thirteen of this server's 45 tools take `view: "compact" | "full"`, and
 **`compact` is the DEFAULT** — the slim rung is what you get without asking
 for it.
 
@@ -94,7 +94,7 @@ silently manufactured.
 `full` already IS the upstream response and a third value would silently alias
 one that exists.
 
-### The 33 tools without `view`
+### The 32 tools without `view`
 
 Each for its own reason — and none of them will tell you it ignored the
 parameter, because an undeclared key is dropped by zod without a warning:
@@ -119,15 +119,22 @@ parameter, because an undeclared key is dropped by zod without a warning:
   second projection on top of it would fight the first.
 - **`untappd_resolve`, `untappd_open_url`, `untappd_healthcheck`** return a
   verdict or a diagnostic.
-- **The remaining ten reads** — `untappd_trending`, `untappd_notifications`,
-  `untappd_brewery_beers`, `untappd_search_brewery`, `untappd_search_venue`,
-  `untappd_user_badges`, `untappd_user_friends`, `untappd_user_venues`,
-  `untappd_pending_friends`, `untappd_venue_by_foursquare` — hand back
-  Untappd's payload as it arrived. No projector has been written for their
-  shapes, so there is no rung to ask for and **no slim option exists**.
-  `untappd_brewery_beers` is the one worth budgeting for: it returns a beer
-  list, which is the shape the beer projectors handle, but it is not wired to
-  one — a 50-beer page arrives as 50 full records.
+- **The remaining nine reads** — `untappd_trending`, `untappd_notifications`,
+  `untappd_search_brewery`, `untappd_search_venue`, `untappd_user_badges`,
+  `untappd_user_friends`, `untappd_user_venues`, `untappd_pending_friends`,
+  `untappd_venue_by_foursquare` — hand back Untappd's payload as it arrived.
+  No projector has been written for their shapes, so there is no rung to ask
+  for and **no slim option exists**.
+
+  `untappd_brewery_beers` **used to be tenth on this list and no longer is**
+  (#161). It now takes a `view` with a projector of its own. It needed one
+  rather than reusing the beer-search projector for a reason worth carrying:
+  the item shape *is* `{beer:{…}}`-wrapped, so the shared `beerCore` fits — but
+  this endpoint spells the two fields around it `total_count` / `has_had`,
+  where `/search/beer` says `checkin_count` / `have_had`. The obvious reuse
+  would have returned a page of beers with no check-ins that you had never had,
+  and the drift guard would not have fired, because the container was exactly
+  where it was expected. The shape was settled against a live capture.
 
 ## Write tools (confirm-gated — these post to your public account)
 

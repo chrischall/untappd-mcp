@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { minifiedResult, resolveView, toolAnnotations, viewParam, viewResult } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
-import { UNTAPPD_VIEWS, upstreamCompact } from '../compact.js';
+import { UNTAPPD_VIEWS, compactBreweryBeers, upstreamCompact } from '../compact.js';
 
 export function registerBreweryTools(server: McpServer, client: UntappdClient): void {
   server.registerTool(
@@ -61,11 +61,20 @@ export function registerBreweryTools(server: McpServer, client: UntappdClient): 
           .enum(['name', 'style', 'abv', 'rating', 'count'])
           .optional()
           .describe('Sort order (default by popularity)'),
+        view: viewParam(UNTAPPD_VIEWS, {
+          note: 'compact keeps each beer\'s identity, rating and counts and drops the description, label URLs and the copy of this brewery repeated on every row; "full" returns Untappd\'s whole page.',
+        }),
       },
     },
-    async ({ brewery_id, limit, offset, sort }) => {
+    // Unlike its `/brewery/info` sibling above, this rung is NOT forwarded to
+    // Untappd: `/brewery/beer_list/` is not one of the endpoints documented to
+    // honour an upstream `compact`, and sending an unverified parameter to see
+    // what happens is not a rung. The projection is entirely ours and is
+    // grounded on a live capture — see `compactBreweryBeer`.
+    async ({ brewery_id, limit, offset, sort, view }) => {
+      const v = resolveView(view, UNTAPPD_VIEWS);
       const data = await client.get(`/brewery/beer_list/${brewery_id}`, { limit, offset, sort });
-      return minifiedResult(data);
+      return viewResult(v, v === 'compact' ? compactBreweryBeers(data) : data);
     },
   );
 }
