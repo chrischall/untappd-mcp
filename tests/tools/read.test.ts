@@ -22,6 +22,34 @@ function parse(result: { content: { text: string }[] }): Record<string, unknown>
   return JSON.parse(result.content[0].text);
 }
 
+// Trimmed from a live /brewery/beer_list/1142 capture.
+const BREWERY_PAGE = {
+  total_count: 723,
+  beers: {
+    count: 1,
+    items: [
+      {
+        total_user_count: 0,
+        has_had: false,
+        total_count: 1303919,
+        beer: {
+          bid: 6284,
+          beer_name: 'Pale Ale',
+          beer_label: 'https://assets.untappd.com/site/beer_logos/beer-6284_5418f_sm.jpeg',
+          beer_style: 'Pale Ale - American',
+          beer_abv: 5.6,
+          beer_description: 'z'.repeat(300),
+          rating_score: 3.62,
+          rating_count: 550296,
+        },
+        brewery: { brewery_id: 1142, brewery_name: 'Sierra Nevada Brewing Co.', contact: { url: 'https://x' } },
+        friends: [],
+      },
+    ],
+  },
+  sorting_options: [{ sort_key: 'most_popular', sort_name: 'Most Popular' }],
+};
+
 describe('read tools', () => {
   it('setup', async () => {
     harness = await createTestHarness((server) => {
@@ -343,6 +371,42 @@ describe('read tools', () => {
     get.mockResolvedValueOnce({ beers: {} });
     await harness.callTool('untappd_brewery_beers', { brewery_id: 5143, sort: 'rating' });
     expect(get).toHaveBeenCalledWith('/brewery/beer_list/5143', { limit: undefined, offset: undefined, sort: 'rating' });
+  });
+
+  // A page here is up to 50 beers, each carrying a description, two label URLs
+  // and a full copy of the SAME brewery object. `view` is not forwarded to
+  // Untappd — this endpoint's slimming is ours, unlike the /*/info tools that
+  // take an upstream `compact`.
+  it('brewery_beers projects BY DEFAULT and keeps view out of the query string', async () => {
+    get.mockResolvedValueOnce(BREWERY_PAGE);
+    const text = ((await harness.callTool('untappd_brewery_beers', { brewery_id: 1142 })).content[0] as {
+      text: string;
+    }).text;
+    expect(get).toHaveBeenCalledWith('/brewery/beer_list/1142', { limit: undefined, offset: undefined, sort: undefined });
+    const out = JSON.parse(text);
+    expect(out.beers.items[0]).toEqual({
+      bid: 6284,
+      name: 'Pale Ale',
+      style: 'Pale Ale - American',
+      abv: 5.6,
+      ibu: undefined,
+      brewery: 'Sierra Nevada Brewing Co.',
+      rating: 3.62,
+      rating_count: 550296,
+      checkin_count: 1303919,
+      have_had: false,
+      your_count: 0,
+    });
+    expect(text).not.toContain('beer_label');
+    expect(text).not.toContain('sorting_options');
+  });
+
+  it('brewery_beers returns the whole page on view:"full"', async () => {
+    get.mockResolvedValueOnce(BREWERY_PAGE);
+    const text = ((await harness.callTool('untappd_brewery_beers', { brewery_id: 1142, view: 'full' })).content[0] as {
+      text: string;
+    }).text;
+    expect(JSON.parse(text)).toEqual(BREWERY_PAGE);
   });
 
   it('trending calls /beer/trending', async () => {

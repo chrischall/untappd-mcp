@@ -84,6 +84,37 @@ export function compactUserBeer(item: unknown): Dict {
 }
 
 /**
+ * Slim one `/brewery/beer_list/` item.
+ *
+ * This endpoint needs its OWN projector rather than reusing
+ * {@link compactBeerResult}, and the reason is easy to miss: the item shape IS
+ * `{beer:{…}, brewery:{…}}`-wrapped, so `beerCore` fits perfectly — but the two
+ * fields the search projector adds on top of it are named differently here.
+ * `/search/beer` says `checkin_count` / `have_had`; `/brewery/beer_list/` says
+ * `total_count` / `has_had`. Reusing the search projector would therefore have
+ * emitted a page of records carrying two silent `undefined`s — a beer with no
+ * check-ins that you have never had — and `projectItems`' drift guard cannot
+ * catch that, because the CONTAINER is exactly where it expects it to be.
+ * Established against a live capture of brewery 1142, not by inference.
+ *
+ * Rating rides along because the tool's own description promises "per-beer
+ * rating and check-in counts"; a compact rung that dropped them would
+ * contradict the thing the caller was told they were getting.
+ */
+export function compactBreweryBeer(item: unknown): Dict {
+  const i = asDict(item) ?? {};
+  const beer = asDict(i.beer) ?? {};
+  return {
+    ...beerCore(i),
+    rating: beer.rating_score,
+    rating_count: beer.rating_count,
+    checkin_count: i.total_count,
+    have_had: i.has_had,
+    your_count: i.total_user_count,
+  };
+}
+
+/**
  * Project `<container>.items` in a response with `mapFn`, preserving the rest of
  * the container (pagination etc.). Drift-safe: returns the raw response
  * unchanged (with a stderr warning) when the array isn't where expected.
@@ -103,6 +134,22 @@ export const compactCheckins = (resp: unknown): unknown => projectItems(resp, 'c
 export const compactBeerSearch = (resp: unknown): unknown => projectItems(resp, 'beers', compactBeerResult);
 export const compactWishlist = (resp: unknown): unknown => projectItems(resp, 'beers', compactWishlistBeer);
 export const compactUserBeers = (resp: unknown): unknown => projectItems(resp, 'beers', compactUserBeer);
+
+/**
+ * Project a brewery beer list, and drop `sorting_options` with it.
+ *
+ * `sorting_options` is 16 `{sort_key, sort_name}` pairs of UI chrome repeated on
+ * every page. The tool's `sort` parameter is already a closed enum on its input
+ * schema, so the list tells a caller nothing they were not handed with the
+ * schema — it is pure duplication of a contract they already hold.
+ */
+export function compactBreweryBeers(resp: unknown): unknown {
+  const projected = projectItems(resp, 'beers', compactBreweryBeer);
+  // projectItems returns the SAME object on drift; don't reshape that.
+  if (projected === resp) return resp;
+  const { sorting_options: _dropped, ...rest } = projected as Dict;
+  return rest;
+}
 
 /**
  * The rungs this server honours (`@chrischall/mcp-utils`' `view` vocabulary,
