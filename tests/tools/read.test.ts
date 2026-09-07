@@ -470,6 +470,9 @@ describe('read tools', () => {
     ['untappd_user_beers', { username: 'someone' }],
     ['untappd_activity_feed', {}],
     ['untappd_local_checkins', { lat: 1, lng: 2 }],
+    // Its rung is purely local — unlike the four `*/info` tools above, nothing
+    // is forwarded to Untappd — so this invariant is exactly what proves it.
+    ['untappd_brewery_beers', { brewery_id: 1 }],
   ];
   for (const [tool, args] of VIEW_TOOLS) {
     for (const view of ['compact', 'full'] as const) {
