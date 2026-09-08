@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.11.1](https://github.com/chrischall/untappd-mcp/compare/v1.11.0...v1.11.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* **deps-dev:** bump @types/node in the dev-dependencies group ([#168](https://github.com/chrischall/untappd-mcp/issues/168)) ([0e973c7](https://github.com/chrischall/untappd-mcp/commit/0e973c7316e680ef4bc133b91a7b0b4966fb015d))
+* **deps-dev:** bump the vitest group with 2 updates ([#167](https://github.com/chrischall/untappd-mcp/issues/167)) ([144044a](https://github.com/chrischall/untappd-mcp/commit/144044abfddf5bdff51f9c616ad0d053d54ed77f))
+* **deps:** bump the production-dependencies group with 2 updates ([#169](https://github.com/chrischall/untappd-mcp/issues/169)) ([dee5dde](https://github.com/chrischall/untappd-mcp/commit/dee5dde046b66bf4d7eeaaa555470f1dbcc4930e))
+
 ## [1.11.0](https://github.com/chrischall/untappd-mcp/compare/v1.10.1...v1.11.0) (2026-09-07)
 
 
