@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.11.0](https://github.com/chrischall/untappd-mcp/compare/v1.10.1...v1.11.0) (2026-09-07)
+
+
+### Features
+
+* **brewery:** untappd_brewery_beers takes a view, on a projector of its own ([#162](https://github.com/chrischall/untappd-mcp/issues/162)) ([906de91](https://github.com/chrischall/untappd-mcp/commit/906de916242f486714a682b9bb8a4deef0936dc2)), closes [#161](https://github.com/chrischall/untappd-mcp/issues/161)
+
+
+### Documentation
+
+* **skill:** document brewery_beers' compact shape with the other projections ([#165](https://github.com/chrischall/untappd-mcp/issues/165)) ([9f03b8b](https://github.com/chrischall/untappd-mcp/commit/9f03b8b893057bc62628ecb15a7a25b5621c8e2c)), closes [#163](https://github.com/chrischall/untappd-mcp/issues/163)
+
 ## [1.10.1](https://github.com/chrischall/untappd-mcp/compare/v1.10.0...v1.10.1) (2026-09-04)
 
 
