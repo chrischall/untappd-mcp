@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.2](https://github.com/chrischall/untappd-mcp/compare/v1.11.1...v1.11.2) (2026-09-08)
+
+
+### Bug Fixes
+
+* **deps:** bump fast-uri from 3.1.5 to 3.1.7 ([#171](https://github.com/chrischall/untappd-mcp/issues/171)) ([960e6bd](https://github.com/chrischall/untappd-mcp/commit/960e6bd9dd8a68845ced588b6cd3c7212d631835))
+
 ## [1.11.1](https://github.com/chrischall/untappd-mcp/compare/v1.11.0...v1.11.1) (2026-09-08)
 
 
