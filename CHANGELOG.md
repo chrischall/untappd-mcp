@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.11.3](https://github.com/chrischall/untappd-mcp/compare/v1.11.2...v1.11.3) (2026-09-10)
+
+
+### Bug Fixes
+
+* **deps:** @chrischall/mcp-utils 0.26.1 ([#174](https://github.com/chrischall/untappd-mcp/issues/174)) ([8995ce3](https://github.com/chrischall/untappd-mcp/commit/8995ce34c0a43f208fc3b1bf100abce01762e383))
+* **deps:** declare the peer floors mcp-utils 0.26.1 requires ([#176](https://github.com/chrischall/untappd-mcp/issues/176)) ([4370c6c](https://github.com/chrischall/untappd-mcp/commit/4370c6ce7920da77c24877445c6d49dffa483d00))
+
 ## [1.11.2](https://github.com/chrischall/untappd-mcp/compare/v1.11.1...v1.11.2) (2026-09-08)
 
 
