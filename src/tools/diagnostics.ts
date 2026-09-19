@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 
 // Small helpers so the live build's exact toolset is visible from the client
 // (via untappd_healthcheck) and from server logs (a startup line). This is how

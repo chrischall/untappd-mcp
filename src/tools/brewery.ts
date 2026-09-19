@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { minifiedResult, resolveView, toolAnnotations, viewParam, viewResult } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 import { UNTAPPD_VIEWS, compactBreweryBeers, upstreamCompact } from '../compact.js';
@@ -13,11 +13,11 @@ export function registerBreweryTools(server: McpServer, client: UntappdClient): 
         'Search Untappd for breweries by name. Returns matches with their brewery id, location, type, and beer ' +
         'count. Feed a brewery id into untappd_brewery_info for full detail. Read-only.',
       annotations: toolAnnotations({ title: 'Search Untappd breweries', readOnly: true, idempotent: true, openWorld: true }),
-      inputSchema: {
+      inputSchema: z.object({
         query: z.string().min(1).describe('Brewery name to search for'),
         limit: z.number().int().min(1).max(50).optional().describe('Max results (1–50, default 25)'),
         offset: z.number().int().min(0).optional().describe('Result offset for paging (default 0)'),
-      },
+      }),
     },
     async ({ query, limit, offset }) => {
       const data = await client.get('/search/brewery', { q: query, limit, offset });
@@ -33,10 +33,10 @@ export function registerBreweryTools(server: McpServer, client: UntappdClient): 
         'Get full detail for a brewery by its Untappd brewery id: description, location, type, rating, total ' +
         'check-ins, and popular beers. Get an id from untappd_search_brewery. Read-only.',
       annotations: toolAnnotations({ title: 'Get Untappd brewery detail', readOnly: true, idempotent: true, openWorld: true }),
-      inputSchema: {
+      inputSchema: z.object({
         brewery_id: z.number().int().positive().describe('Untappd brewery id'),
         view: viewParam(UNTAPPD_VIEWS, { note: 'compact also asks Untappd for its own slim record, dropping the embedded activity/list blocks; "full" returns everything.' }),
-      },
+      }),
     },
     async ({ brewery_id, view }) => {
       const v = resolveView(view, UNTAPPD_VIEWS);
@@ -53,7 +53,7 @@ export function registerBreweryTools(server: McpServer, client: UntappdClient): 
         'Get the beers a brewery makes, by brewery id, with per-beer rating and check-in counts. Supports sorting ' +
         'and paging. Get an id from untappd_search_brewery. Read-only.',
       annotations: toolAnnotations({ title: "Get a brewery's beer list", readOnly: true, idempotent: true, openWorld: true }),
-      inputSchema: {
+      inputSchema: z.object({
         brewery_id: z.number().int().positive().describe('Untappd brewery id'),
         limit: z.number().int().min(1).max(50).optional().describe('Max beers (1–50, default 25)'),
         offset: z.number().int().min(0).optional().describe('Result offset for paging (default 0)'),
@@ -64,7 +64,7 @@ export function registerBreweryTools(server: McpServer, client: UntappdClient): 
         view: viewParam(UNTAPPD_VIEWS, {
           note: 'compact keeps each beer\'s identity, rating and counts and drops the description, label URLs and the copy of this brewery repeated on every row; "full" returns Untappd\'s whole page.',
         }),
-      },
+      }),
     },
     // Unlike its `/brewery/info` sibling above, this rung is NOT forwarded to
     // Untappd: `/brewery/beer_list/` is not one of the endpoints documented to

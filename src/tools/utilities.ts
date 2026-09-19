@@ -1,4 +1,5 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from 'zod';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { minifiedResult, toolAnnotations } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 import { VERSION } from '../version.js';
@@ -15,7 +16,7 @@ export function registerUtilityTools(server: McpServer, client: UntappdClient): 
         'and the exact set of tools this build exposes (count, a stable hash, and their names) so you can confirm ' +
         'which build is live. Read-only.',
       annotations: toolAnnotations({ title: 'Untappd healthcheck', readOnly: true, idempotent: true, openWorld: true }),
-      inputSchema: {},
+      inputSchema: z.object({}),
     },
     async () => {
       // Always report build/tool diagnostics, even when credentials are absent,

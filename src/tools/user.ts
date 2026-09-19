@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { createHelpfulError, minifiedResult, resolveView, toolAnnotations, viewParam, viewResult } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 import { compactCheckins, compactWishlist, compactUserBeers, UNTAPPD_VIEWS, upstreamCompact } from '../compact.js';
@@ -30,10 +30,10 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
         "Get an Untappd user's profile: bio, location, total check-ins, distinct beers, badges, and stats. " +
         'Omit username for your own account. Read-only.',
       annotations: toolAnnotations({ title: 'Get Untappd user profile', readOnly: true, idempotent: true, openWorld: true }),
-      inputSchema: {
+      inputSchema: z.object({
         username: UsernameArg,
         view: viewParam(UNTAPPD_VIEWS, { note: 'compact also asks Untappd for its own slim record, dropping the embedded activity/list blocks; \'full\' returns everything.' }),
-      },
+      }),
     },
     async ({ username, view }) => {
       const v = resolveView(view, UNTAPPD_VIEWS);
@@ -50,12 +50,12 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
         "Get a user's recent check-ins (most recent first): the beer, rating, comment, venue, and toasts/comments. " +
         'Page backwards with max_id (the pagination.max_id from a prior call). Omit username for your own. Read-only.',
       annotations: toolAnnotations({ title: 'Get Untappd user check-ins', readOnly: true, idempotent: true, openWorld: true }),
-      inputSchema: {
+      inputSchema: z.object({
         username: UsernameArg,
         limit: z.number().int().min(1).max(50).optional().describe('Max check-ins (1–50, default 25)'),
         max_id: z.number().int().positive().optional().describe('Return check-ins older than this id (for paging)'),
         view: viewParam(UNTAPPD_VIEWS, { note: 'compact projects each check-in to {id, user, beer, brewery, venue, rating, comment, toast/comment counts}; "full" returns Untappd\'s whole ~5 KB record.' }),
-      },
+      }),
     },
     async ({ username, limit, max_id, view }) => {
       const data = await client.get(`/user/checkins/${resolveUser(username, client.loginName)}`, { limit, max_id });
@@ -71,7 +71,7 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
       description:
         "Get the beers on a user's wishlist. Supports sorting and paging. Omit username for your own account. Read-only.",
       annotations: toolAnnotations({ title: 'Get Untappd user wishlist', readOnly: true, idempotent: true, openWorld: true }),
-      inputSchema: {
+      inputSchema: z.object({
         username: UsernameArg,
         limit: z.number().int().min(1).max(50).optional().describe('Max beers (1–50, default 25)'),
         offset: z.number().int().min(0).optional().describe('Result offset for paging (default 0)'),
@@ -80,7 +80,7 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
           .optional()
           .describe('Sort order (default date added, newest first)'),
         view: viewParam(UNTAPPD_VIEWS, { note: 'compact projects each wishlisted beer to {bid, name, style, abv, ibu, brewery, added_at}; "full" returns Untappd\'s whole ~1.2 KB beer record per entry, including the long beer_description and the nested brewery record.' }),
-      },
+      }),
     },
     async ({ username, limit, offset, sort, view }) => {
       const data = await client.get(`/user/wishlist/${resolveUser(username, client.loginName)}`, { limit, offset, sort });
@@ -97,7 +97,7 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
         "Get the distinct (unique) beers a user has ever checked in, with their rating and check-in count per beer. " +
         'Supports sorting and paging. Omit username for your own account. Read-only.',
       annotations: toolAnnotations({ title: 'Get Untappd distinct beers', readOnly: true, idempotent: true, openWorld: true }),
-      inputSchema: {
+      inputSchema: z.object({
         username: UsernameArg,
         limit: z.number().int().min(1).max(50).optional().describe('Max beers (1–50, default 25)'),
         offset: z.number().int().min(0).optional().describe('Result offset for paging (default 0)'),
@@ -106,7 +106,7 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
           .optional()
           .describe('Sort order (default date, most recent first)'),
         view: viewParam(UNTAPPD_VIEWS, { note: 'compact projects each distinct beer to {bid, name, style, abv, ibu, brewery, your_count, your_rating, global_rating, last_had}; "full" returns Untappd\'s whole ~1.2 KB beer record per entry, including the long beer_description and the nested brewery record.' }),
-      },
+      }),
     },
     async ({ username, limit, offset, sort, view }) => {
       const data = await client.get(`/user/beers/${resolveUser(username, client.loginName)}`, { limit, offset, sort });
@@ -121,11 +121,11 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
       title: 'Get Untappd user badges',
       description: "Get the badges a user has earned, most recent first. Omit username for your own account. Read-only.",
       annotations: toolAnnotations({ title: 'Get Untappd user badges', readOnly: true, idempotent: true, openWorld: true }),
-      inputSchema: {
+      inputSchema: z.object({
         username: UsernameArg,
         limit: z.number().int().min(1).max(50).optional().describe('Max badges (1–50, default 25)'),
         offset: z.number().int().min(0).optional().describe('Result offset for paging (default 0)'),
-      },
+      }),
     },
     async ({ username, limit, offset }) => {
       const data = await client.get(`/user/badges/${resolveUser(username, client.loginName)}`, { limit, offset });
@@ -139,11 +139,11 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
       title: 'Get Untappd user friends',
       description: "Get a user's friend list. Omit username for your own account. Read-only.",
       annotations: toolAnnotations({ title: 'Get Untappd user friends', readOnly: true, idempotent: true, openWorld: true }),
-      inputSchema: {
+      inputSchema: z.object({
         username: UsernameArg,
         limit: z.number().int().min(1).max(50).optional().describe('Max friends (1–50, default 25)'),
         offset: z.number().int().min(0).optional().describe('Result offset for paging (default 0)'),
-      },
+      }),
     },
     async ({ username, limit, offset }) => {
       const data = await client.get(`/user/friends/${resolveUser(username, client.loginName)}`, { limit, offset });
@@ -159,7 +159,7 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
         "Get the venues a user has checked in at, most recent first, with per-venue check-in counts. Supports " +
         'sorting and paging. Omit username for your own account. Read-only.',
       annotations: toolAnnotations({ title: 'Get venues a user has checked in at', readOnly: true, idempotent: true, openWorld: true }),
-      inputSchema: {
+      inputSchema: z.object({
         username: UsernameArg,
         limit: z.number().int().min(1).max(50).optional().describe('Max venues (1–50, default 25)'),
         offset: z.number().int().min(0).optional().describe('Result offset for paging (default 0)'),
@@ -167,7 +167,7 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
           .enum(['date', 'name', 'checkin', 'highest_rated'])
           .optional()
           .describe('Sort order (default most recent)'),
-      },
+      }),
     },
     async ({ username, limit, offset, sort }) => {
       const data = await client.get(`/user/venues/${resolveUser(username, client.loginName)}`, { limit, offset, sort });
@@ -183,10 +183,10 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
         'Get the incoming friend requests waiting on YOUR account — the users who have requested to be your ' +
         'friend. Read-only.',
       annotations: toolAnnotations({ title: 'Get your pending friend requests', readOnly: true, idempotent: true, openWorld: true }),
-      inputSchema: {
+      inputSchema: z.object({
         limit: z.number().int().min(1).max(50).optional().describe('Max requests (1–50, default 25)'),
         offset: z.number().int().min(0).optional().describe('Result offset for paging (default 0)'),
-      },
+      }),
     },
     async ({ limit, offset }) => {
       const data = await client.get('/user/pending', { limit, offset });
