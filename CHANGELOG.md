@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.0.0](https://github.com/chrischall/untappd-mcp/compare/v1.11.4...v2.0.0) (2026-09-19)
+
+
+### ⚠ BREAKING CHANGES
+
+* **mcp:** migrate server to SDK v2 ([#181](https://github.com/chrischall/untappd-mcp/issues/181))
+
+### Features
+
+* **mcp:** migrate server to SDK v2 ([#181](https://github.com/chrischall/untappd-mcp/issues/181)) ([9083067](https://github.com/chrischall/untappd-mcp/commit/9083067f40c6c212ccf8aab23771e3038546e976))
+
 ## [1.11.4](https://github.com/chrischall/untappd-mcp/compare/v1.11.3...v1.11.4) (2026-09-16)
 
 
