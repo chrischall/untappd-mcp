@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { minifiedResult, schemaConfirm, toolAnnotations } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 
@@ -68,10 +68,10 @@ export function registerFriendActionTools(server: McpServer, client: UntappdClie
           'performs the action. Note: this endpoint path is taken from the Untappd app but is not otherwise ' +
           'independently verified.',
         annotations: toolAnnotations({ title: action.title, readOnly: false, idempotent: true, openWorld: true }),
-        inputSchema: {
+        inputSchema: z.object({
           target_uid: TargetUidSchema,
           confirm: schemaConfirm,
-        },
+        }),
       },
       async ({ target_uid, confirm }) => {
         if (confirm !== true) {

@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { extname } from 'node:path';
 import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { McpToolError, createHelpfulError, fileBlob, messageOf, minifiedResult, schemaConfirm, toolAnnotations } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 
@@ -40,10 +40,10 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
         'already toasted removes the toast. Without confirm: true it returns a dry-run preview and makes NO network ' +
         'call; with confirm: true it posts. Writes to your Untappd account and is visible to others.',
       annotations: toolAnnotations({ title: 'Toast an Untappd check-in', readOnly: false, idempotent: false, openWorld: true }),
-      inputSchema: {
+      inputSchema: z.object({
         checkin_id: CheckinIdSchema,
         confirm: schemaConfirm,
-      },
+      }),
     },
     async ({ checkin_id, confirm }) => {
       if (confirm !== true) {
@@ -67,11 +67,11 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
         'Post a comment on a check-in from YOUR account. Without confirm: true it returns a dry-run preview and ' +
         'makes NO network call; with confirm: true it posts. Writes to your Untappd account and is visible to others.',
       annotations: toolAnnotations({ title: 'Comment on an Untappd check-in', readOnly: false, idempotent: false, openWorld: true }),
-      inputSchema: {
+      inputSchema: z.object({
         checkin_id: CheckinIdSchema,
         comment: z.string().min(1).max(2000).describe('Comment text to post'),
         confirm: schemaConfirm,
-      },
+      }),
     },
     async ({ checkin_id, comment, confirm }) => {
       if (confirm !== true) {
@@ -96,10 +96,10 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
         'Delete one of YOUR comments by its comment id (the id from a check-in\'s comments list). Without ' +
         'confirm: true it returns a dry-run preview and makes NO network call; with confirm: true it deletes.',
       annotations: toolAnnotations({ title: 'Delete a comment from an Untappd check-in', readOnly: false, idempotent: true, openWorld: true }),
-      inputSchema: {
+      inputSchema: z.object({
         comment_id: z.number().int().positive().describe('Untappd comment id (from a check-in\'s comments.items)'),
         confirm: schemaConfirm,
-      },
+      }),
     },
     async ({ comment_id, confirm }) => {
       if (confirm !== true) {
@@ -123,10 +123,10 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
         'Permanently delete one of YOUR check-ins by its id. This is destructive and cannot be undone. Without ' +
         'confirm: true it returns a dry-run preview and makes NO network call; with confirm: true it deletes.',
       annotations: toolAnnotations({ title: 'Delete an Untappd check-in', readOnly: false, idempotent: true, openWorld: true }),
-      inputSchema: {
+      inputSchema: z.object({
         checkin_id: CheckinIdSchema,
         confirm: schemaConfirm,
-      },
+      }),
     },
     async ({ checkin_id, confirm }) => {
       if (confirm !== true) {
@@ -152,7 +152,7 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
         'foursquare_id, and a local photo via photo_path (JPEG/PNG). Without confirm: true it returns a dry-run ' +
         'preview of the exact fields and makes NO network call; with confirm: true it posts.',
       annotations: toolAnnotations({ title: 'Check in a beer on Untappd', readOnly: false, idempotent: false, openWorld: true }),
-      inputSchema: {
+      inputSchema: z.object({
         bid: z.number().int().positive().describe('Untappd beer id to check in (from untappd_search_beer)'),
         rating: RatingSchema.optional().describe('Rating 0–5 in 0.25 increments (omit for no rating)'),
         shout: z.string().max(2000).optional().describe('Optional shout / comment text for the check-in'),
@@ -166,7 +166,7 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
           .optional()
           .describe('Optional serving container id (e.g. 1 = draft, 2 = bottle, 3 = can)'),
         confirm: schemaConfirm,
-      },
+      }),
     },
     async ({ bid, rating, shout, foursquare_id, photo_path, geolat, geolng, container_id, confirm }) => {
       const { timezone, gmt_offset } = localTimezone();

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { RateLimitError, createHelpfulError, minifiedResult, toolAnnotations } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 import { beerMetaFrom, type BeerMeta, type CacheStore, type SyncState } from '../cache/store.js';
@@ -110,7 +110,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         'total_checkins is cached. Pass force_backfill: true to reset a cache wrongly marked complete and re-page ' +
         'the whole history (cached rows are kept). Omit username for your own account.',
       annotations: toolAnnotations({ title: "Sync a user's check-ins into the cache", readOnly: false, idempotent: false, openWorld: true }),
-      inputSchema: {
+      inputSchema: z.object({
         username: UsernameArg,
         max_pages: z
           .number()
@@ -123,7 +123,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
           .boolean()
           .optional()
           .describe('Reset the sync state (clear backfill_complete + cursors) but KEEP cached rows, then re-page the whole history from newest. Use to recover a cache wrongly marked complete.'),
-      },
+      }),
     },
     async ({ username, max_pages, force_backfill }) => {
       const user = resolveUser(username, client.loginName);
@@ -147,7 +147,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         'per call and persists progress; run again until another_run_needed is false. Feeds the same ' +
         'untappd_cache_has_had / has_had_many / not_had tools. Omit username for your own account.',
       annotations: toolAnnotations({ title: "Sync a user's complete distinct-beers list into the cache", readOnly: false, idempotent: false, openWorld: true }),
-      inputSchema: {
+      inputSchema: z.object({
         username: UsernameArg,
         max_pages: z
           .number()
@@ -156,7 +156,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
           .max(50)
           .optional()
           .describe('Pages (50 beers each) to fetch this run (default 10). Keep modest to respect the ~100 calls/hour rate limit.'),
-      },
+      }),
     },
     async ({ username, max_pages }) => {
       const user = resolveUser(username, client.loginName);
@@ -176,11 +176,11 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         'last date, which sources matched, and any detailed check-ins. Reports per-source freshness so you can ' +
         'caveat incomplete data. Requires bid or beer_name. Run untappd_sync_user_beers first for full coverage.',
       annotations: toolAnnotations({ title: 'Check if a user has had a beer (from the cache)', readOnly: true, idempotent: true, openWorld: false }),
-      inputSchema: {
+      inputSchema: z.object({
         username: UsernameArg,
         bid: z.number().int().positive().optional().describe('Exact Untappd beer id to look for'),
         beer_name: z.string().min(1).optional().describe('Case-insensitive substring match on the beer name'),
-      },
+      }),
     },
     async ({ username, bid, beer_name }) => {
       if (bid === undefined && beer_name === undefined) {
@@ -203,10 +203,10 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         'for checking a whole venue menu at once. Run untappd_sync_user_beers first; the freshness block flags if ' +
         'coverage is incomplete.',
       annotations: toolAnnotations({ title: 'Batch-check many beers against the cache', readOnly: true, idempotent: true, openWorld: false }),
-      inputSchema: {
+      inputSchema: z.object({
         username: UsernameArg,
         bids: z.array(z.number().int().positive()).min(1).max(500).describe('Beer ids to check (1–500)'),
-      },
+      }),
     },
     async ({ username, bids }) => {
       const user = resolveUser(username, client.loginName);
@@ -243,10 +243,10 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         'untappd_sync_user_beers first; if coverage is incomplete the freshness caveat flags that a "not had" may be ' +
         'a false negative.',
       annotations: toolAnnotations({ title: 'From a list of beers, return the ones a user has NOT had', readOnly: true, idempotent: true, openWorld: false }),
-      inputSchema: {
+      inputSchema: z.object({
         username: UsernameArg,
         bids: z.array(z.number().int().positive()).min(1).max(500).describe('Candidate beer ids to filter (1–500)'),
-      },
+      }),
     },
     async ({ username, bids }) => {
       const user = resolveUser(username, client.loginName);
@@ -282,7 +282,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         'for non-self accounts is only the recent window; for full coverage of which beers a user has had, use ' +
         'untappd_cache_has_had / not_had instead. Run untappd_sync_checkins first.',
       annotations: toolAnnotations({ title: 'Query cached check-ins with filters', readOnly: true, idempotent: true, openWorld: false }),
-      inputSchema: {
+      inputSchema: z.object({
         username: UsernameArg,
         brewery_id: z.number().int().positive().optional().describe('Exact brewery id'),
         brewery: z.string().min(1).optional().describe('Case-insensitive substring match on brewery name'),
@@ -297,7 +297,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
           .optional()
           .describe('Sort order (default recent first)'),
         limit: z.number().int().min(1).max(200).optional().describe('Max rows (1–200, default 25)'),
-      },
+      }),
     },
     async ({ username, ...filters }) => {
       const user = resolveUser(username, client.loginName);
@@ -320,7 +320,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         're-running fills the rest. Reports the same freshness/caveat block as untappd_cache_not_had. Omit username ' +
         'for your own account.',
       annotations: toolAnnotations({ title: 'Top-rated beers a user has NOT had, from a candidate list', readOnly: false, idempotent: false, openWorld: true }),
-      inputSchema: {
+      inputSchema: z.object({
         username: UsernameArg,
         bids: z.array(z.number().int().positive()).min(1).max(100).describe('Candidate beer ids (1–100)'),
         top_n: z.number().int().min(1).max(10).optional().describe('How many top beers to return (default 2, max 10)'),
@@ -336,7 +336,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
           .max(100)
           .optional()
           .describe('Max beer/info API calls this run for uncached/stale metadata (default 25). Keep modest to respect the ~100 calls/hour rate limit.'),
-      },
+      }),
     },
     async ({ username, bids, top_n, style, api_budget }) => {
       const user = resolveUser(username, client.loginName);

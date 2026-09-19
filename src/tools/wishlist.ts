@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { minifiedResult, schemaConfirm, toolAnnotations } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 
@@ -14,10 +14,10 @@ export function registerWishlistTools(server: McpServer, client: UntappdClient):
         'Add a beer to YOUR Untappd wishlist by its bid. Without confirm: true it returns a dry-run preview and ' +
         'makes NO network call; with confirm: true it adds. Writes to your account.',
       annotations: toolAnnotations({ title: 'Add a beer to your wishlist', readOnly: false, idempotent: true, openWorld: true }),
-      inputSchema: {
+      inputSchema: z.object({
         bid: BidSchema,
         confirm: schemaConfirm,
-      },
+      }),
     },
     async ({ bid, confirm }) => {
       if (confirm !== true) {
@@ -41,10 +41,10 @@ export function registerWishlistTools(server: McpServer, client: UntappdClient):
         'Remove a beer from YOUR Untappd wishlist by its bid. Without confirm: true it returns a dry-run preview ' +
         'and makes NO network call; with confirm: true it removes. Writes to your account.',
       annotations: toolAnnotations({ title: 'Remove a beer from your wishlist', readOnly: false, idempotent: true, openWorld: true }),
-      inputSchema: {
+      inputSchema: z.object({
         bid: BidSchema,
         confirm: schemaConfirm,
-      },
+      }),
     },
     async ({ bid, confirm }) => {
       if (confirm !== true) {

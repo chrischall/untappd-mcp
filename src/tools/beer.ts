@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { resolveView, toolAnnotations, viewParam, viewResult } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 import { compactBeerSearch, compactCheckins, UNTAPPD_VIEWS, upstreamCompact } from '../compact.js';
@@ -38,7 +38,7 @@ export function registerBeerTools(server: McpServer, client: UntappdClient, cach
         'beer id (bid), brewery, style, ABV, IBU, and global rating. Feed a bid into untappd_beer_info for full ' +
         'detail. Read-only.',
       annotations: toolAnnotations({ title: 'Search Untappd beers', readOnly: true, idempotent: true, openWorld: true }),
-      inputSchema: {
+      inputSchema: z.object({
         query: z.string().min(1).describe('Beer name to search for'),
         limit: z.number().int().min(1).max(50).optional().describe('Max results (1–50, default 25)'),
         offset: z.number().int().min(0).optional().describe('Result offset for paging (default 0)'),
@@ -47,7 +47,7 @@ export function registerBeerTools(server: McpServer, client: UntappdClient, cach
           .optional()
           .describe('Sort order: checkin (relevance, default), name, or count'),
         view: viewParam(UNTAPPD_VIEWS, { note: 'compact projects each match to {bid, name, style, abv, ibu, brewery, checkin_count, have_had}; "full" returns Untappd\'s whole ~1.2 KB search item, including the long beer_description and the nested brewery record.' }),
-      },
+      }),
     },
     async ({ query, limit, offset, sort, view }) => {
       const data = await client.get('/search/beer', { q: query, limit, offset, sort });
@@ -68,13 +68,13 @@ export function registerBeerTools(server: McpServer, client: UntappdClient, cach
         'Get full detail for a beer by its Untappd beer id (bid): description, style, ABV, IBU, brewery, rating, ' +
         'total check-in count, and — on view:"full" — recent activity. Get a bid from untappd_search_beer. Read-only.',
       annotations: toolAnnotations({ title: 'Get Untappd beer detail', readOnly: true, idempotent: true, openWorld: true }),
-      inputSchema: {
+      inputSchema: z.object({
         bid: BidSchema,
         // No local projection here: compact is forwarded to Untappd as its OWN
         // `compact=true`, which drops the embedded recent-activity block server
         // side. What comes back is passed through on both rungs.
         view: viewParam(UNTAPPD_VIEWS, { note: 'compact asks Untappd for its own slim record, dropping the embedded recent-activity (media/check-in) block server side; "full" returns the whole record including that activity. No local projection — the beer fields themselves are identical on both rungs.' }),
-      },
+      }),
     },
     async ({ bid, view }) => {
       const v = resolveView(view, UNTAPPD_VIEWS);
@@ -92,12 +92,12 @@ export function registerBeerTools(server: McpServer, client: UntappdClient, cach
         'Get the recent public check-ins for a beer by its bid — who drank it, their rating, comment, and venue. ' +
         'Page backwards with max_id (the pagination.max_id from a prior call). Read-only.',
       annotations: toolAnnotations({ title: 'Get recent check-ins for a beer', readOnly: true, idempotent: false, openWorld: true }),
-      inputSchema: {
+      inputSchema: z.object({
         bid: BidSchema,
         limit: z.number().int().min(1).max(50).optional().describe('Max check-ins (1–50, default 25)'),
         max_id: z.number().int().positive().optional().describe('Return check-ins older than this id (for paging)'),
         view: viewParam(UNTAPPD_VIEWS, { note: 'compact projects each check-in to {id, user, beer, brewery, venue, rating, comment, toast/comment counts}; "full" returns Untappd\'s whole ~5 KB record.' }),
-      },
+      }),
     },
     async ({ bid, limit, max_id, view }) => {
       const data = await client.get(`/beer/checkins/${bid}`, { limit, max_id });
