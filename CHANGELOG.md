@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.0](https://github.com/chrischall/untappd-mcp/compare/v2.0.0...v2.1.0) (2026-09-19)
+
+
+### Features
+
+* **deps:** take mcp-utils 1.0.0, fixing server/discover ([#183](https://github.com/chrischall/untappd-mcp/issues/183)) ([072c099](https://github.com/chrischall/untappd-mcp/commit/072c09983efb63101f9e55c53af009a61a302336))
+
 ## [2.0.0](https://github.com/chrischall/untappd-mcp/compare/v1.11.4...v2.0.0) (2026-09-19)
 
 
