@@ -67,7 +67,11 @@ export function registerFriendActionTools(server: McpServer, client: UntappdClie
           'Without confirm: true it returns a dry-run preview and makes NO network call; with confirm: true it ' +
           'performs the action. Note: this endpoint path is taken from the Untappd app but is not otherwise ' +
           'independently verified.',
-        annotations: toolAnnotations({ title: action.title, readOnly: false, idempotent: true, openWorld: true }),
+        // All four reach ANOTHER PERSON — the description says so itself: "affects
+        // a real relationship with another person". A friend request cannot be
+        // un-sent, and a rejection cannot be un-rejected, so none of them has an
+        // inverse in this tool set.
+        annotations: toolAnnotations({ title: action.title, readOnly: false, idempotent: true, openWorld: true, destructive: true }),
         inputSchema: z.object({
           target_uid: TargetUidSchema,
           confirm: schemaConfirm,
