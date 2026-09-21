@@ -109,7 +109,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         'untappd_sync_user_beers for full has-had coverage. backfill_complete is only reported once ~all of ' +
         'total_checkins is cached. Pass force_backfill: true to reset a cache wrongly marked complete and re-page ' +
         'the whole history (cached rows are kept). Omit username for your own account.',
-      annotations: toolAnnotations({ title: "Sync a user's check-ins into the cache", readOnly: false, idempotent: false, openWorld: true }),
+      annotations: toolAnnotations({ title: "Sync a user's check-ins into the cache", readOnly: false, idempotent: false, openWorld: true, destructive: false }),
       inputSchema: z.object({
         username: UsernameArg,
         max_pages: z
@@ -146,7 +146,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         'user/checkins, it pages fully for any public/friend account. Offset-paged and resumable: fetches max_pages ' +
         'per call and persists progress; run again until another_run_needed is false. Feeds the same ' +
         'untappd_cache_has_had / has_had_many / not_had tools. Omit username for your own account.',
-      annotations: toolAnnotations({ title: "Sync a user's complete distinct-beers list into the cache", readOnly: false, idempotent: false, openWorld: true }),
+      annotations: toolAnnotations({ title: "Sync a user's complete distinct-beers list into the cache", readOnly: false, idempotent: false, openWorld: true, destructive: false }),
       inputSchema: z.object({
         username: UsernameArg,
         max_pages: z
@@ -319,7 +319,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         'run (~100 calls/hour limit) — if more are needed it returns partial: true / another_run_needed: true, so ' +
         're-running fills the rest. Reports the same freshness/caveat block as untappd_cache_not_had. Omit username ' +
         'for your own account.',
-      annotations: toolAnnotations({ title: 'Top-rated beers a user has NOT had, from a candidate list', readOnly: false, idempotent: false, openWorld: true }),
+      annotations: toolAnnotations({ title: 'Top-rated beers a user has NOT had, from a candidate list', readOnly: false, idempotent: false, openWorld: true, destructive: false }),
       inputSchema: z.object({
         username: UsernameArg,
         bids: z.array(z.number().int().positive()).min(1).max(100).describe('Candidate beer ids (1–100)'),

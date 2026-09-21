@@ -13,7 +13,7 @@ export function registerWishlistTools(server: McpServer, client: UntappdClient):
       description:
         'Add a beer to YOUR Untappd wishlist by its bid. Without confirm: true it returns a dry-run preview and ' +
         'makes NO network call; with confirm: true it adds. Writes to your account.',
-      annotations: toolAnnotations({ title: 'Add a beer to your wishlist', readOnly: false, idempotent: true, openWorld: true }),
+      annotations: toolAnnotations({ title: 'Add a beer to your wishlist', readOnly: false, idempotent: true, openWorld: true, destructive: false }),
       inputSchema: z.object({
         bid: BidSchema,
         confirm: schemaConfirm,
@@ -40,7 +40,7 @@ export function registerWishlistTools(server: McpServer, client: UntappdClient):
       description:
         'Remove a beer from YOUR Untappd wishlist by its bid. Without confirm: true it returns a dry-run preview ' +
         'and makes NO network call; with confirm: true it removes. Writes to your account.',
-      annotations: toolAnnotations({ title: 'Remove a beer from your wishlist', readOnly: false, idempotent: true, openWorld: true }),
+      annotations: toolAnnotations({ title: 'Remove a beer from your wishlist', readOnly: false, idempotent: true, openWorld: true, destructive: false }),
       inputSchema: z.object({
         bid: BidSchema,
         confirm: schemaConfirm,
