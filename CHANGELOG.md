@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.1](https://github.com/chrischall/untappd-mcp/compare/v2.1.0...v2.1.1) (2026-09-21)
+
+
+### Bug Fixes
+
+* **tools:** say which writes are destructive ([#185](https://github.com/chrischall/untappd-mcp/issues/185)) ([da83b55](https://github.com/chrischall/untappd-mcp/commit/da83b55c9f52a693df1a602c7bf306140cdb5ca7))
+
 ## [2.1.0](https://github.com/chrischall/untappd-mcp/compare/v2.0.0...v2.1.0) (2026-09-19)
 
 
