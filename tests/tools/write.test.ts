@@ -1,4 +1,4 @@
-import { writeFileSync, rmSync } from 'node:fs';
+import { writeFileSync, rmSync, mkdirSync, truncateSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
@@ -13,6 +13,18 @@ const putBinary = vi.spyOn(client, 'putBinary').mockResolvedValue(undefined);
 
 const TMP_JPG = join(tmpdir(), 'untappd-test-photo.jpg');
 writeFileSync(TMP_JPG, Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00]));
+// Not an image at all, just named like one (e.g. a private document).
+const TMP_FAKE_JPG = join(tmpdir(), 'untappd-test-not-a-photo.jpg');
+writeFileSync(TMP_FAKE_JPG, 'SECRET=hunter2\n');
+// A real PNG signature behind a .jpg name.
+const TMP_PNG_AS_JPG = join(tmpdir(), 'untappd-test-png-named.jpg');
+writeFileSync(TMP_PNG_AS_JPG, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]));
+// A JPEG header on a file bigger than any phone photo.
+const TMP_HUGE_JPG = join(tmpdir(), 'untappd-test-huge.jpg');
+writeFileSync(TMP_HUGE_JPG, Buffer.from([0xff, 0xd8, 0xff, 0xe0]));
+truncateSync(TMP_HUGE_JPG, 30 * 1024 * 1024);
+const TMP_PHOTO_DIR = join(tmpdir(), 'untappd-test-photo-dir');
+mkdirSync(TMP_PHOTO_DIR, { recursive: true });
 
 let harness: Awaited<ReturnType<typeof createTestHarness>>;
 beforeEach(() => {
@@ -21,7 +33,8 @@ beforeEach(() => {
 });
 afterAll(async () => {
   if (harness) await harness.close();
-  rmSync(TMP_JPG, { force: true });
+  for (const f of [TMP_JPG, TMP_FAKE_JPG, TMP_PNG_AS_JPG, TMP_HUGE_JPG]) rmSync(f, { force: true });
+  rmSync(TMP_PHOTO_DIR, { recursive: true, force: true });
 });
 
 function parse(result: { content: { text: string }[] }): Record<string, unknown> {
@@ -131,6 +144,59 @@ describe('write tools (confirm-gated)', () => {
     expect((out.form as Record<string, unknown>).photo_file_ext).toBe('jpg');
     expect(write).not.toHaveBeenCalled();
     expect(putBinary).not.toHaveBeenCalled();
+  });
+
+  it('checkin dry run shows the resolved absolute path and size of the photo it would publish', async () => {
+    const r = await harness.callTool('untappd_checkin', { bid: 100, photo_path: TMP_JPG });
+    const photo = parse(r as never).photo as Record<string, unknown>;
+    expect(photo.path).toBe(realpathSync(TMP_JPG));
+    expect(photo.size_bytes).toBe(5);
+    expect(photo.content_type).toBe('image/jpeg');
+  });
+
+  it('checkin refuses a .jpg-named file whose bytes are not an image (no upload, no check-in)', async () => {
+    for (const confirm of [undefined, true]) {
+      const r = await harness.callTool('untappd_checkin', { bid: 100, photo_path: TMP_FAKE_JPG, confirm });
+      expect((r as { isError?: boolean }).isError).toBe(true);
+      expect(JSON.stringify(r)).not.toContain('hunter2');
+    }
+    expect(write).not.toHaveBeenCalled();
+    expect(putBinary).not.toHaveBeenCalled();
+  });
+
+  it('checkin refuses a photo whose content does not match its extension', async () => {
+    const r = await harness.callTool('untappd_checkin', { bid: 100, photo_path: TMP_PNG_AS_JPG, confirm: true });
+    expect((r as { isError?: boolean }).isError).toBe(true);
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it('checkin refuses an oversized photo before creating the check-in', async () => {
+    const r = await harness.callTool('untappd_checkin', { bid: 100, photo_path: TMP_HUGE_JPG, confirm: true });
+    expect((r as { isError?: boolean }).isError).toBe(true);
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it('checkin confines photo_path to UNTAPPD_PHOTO_DIR when it is set', async () => {
+    process.env.UNTAPPD_PHOTO_DIR = TMP_PHOTO_DIR;
+    try {
+      const r = await harness.callTool('untappd_checkin', { bid: 100, photo_path: TMP_JPG, confirm: true });
+      expect((r as { isError?: boolean }).isError).toBe(true);
+      expect(write).not.toHaveBeenCalled();
+      const inside = join(TMP_PHOTO_DIR, 'pint.jpg');
+      writeFileSync(inside, Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00]));
+      const ok = await harness.callTool('untappd_checkin', { bid: 100, photo_path: inside });
+      expect(parse(ok as never).dryRun).toBe(true);
+    } finally {
+      delete process.env.UNTAPPD_PHOTO_DIR;
+    }
+  });
+
+  it('checkin reports a missing photo without echoing the path', async () => {
+    const missing = join(tmpdir(), 'untappd-no-such-dir', 'x.jpg');
+    const r = await harness.callTool('untappd_checkin', { bid: 100, photo_path: missing, confirm: true });
+    expect((r as { isError?: boolean }).isError).toBe(true);
+    expect(JSON.stringify(r)).not.toContain('untappd-no-such-dir');
+    expect(write).not.toHaveBeenCalled();
   });
 
   it('checkin rejects an unsupported photo type', async () => {

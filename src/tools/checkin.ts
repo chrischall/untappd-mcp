@@ -1,8 +1,20 @@
-import { existsSync } from 'node:fs';
-import { extname } from 'node:path';
+import { realpathSync, statSync } from 'node:fs';
+import { delimiter, extname } from 'node:path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
-import { McpToolError, createHelpfulError, fileBlob, messageOf, minifiedResult, readEnvVar, schemaConfirm, toolAnnotations } from '@chrischall/mcp-utils';
+import {
+  McpToolError,
+  assertPathWithinRoots,
+  createHelpfulError,
+  fileBlob,
+  messageOf,
+  minifiedResult,
+  readEnvVar,
+  readFileHead,
+  schemaConfirm,
+  sniffMimeBytes,
+  toolAnnotations,
+} from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 
 const CheckinIdSchema = z.number().int().positive().describe('Untappd check-in id');
@@ -14,6 +26,76 @@ const PHOTO_CONTENT_TYPES: Record<string, string> = { jpg: 'image/jpeg', png: 'i
 function photoExt(path: string): string {
   const ext = extname(path).slice(1).toLowerCase();
   return ext === 'jpeg' ? 'jpg' : ext;
+}
+
+// Far above any phone photo; a file this big is not a beer picture.
+const MAX_PHOTO_BYTES = 15 * 1024 * 1024;
+
+interface CheckedPhoto {
+  /** Real absolute path (symlinks resolved) — what will actually be read. */
+  path: string;
+  size_bytes: number;
+  ext: string;
+  content_type: string;
+}
+
+/** UNTAPPD_PHOTO_DIR (one or more dirs, split on the platform path delimiter). */
+function photoRoots(): string[] | undefined {
+  const raw = readEnvVar('UNTAPPD_PHOTO_DIR');
+  const roots = raw?.split(delimiter).filter(Boolean);
+  return roots && roots.length > 0 ? roots : undefined;
+}
+
+/**
+ * Vet a photo before it can be published to the public feed. photo_path is a
+ * free-form, model-supplied path, so an injected instruction could aim it at
+ * any file with an image-like name. Require the bytes to BE a JPEG/PNG that
+ * matches the extension, cap the size, honour the optional UNTAPPD_PHOTO_DIR
+ * allow-list, and return the resolved path + size so the dry run shows a human
+ * exactly which file would be uploaded. Errors never echo the path back.
+ */
+async function checkPhoto(photoPath: string): Promise<CheckedPhoto> {
+  const ext = photoExt(photoPath);
+  if (!(ext in PHOTO_CONTENT_TYPES)) {
+    throw createHelpfulError(`Unsupported photo type "${ext || '(none)'}".`, {
+      hint: 'Attach a .jpg, .jpeg, or .png file.',
+    });
+  }
+  const roots = photoRoots();
+  if (roots) {
+    try {
+      assertPathWithinRoots(photoPath, roots);
+    } catch {
+      throw createHelpfulError('The photo is outside the allowed photo directory.', {
+        hint: 'UNTAPPD_PHOTO_DIR restricts which files can be attached to a check-in.',
+      });
+    }
+  }
+  let real: string;
+  let size: number;
+  try {
+    real = realpathSync(photoPath);
+    const st = statSync(real);
+    if (!st.isFile()) throw new Error('not a file');
+    size = st.size;
+  } catch {
+    throw new McpToolError('Photo file not found or not readable.');
+  }
+  if (size > MAX_PHOTO_BYTES) {
+    throw createHelpfulError(`Photo is too large (${size} bytes; the limit is ${MAX_PHOTO_BYTES}).`, {
+      hint: 'Attach a normal-sized JPEG or PNG photo.',
+    });
+  }
+  const sniffed = sniffMimeBytes(await readFileHead(real, 16));
+  if (sniffed !== PHOTO_CONTENT_TYPES[ext]) {
+    throw createHelpfulError(
+      sniffed === 'image/jpeg' || sniffed === 'image/png'
+        ? `Photo content (${sniffed}) does not match its .${ext} extension.`
+        : 'The file is not a JPEG or PNG image.',
+      { hint: 'Attach a real .jpg/.jpeg or .png photo.' },
+    );
+  }
+  return { path: real, size_bytes: size, ext, content_type: sniffed };
 }
 
 // Untappd ratings are 0–5 in 0.25 increments; 0 (or omitted) means no rating.
@@ -180,7 +262,13 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
         rating: RatingSchema.optional().describe('Rating 0–5 in 0.25 increments (omit for no rating)'),
         shout: z.string().max(2000).optional().describe('Optional shout / comment text for the check-in'),
         foursquare_id: z.string().optional().describe('Optional Foursquare venue id to tag the check-in location'),
-        photo_path: z.string().optional().describe('Optional path to a local JPEG/PNG photo to attach to the check-in'),
+        photo_path: z
+          .string()
+          .optional()
+          .describe(
+            'Optional path to a local JPEG/PNG photo (max 15 MB) to attach — it is published publicly. Only use a ' +
+              'file the user explicitly chose; the dry run shows the resolved path and size for them to confirm.',
+          ),
         geolat: z.number().optional().describe('Optional latitude of the check-in'),
         geolng: z.number().optional().describe('Optional longitude of the check-in'),
         container_id: z
@@ -202,15 +290,9 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
     },
     async ({ bid, rating, shout, foursquare_id, photo_path, geolat, geolng, container_id, timezone: requestedTz, confirm }) => {
       const { timezone, gmt_offset } = checkinTimezone(requestedTz);
-      let ext: string | undefined;
-      if (photo_path !== undefined) {
-        ext = photoExt(photo_path);
-        if (!(ext in PHOTO_CONTENT_TYPES)) {
-          throw createHelpfulError(`Unsupported photo type "${ext || '(none)'}".`, {
-            hint: 'Attach a .jpg, .jpeg, or .png file.',
-          });
-        }
-      }
+      // Vetted on the dry run too, so the preview names the exact file (resolved
+      // path + size) that confirm: true would publish.
+      const photo = photo_path !== undefined ? await checkPhoto(photo_path) : undefined;
       const form: Record<string, string | number | undefined> = {
         bid,
         rating: rating !== undefined ? rating.toFixed(2) : undefined,
@@ -221,8 +303,8 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
         container_id,
         timezone,
         gmt_offset,
-        is_photo: photo_path !== undefined ? 'true' : 'false',
-        photo_file_ext: photo_path !== undefined ? ext : undefined,
+        is_photo: photo ? 'true' : 'false',
+        photo_file_ext: photo?.ext,
         platform: 'ios',
       };
       if (confirm !== true) {
@@ -230,16 +312,16 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
           dryRun: true,
           action: 'checkin',
           form,
-          photo: photo_path !== undefined ? { path: photo_path, note: 'will be uploaded after the check-in is created' } : undefined,
+          photo: photo ? { ...photo, note: 'this exact file will be uploaded PUBLICLY after the check-in is created' } : undefined,
           note: 'Dry run — re-run with confirm: true to POST this check-in to your public Untappd feed.',
         });
       }
       // Open the photo BEFORE creating the check-in, so a missing/unreadable
       // file fails fast without leaving an orphaned photo-less check-in behind.
       let blob: Blob | undefined;
-      if (photo_path !== undefined) {
-        if (!existsSync(photo_path)) throw new McpToolError(`Photo file not found: ${photo_path}`);
-        blob = await fileBlob(photo_path); // file-backed, streamed — not heap-buffered
+      if (photo) {
+        // file-backed, streamed — not heap-buffered; re-checks the size cap/roots at open.
+        blob = await fileBlob(photo.path, { maxBytes: MAX_PHOTO_BYTES, label: 'Photo', allowedRoots: photoRoots() });
       }
 
       const data = await client.write<{
@@ -253,10 +335,10 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
       // never silently dropped.
       let photo_attached = false;
       let photo_error: string | undefined;
-      if (photo_path !== undefined) {
+      if (photo) {
         if (data?.photo_upload?.url && data.checkin_id) {
           try {
-            await client.putBinary(data.photo_upload.url, blob!, PHOTO_CONTENT_TYPES[ext!]);
+            await client.putBinary(data.photo_upload.url, blob!, photo.content_type);
             await client.write('POST', '/photo/uploadComplete', {
               form: { checkin_id: data.checkin_id, destination_url: data.photo_upload.destination_url },
             });
