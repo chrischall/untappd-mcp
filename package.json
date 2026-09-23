@@ -49,7 +49,7 @@
     "@modelcontextprotocol/server": "^2.0.0",
     "ai": "^7.0.19",
     "dotenv": "^18.0.1",
-    "zod": "^4.6.2"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "^2.0.0",
