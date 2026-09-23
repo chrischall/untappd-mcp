@@ -126,6 +126,14 @@ Non-obvious behaviours that were each fixed the hard way:
   every bid inside it. Hence the ceil/remainder split, plus the
   `served_backfill_last` turn flag for the `max_pages: 1` tie where the split
   zeroes one phase. Don't "simplify" this back into one counter.
+- **`syncUserBeers` completion is count-verified, not "offset reached total".**
+  Offset paging across runs is not a snapshot, so a resumed run re-reads the
+  last `RESUME_OVERLAP` items (beers dropping out shift the list up), and
+  reaching the end only counts as complete if the cache holds `total_count`
+  beers. A NEW shortfall (bigger than `beers_accepted_gap`, the gap a previous
+  full pass proved can't close) starts a rescan from the top that stops as soon
+  as the gap closes (`beers_rescan_target`). This also self-heals caches marked
+  complete before the check existed.
 - Every cache READ returns a `freshness` block reporting each source's
   completeness **separately** plus a `caveat`, so a "not had" can be flagged as a
   possible false negative. New cache read tools must include it.
