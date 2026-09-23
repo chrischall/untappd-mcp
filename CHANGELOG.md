@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.1.2](https://github.com/chrischall/untappd-mcp/compare/v2.1.1...v2.1.2) (2026-09-23)
+
+
+### Bug Fixes
+
+* **deps:** bump dotenv from 17.4.2 to 18.0.1 ([#191](https://github.com/chrischall/untappd-mcp/issues/191)) ([7dd0804](https://github.com/chrischall/untappd-mcp/commit/7dd08049a447c4408a95304ce2b9985d0caa3695))
+* **deps:** bump the production-dependencies group with 2 updates ([#190](https://github.com/chrischall/untappd-mcp/issues/190)) ([0c669e9](https://github.com/chrischall/untappd-mcp/commit/0c669e9be55279d6fc20b5cbde02181553942389))
+* **deps:** require zod ^4.6.5 to match @chrischall/mcp-utils 2.4.0 ([#194](https://github.com/chrischall/untappd-mcp/issues/194)) ([fca0f41](https://github.com/chrischall/untappd-mcp/commit/fca0f419902002596c74c128928c47f2e9a42d18))
+* **deps:** upgrade @chrischall/mcp-utils to 2.4.0 and @fetchproxy/* to 3.2.0 ([#193](https://github.com/chrischall/untappd-mcp/issues/193)) ([d3ec236](https://github.com/chrischall/untappd-mcp/commit/d3ec236d687e7f1627b32b1ba778aa65771aff9e))
+
 ## [2.1.1](https://github.com/chrischall/untappd-mcp/compare/v2.1.0...v2.1.1) (2026-09-21)
 
 
