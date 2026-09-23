@@ -76,11 +76,12 @@ function fakeCheckinsClient(history: unknown[], opts: { total?: number; throwOnC
 
 /** Fake client for user/beers (offset paged). */
 function fakeBeersClient(beers: unknown[], opts: { total?: number } = {}) {
-  const total = opts.total ?? beers.length;
   let calls = 0;
   const get = async (path: string, query?: { offset?: number }) => {
     if (path.startsWith('/user/beers/')) {
       calls++;
+      // Read live, so a test can mutate `beers` between runs (list churn).
+      const total = opts.total ?? beers.length;
       const offset = query?.offset ?? 0;
       const slice = beers.slice(offset, offset + 50);
       return { total_count: total, beers: { count: slice.length, items: slice } };
@@ -328,11 +329,81 @@ describe('syncUserBeers (user/beers offset paging)', () => {
     expect(r1.another_run_needed).toBe(true);
     expect((await cache.getState('mer'))!.beers_offset).toBe(50);
 
+    // Each resumed run re-reads the last 10 already-fetched items (the overlap
+    // that guards against the list shifting up between runs), so 40 are new.
     const r2 = await syncUserBeers(client, cache, 'mer', 1);
-    expect(r2.cached_distinct_beers).toBe(100);
+    expect(r2.cached_distinct_beers).toBe(90);
+    expect((await cache.getState('mer'))!.beers_offset).toBe(90);
     const r3 = await syncUserBeers(client, cache, 'mer', 1);
     expect(r3.cached_distinct_beers).toBe(120);
     expect(r3.beers_complete).toBe(true);
+  });
+});
+
+describe('syncUserBeers never marks an incomplete list complete (list churn between runs)', () => {
+  const bidOf = (b: unknown) => (b as { beer: { bid: number } }).beer.bid;
+
+  it('recovers a beer that an up-shift pushed across the resumed page boundary', async () => {
+    const cache = CheckinCache.open(':memory:');
+    const beers = makeBeersList(120); // bids 1000..1119
+    const { client } = fakeBeersClient(beers);
+
+    await syncUserBeers(client, cache, 'mer', 1); // caches positions 0..49, offset 50
+    // Between runs one already-fetched beer leaves the list (e.g. its only check-in
+    // was deleted), so everything below shifts UP by one: the beer that was at
+    // position 50 (bid 1050) is now at 49 — behind the resumed offset.
+    beers.splice(10, 1); // drop bid 1010
+    let last = await syncUserBeers(client, cache, 'mer', 1);
+    for (let i = 0; i < 20 && last.another_run_needed; i++) last = await syncUserBeers(client, cache, 'mer', 1);
+
+    expect(last.beers_complete).toBe(true);
+    for (const b of beers) expect((await cache.hasHad('mer', { bid: bidOf(b) })).had).toBe(true);
+    expect((await cache.hasHad('mer', { bid: 1050 })).had).toBe(true);
+  });
+
+  it('picks up a beer had at the top of the list mid-backfill without re-paging everything', async () => {
+    const cache = CheckinCache.open(':memory:');
+    const beers = makeBeersList(120);
+    const { client, calls } = fakeBeersClient(beers);
+
+    await syncUserBeers(client, cache, 'mer', 1);
+    beers.unshift(makeBeer(5000)); // newly had — lands at offset 0, already passed
+    let last = await syncUserBeers(client, cache, 'mer', 1);
+    for (let i = 0; i < 20 && last.another_run_needed; i++) last = await syncUserBeers(client, cache, 'mer', 1);
+
+    expect(last.beers_complete).toBe(true);
+    expect((await cache.hasHad('mer', { bid: 5000 })).had).toBe(true);
+    expect(last.cached_distinct_beers).toBe(121);
+    // 3 backfill pages + 1 recovery page from the top: the gap closed on page one.
+    expect(calls()).toBeLessThanOrEqual(5);
+  });
+
+  it('self-heals a cache already (wrongly) marked complete with a beer missing', async () => {
+    const cache = CheckinCache.open(':memory:');
+    const beers = makeBeersList(120);
+    await seedBeers(cache, 'mer', beers.filter((b) => bidOf(b) !== 1075));
+    await cache.setState('mer', { beers_complete: true, beers_total: 120, beers_offset: 120, last_synced_at: '2026-09-01T00:00:00.000Z' });
+    const { client } = fakeBeersClient(beers);
+
+    let last = await syncUserBeers(client, cache, 'mer', 10);
+    for (let i = 0; i < 5 && last.another_run_needed; i++) last = await syncUserBeers(client, cache, 'mer', 10);
+    expect((await cache.hasHad('mer', { bid: 1075 })).had).toBe(true);
+    expect(last.beers_complete).toBe(true);
+  });
+
+  it('accepts a total_count the list can never reach, instead of rescanning forever', async () => {
+    const cache = CheckinCache.open(':memory:');
+    const { client, calls } = fakeBeersClient(makeBeersList(120), { total: 123 });
+
+    let last = await syncUserBeers(client, cache, 'mer', 10);
+    for (let i = 0; i < 5 && last.another_run_needed; i++) last = await syncUserBeers(client, cache, 'mer', 10);
+    expect(last.beers_complete).toBe(true);
+
+    // A later refresh with nothing new costs one page and stays complete.
+    const before = calls();
+    const refresh = await syncUserBeers(client, cache, 'mer', 10);
+    expect(refresh.beers_complete).toBe(true);
+    expect(calls() - before).toBe(1);
   });
 });
 

@@ -126,6 +126,14 @@ Non-obvious behaviours that were each fixed the hard way:
   every bid inside it. Hence the ceil/remainder split, plus the
   `served_backfill_last` turn flag for the `max_pages: 1` tie where the split
   zeroes one phase. Don't "simplify" this back into one counter.
+- **`syncUserBeers` completion is count-verified, not "offset reached total".**
+  Offset paging across runs is not a snapshot, so a resumed run re-reads the
+  last `RESUME_OVERLAP` items (beers dropping out shift the list up), and
+  reaching the end only counts as complete if the cache holds `total_count`
+  beers. A NEW shortfall (bigger than `beers_accepted_gap`, the gap a previous
+  full pass proved can't close) starts a rescan from the top that stops as soon
+  as the gap closes (`beers_rescan_target`). This also self-heals caches marked
+  complete before the check existed.
 - Every cache READ returns a `freshness` block reporting each source's
   completeness **separately** plus a `caveat`, so a "not had" can be flagged as a
   possible false negative. New cache read tools must include it.
@@ -142,6 +150,8 @@ UNTAPPD_CLIENT_SECRET  required  Mobile-app client secret
 UNTAPPD_DEVICE_ID      optional  Stable device UUID the token is keyed to
 UNTAPPD_UTV            optional  API version param (default 4.0.0)
 UNTAPPD_USER_AGENT     optional  Default mimics Untappd/4.7.13 (ios; iPadOS 26.5)
+UNTAPPD_TIMEZONE       optional  IANA zone check-ins are stamped with when the call passes no `timezone` (default: process zone — UTC on a hosted connector)
+UNTAPPD_PHOTO_DIR      optional  Allow-list dir(s) for untappd_checkin photo_path (unset = any path; bytes are always sniffed as JPEG/PNG, 15 MB cap)
 UNTAPPD_CACHE_DB       optional  Cache SQLite path (default ~/.untappd-mcp/checkins.db). LOCAL ONLY
 ```
 

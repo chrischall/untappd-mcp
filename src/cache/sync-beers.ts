@@ -3,6 +3,10 @@ import type { UntappdClient } from '../client.js';
 import { mapBeerRow, type CacheStore, type DistinctBeerRow } from './store.js';
 
 const PAGE_LIMIT = 50; // Untappd's max page size for /user/beers.
+// A resumed backfill re-reads this many already-fetched items: if beers dropped
+// out of the list between runs, everything below shifted UP past the stored
+// offset, and without the overlap the beers that crossed it would be skipped.
+const RESUME_OVERLAP = 10;
 
 export interface SyncBeersSummary {
   username: string;
@@ -68,8 +72,15 @@ export async function syncUserBeers(
   // An already-complete cache re-scans from the top to pick up newly-had beers,
   // stopping on the first page with nothing new. Otherwise resume the backfill.
   const incremental = (prior?.beers_complete ?? false) && !!prior?.last_synced_at;
-  let offset = incremental ? 0 : (prior?.beers_offset ?? 0);
+  // `refreshing` is the live mode: it starts as `incremental` and is cleared when
+  // a shortfall forces a rescan (which must page past "nothing new" pages).
+  let refreshing = incremental;
+  let offset = incremental ? 0 : Math.max(0, (prior?.beers_offset ?? 0) - RESUME_OVERLAP);
   let total = prior?.beers_total ?? null;
+  let acceptedGap = prior?.beers_accepted_gap ?? 0;
+  // Non-null while a coverage rescan is walking down from the top (possibly
+  // across runs): it stops as soon as the shortfall is back within this target.
+  let rescanTarget: number | null = incremental ? null : (prior?.beers_rescan_target ?? null);
   let complete = false;
   let pages = 0;
   let added = 0;
@@ -85,38 +96,56 @@ export async function syncUserBeers(
     }
   };
 
+  const gapNow = async (): Promise<number> =>
+    total === null ? 0 : total - (await cache.distinctBeersCount(rawUsername));
+
   for (; pages < maxPages && !complete; ) {
     const page = pages === 0 ? await firstFetch(offset) : await fetchBeersPage(client, encodedUser, offset);
     pages++;
     if (page.total !== null) total = page.total;
-    if (page.items.length === 0) {
-      // An empty (e.g. first) page still means the list is fully paged — persist
-      // completion so a subsequent call doesn't re-run the same empty fetch.
-      complete = true;
-      await cache.setState(rawUsername, {
-        beers_offset: incremental ? (total ?? offset) : offset,
-        beers_total: total,
-        beers_complete: true,
-        last_synced_at: now(),
-      });
-      break;
+    // An empty (e.g. first) page still means the list is fully paged.
+    let atEnd = page.items.length === 0;
+    if (!atEnd) {
+      const rows = rowsOf(rawUsername, page.items);
+      const netNew = await cache.upsertDistinctBeers(rawUsername, rows);
+      added += netNew;
+      offset += page.items.length;
+      // End conditions: caught the whole list, a short (final) page, or — during an
+      // incremental top refresh — a page that added nothing new.
+      if (total !== null && offset >= total) atEnd = true;
+      else if (page.items.length < PAGE_LIMIT) atEnd = true;
+      else if (refreshing && netNew === 0) atEnd = true;
+      else if (rescanTarget !== null && (await gapNow()) <= rescanTarget) atEnd = true;
     }
-    const rows = rowsOf(rawUsername, page.items);
-    const netNew = await cache.upsertDistinctBeers(rawUsername, rows);
-    added += netNew;
-    offset += page.items.length;
-    // End conditions: caught the whole list, a short (final) page, or — during an
-    // incremental top refresh — a page that added nothing new.
-    if (total !== null && offset >= total) complete = true;
-    else if (page.items.length < PAGE_LIMIT) complete = true;
-    else if (incremental && netNew === 0) complete = true;
+    if (atEnd) {
+      // Offset paging across runs is not a snapshot: when the list churns between
+      // runs (a beer drops out, or is re-sorted) a beer can slip behind the resumed
+      // offset and never be fetched. Reaching the end is therefore only "complete"
+      // if the cache actually holds total_count beers — less whatever shortfall a
+      // previous full pass already proved the list can never close (a count Untappd
+      // reports but never lists). A NEW shortfall means skipped beers: rescan from
+      // the top (upserts are idempotent) instead of reporting false coverage.
+      const gap = await gapNow();
+      if (gap > acceptedGap && rescanTarget === null) {
+        rescanTarget = acceptedGap;
+        acceptedGap = gap; // a rescan that finds nothing new accepts this gap
+        refreshing = false;
+        offset = 0;
+      } else {
+        complete = true;
+        rescanTarget = null;
+        acceptedGap = Math.max(0, gap);
+      }
+    }
     // Persist progress after EVERY page. During an incremental refresh the stored
     // offset stays at the completed total so the next run refreshes from the top
     // again rather than resuming a stale cursor.
     await cache.setState(rawUsername, {
-      beers_offset: incremental ? (total ?? offset) : offset,
+      beers_offset: refreshing ? (total ?? offset) : offset,
       beers_total: total,
       beers_complete: complete,
+      beers_accepted_gap: acceptedGap,
+      beers_rescan_target: rescanTarget,
       last_synced_at: now(),
     });
   }

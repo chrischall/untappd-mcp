@@ -26,6 +26,15 @@ env:
     required: true
     help: >-
       Untappd mobile app client secret.
+  - name: UNTAPPD_TIMEZONE
+    required: false
+    help: >-
+      IANA timezone (e.g. America/New_York) that check-ins are stamped with
+      when a call passes no timezone. Defaults to the server's own zone.
+  - name: UNTAPPD_PHOTO_DIR
+    required: false
+    help: >-
+      Restrict check-in photo uploads to files inside this directory.
   - name: UNTAPPD_CACHE_DB
     required: false
     help: >-

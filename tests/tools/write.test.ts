@@ -1,27 +1,43 @@
-import { writeFileSync, rmSync } from 'node:fs';
+import { writeFileSync, rmSync, mkdirSync, truncateSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
+import { UnreachableError } from '@chrischall/mcp-utils';
 import { UntappdClient } from '../../src/client.js';
 import { registerCheckinTools } from '../../src/tools/checkin.js';
 import { registerWishlistTools } from '../../src/tools/wishlist.js';
 import { createTestHarness } from '../helpers.js';
 
-const client = new UntappdClient();
+const client = new UntappdClient({ loginName: 'me' });
 const write = vi.spyOn(client, 'write').mockResolvedValue(undefined as never);
+const get = vi.spyOn(client, 'get').mockResolvedValue(undefined as never);
 const putBinary = vi.spyOn(client, 'putBinary').mockResolvedValue(undefined);
 
 const TMP_JPG = join(tmpdir(), 'untappd-test-photo.jpg');
 writeFileSync(TMP_JPG, Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00]));
+// Not an image at all, just named like one (e.g. a private document).
+const TMP_FAKE_JPG = join(tmpdir(), 'untappd-test-not-a-photo.jpg');
+writeFileSync(TMP_FAKE_JPG, 'SECRET=hunter2\n');
+// A real PNG signature behind a .jpg name.
+const TMP_PNG_AS_JPG = join(tmpdir(), 'untappd-test-png-named.jpg');
+writeFileSync(TMP_PNG_AS_JPG, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]));
+// A JPEG header on a file bigger than any phone photo.
+const TMP_HUGE_JPG = join(tmpdir(), 'untappd-test-huge.jpg');
+writeFileSync(TMP_HUGE_JPG, Buffer.from([0xff, 0xd8, 0xff, 0xe0]));
+truncateSync(TMP_HUGE_JPG, 30 * 1024 * 1024);
+const TMP_PHOTO_DIR = join(tmpdir(), 'untappd-test-photo-dir');
+mkdirSync(TMP_PHOTO_DIR, { recursive: true });
 
 let harness: Awaited<ReturnType<typeof createTestHarness>>;
 beforeEach(() => {
   write.mockClear();
   putBinary.mockClear();
+  get.mockReset();
 });
 afterAll(async () => {
   if (harness) await harness.close();
-  rmSync(TMP_JPG, { force: true });
+  for (const f of [TMP_JPG, TMP_FAKE_JPG, TMP_PNG_AS_JPG, TMP_HUGE_JPG]) rmSync(f, { force: true });
+  rmSync(TMP_PHOTO_DIR, { recursive: true, force: true });
 });
 
 function parse(result: { content: { text: string }[] }): Record<string, unknown> {
@@ -92,6 +108,31 @@ describe('write tools (confirm-gated)', () => {
     expect(parse(r as never).checked_in).toBe(true);
   });
 
+  it('checkin sends the caller-supplied IANA timezone and its current GMT offset', async () => {
+    const r = await harness.callTool('untappd_checkin', { bid: 100, timezone: 'Asia/Kolkata' });
+    const form = parse(r as never).form as Record<string, unknown>;
+    expect(form.timezone).toBe('Asia/Kolkata');
+    expect(form.gmt_offset).toBe(5.5); // no DST, so stable year-round
+  });
+
+  it('checkin rejects a timezone that is not a valid IANA name', async () => {
+    const r = await harness.callTool('untappd_checkin', { bid: 100, timezone: 'Mars/Olympus', confirm: true });
+    expect((r as { isError?: boolean }).isError).toBe(true);
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it('checkin falls back to UNTAPPD_TIMEZONE (not the host process zone) when no timezone is given', async () => {
+    process.env.UNTAPPD_TIMEZONE = 'Asia/Kathmandu';
+    try {
+      const r = await harness.callTool('untappd_checkin', { bid: 100 });
+      const form = parse(r as never).form as Record<string, unknown>;
+      expect(form.timezone).toBe('Asia/Kathmandu');
+      expect(form.gmt_offset).toBe(5.75);
+    } finally {
+      delete process.env.UNTAPPD_TIMEZONE;
+    }
+  });
+
   it('checkin rejects a rating that is not a 0.25 multiple', async () => {
     const r = await harness.callTool('untappd_checkin', { bid: 100, rating: 4.1, confirm: true });
     expect((r as { isError?: boolean }).isError).toBe(true);
@@ -106,6 +147,59 @@ describe('write tools (confirm-gated)', () => {
     expect((out.form as Record<string, unknown>).photo_file_ext).toBe('jpg');
     expect(write).not.toHaveBeenCalled();
     expect(putBinary).not.toHaveBeenCalled();
+  });
+
+  it('checkin dry run shows the resolved absolute path and size of the photo it would publish', async () => {
+    const r = await harness.callTool('untappd_checkin', { bid: 100, photo_path: TMP_JPG });
+    const photo = parse(r as never).photo as Record<string, unknown>;
+    expect(photo.path).toBe(realpathSync(TMP_JPG));
+    expect(photo.size_bytes).toBe(5);
+    expect(photo.content_type).toBe('image/jpeg');
+  });
+
+  it('checkin refuses a .jpg-named file whose bytes are not an image (no upload, no check-in)', async () => {
+    for (const confirm of [undefined, true]) {
+      const r = await harness.callTool('untappd_checkin', { bid: 100, photo_path: TMP_FAKE_JPG, confirm });
+      expect((r as { isError?: boolean }).isError).toBe(true);
+      expect(JSON.stringify(r)).not.toContain('hunter2');
+    }
+    expect(write).not.toHaveBeenCalled();
+    expect(putBinary).not.toHaveBeenCalled();
+  });
+
+  it('checkin refuses a photo whose content does not match its extension', async () => {
+    const r = await harness.callTool('untappd_checkin', { bid: 100, photo_path: TMP_PNG_AS_JPG, confirm: true });
+    expect((r as { isError?: boolean }).isError).toBe(true);
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it('checkin refuses an oversized photo before creating the check-in', async () => {
+    const r = await harness.callTool('untappd_checkin', { bid: 100, photo_path: TMP_HUGE_JPG, confirm: true });
+    expect((r as { isError?: boolean }).isError).toBe(true);
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it('checkin confines photo_path to UNTAPPD_PHOTO_DIR when it is set', async () => {
+    process.env.UNTAPPD_PHOTO_DIR = TMP_PHOTO_DIR;
+    try {
+      const r = await harness.callTool('untappd_checkin', { bid: 100, photo_path: TMP_JPG, confirm: true });
+      expect((r as { isError?: boolean }).isError).toBe(true);
+      expect(write).not.toHaveBeenCalled();
+      const inside = join(TMP_PHOTO_DIR, 'pint.jpg');
+      writeFileSync(inside, Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00]));
+      const ok = await harness.callTool('untappd_checkin', { bid: 100, photo_path: inside });
+      expect(parse(ok as never).dryRun).toBe(true);
+    } finally {
+      delete process.env.UNTAPPD_PHOTO_DIR;
+    }
+  });
+
+  it('checkin reports a missing photo without echoing the path', async () => {
+    const missing = join(tmpdir(), 'untappd-no-such-dir', 'x.jpg');
+    const r = await harness.callTool('untappd_checkin', { bid: 100, photo_path: missing, confirm: true });
+    expect((r as { isError?: boolean }).isError).toBe(true);
+    expect(JSON.stringify(r)).not.toContain('untappd-no-such-dir');
+    expect(write).not.toHaveBeenCalled();
   });
 
   it('checkin rejects an unsupported photo type', async () => {
@@ -147,6 +241,70 @@ describe('write tools (confirm-gated)', () => {
     expect(String(out.photo_error)).toContain('999');
     // uploadComplete must NOT be called after the upload failed (only checkin/add ran)
     expect(write).toHaveBeenCalledTimes(1);
+  });
+
+  // A transport failure/timeout AFTER the POST was sent leaves the outcome unknown:
+  // Untappd may already have created it. A blind retry would double-post.
+  const recentCheckin = (id: number, bid: number, at: Date) => ({
+    checkin_id: id,
+    created_at: at.toUTCString().replace('GMT', '+0000'),
+    beer: { bid },
+  });
+
+  it('checkin that times out reports the check-in Untappd did create instead of failing', async () => {
+    write.mockRejectedValueOnce(new UnreachableError('Untappd'));
+    get.mockResolvedValueOnce({ checkins: { items: [recentCheckin(4242, 100, new Date()), recentCheckin(4000, 7, new Date())] } });
+    const r = await harness.callTool('untappd_checkin', { bid: 100, confirm: true });
+    const out = parse(r as never);
+    expect(get).toHaveBeenCalledWith('/user/checkins/me', { limit: 5 });
+    expect(out.checked_in).toBe(true);
+    expect(out.checkin_id).toBe(4242);
+    expect(out.recovered).toBe(true);
+    expect(write).toHaveBeenCalledTimes(1);
+  });
+
+  it('checkin that times out and left no check-in says the outcome is unknown and not to blindly retry', async () => {
+    write.mockRejectedValueOnce(new UnreachableError('Untappd'));
+    // Only an OLD check-in of the same beer — not one this call made.
+    get.mockResolvedValueOnce({ checkins: { items: [recentCheckin(1, 100, new Date(Date.now() - 3 * 3600_000))] } });
+    const r = await harness.callTool('untappd_checkin', { bid: 100, confirm: true });
+    expect((r as { isError?: boolean }).isError).toBe(true);
+    const text = JSON.stringify(r);
+    expect(text).toMatch(/may have been created/i);
+    expect(text).toContain('untappd_user_checkins');
+  });
+
+  it('checkin that times out and cannot verify still warns instead of inviting a duplicate', async () => {
+    write.mockRejectedValueOnce(new UnreachableError('Untappd'));
+    get.mockRejectedValueOnce(new UnreachableError('Untappd'));
+    const r = await harness.callTool('untappd_checkin', { bid: 100, confirm: true });
+    expect((r as { isError?: boolean }).isError).toBe(true);
+    expect(JSON.stringify(r)).toMatch(/may have been created/i);
+  });
+
+  it('checkin passes through ordinary (definite) API errors unchanged, with no recovery lookup', async () => {
+    write.mockRejectedValueOnce(new Error('Untappd POST /checkin/add failed (500): boom'));
+    const r = await harness.callTool('untappd_checkin', { bid: 100, confirm: true });
+    expect((r as { isError?: boolean }).isError).toBe(true);
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it('add_comment that times out says the comment may have posted and how to check', async () => {
+    write.mockRejectedValueOnce(new UnreachableError('Untappd'));
+    const r = await harness.callTool('untappd_add_comment', { checkin_id: 42, comment: 'nice', confirm: true });
+    expect((r as { isError?: boolean }).isError).toBe(true);
+    const text = JSON.stringify(r);
+    expect(text).toMatch(/may have been posted/i);
+    expect(text).toContain('untappd_checkin_info');
+  });
+
+  it('toast that times out warns that a retry could UN-toast', async () => {
+    write.mockRejectedValueOnce(new UnreachableError('Untappd'));
+    const r = await harness.callTool('untappd_toast', { checkin_id: 42, confirm: true });
+    expect((r as { isError?: boolean }).isError).toBe(true);
+    const text = JSON.stringify(r);
+    expect(text).toMatch(/toggle/i);
+    expect(text).toContain('untappd_checkin_info');
   });
 
   it('delete_checkin without confirm is a dry run', async () => {
