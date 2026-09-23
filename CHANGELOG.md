@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.3](https://github.com/chrischall/untappd-mcp/compare/v2.1.2...v2.1.3) (2026-09-23)
+
+
+### Bug Fixes
+
+* **checkin:** don't report an earlier same-beer check-in as the one a timed-out check-in created ([#198](https://github.com/chrischall/untappd-mcp/issues/198)) ([4af5f0f](https://github.com/chrischall/untappd-mcp/commit/4af5f0fb22d55af3cb28f8cec97eb57fe25dc948)), closes [#196](https://github.com/chrischall/untappd-mcp/issues/196)
+* **checkin:** prevent duplicate check-ins on timeout, use the drinker's timezone, vet photo uploads, and fix distinct-beers sync gaps ([#195](https://github.com/chrischall/untappd-mcp/issues/195)) ([b4130fd](https://github.com/chrischall/untappd-mcp/commit/b4130fd42bc6aed1a7ae07cb308621e75bf6d8d7))
+
 ## [2.1.2](https://github.com/chrischall/untappd-mcp/compare/v2.1.1...v2.1.2) (2026-09-23)
 
 
