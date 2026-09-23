@@ -34,6 +34,7 @@ it goes stale.
 | `UNTAPPD_DEVICE_ID` | no | Stable device UUID the token is keyed to (a default is provided). |
 | `UNTAPPD_UTV` | no | API version param (default `4.0.0`). |
 | `UNTAPPD_USER_AGENT` | no | Override the User-Agent (default mimics the app). |
+| `UNTAPPD_TIMEZONE` | no | IANA timezone (e.g. `America/New_York`) that check-ins are stamped with when the call doesn't pass `timezone`. Set it when the server runs somewhere other than the drinker's zone (e.g. a hosted connector, usually UTC). Defaults to the server process's zone. |
 | `UNTAPPD_CACHE_DB` | no | Path to the local check-in cache SQLite file (default `~/.untappd-mcp/checkins.db`). Local/stdio only. |
 
 Copy `.env.example` to `.env` and fill it in for local use.

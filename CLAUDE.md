@@ -150,6 +150,7 @@ UNTAPPD_CLIENT_SECRET  required  Mobile-app client secret
 UNTAPPD_DEVICE_ID      optional  Stable device UUID the token is keyed to
 UNTAPPD_UTV            optional  API version param (default 4.0.0)
 UNTAPPD_USER_AGENT     optional  Default mimics Untappd/4.7.13 (ios; iPadOS 26.5)
+UNTAPPD_TIMEZONE       optional  IANA zone check-ins are stamped with when the call passes no `timezone` (default: process zone — UTC on a hosted connector)
 UNTAPPD_CACHE_DB       optional  Cache SQLite path (default ~/.untappd-mcp/checkins.db). LOCAL ONLY
 ```
 

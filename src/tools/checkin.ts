@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { extname } from 'node:path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
-import { McpToolError, createHelpfulError, fileBlob, messageOf, minifiedResult, schemaConfirm, toolAnnotations } from '@chrischall/mcp-utils';
+import { McpToolError, createHelpfulError, fileBlob, messageOf, minifiedResult, readEnvVar, schemaConfirm, toolAnnotations } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 
 const CheckinIdSchema = z.number().int().positive().describe('Untappd check-in id');
@@ -23,11 +23,34 @@ const RatingSchema = z
   .max(5)
   .refine((r) => Math.round(r * 4) === r * 4, { message: 'rating must be a multiple of 0.25' });
 
-function localTimezone(): { timezone: string; gmt_offset: number } {
-  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-  // getTimezoneOffset is minutes behind UTC (positive = behind), so negate for GMT offset in hours.
-  const gmt_offset = -new Date().getTimezoneOffset() / 60;
-  return { timezone, gmt_offset };
+/** GMT offset in hours of an IANA zone at `at` (DST-aware), e.g. 5.5 for Asia/Kolkata. */
+function gmtOffsetHours(timeZone: string, at: Date): number {
+  const name = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'longOffset' })
+    .formatToParts(at)
+    .find((p) => p.type === 'timeZoneName')?.value;
+  const m = /GMT([+-])(\d{1,2})(?::(\d{2}))?/.exec(name ?? '');
+  if (!m) return 0; // plain "GMT"
+  const hours = Number(m[2]) + Number(m[3] ?? 0) / 60;
+  return m[1] === '-' ? -hours : hours;
+}
+
+/**
+ * The zone the check-in is stamped with: the caller's `timezone`, else
+ * UNTAPPD_TIMEZONE, else the server process's own zone. The process zone is
+ * only right when the server runs on the drinker's own machine — a hosted
+ * connector's process is typically UTC, which would stamp an evening check-in
+ * into the next day.
+ */
+function checkinTimezone(requested: string | undefined): { timezone: string; gmt_offset: number } {
+  const timezone =
+    requested ?? readEnvVar('UNTAPPD_TIMEZONE') ?? (Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+  try {
+    return { timezone, gmt_offset: gmtOffsetHours(timezone, new Date()) };
+  } catch {
+    throw createHelpfulError(`Unknown timezone "${timezone}".`, {
+      hint: 'Pass an IANA timezone name such as "America/New_York" or "Europe/London".',
+    });
+  }
 }
 
 export function registerCheckinTools(server: McpServer, client: UntappdClient): void {
@@ -165,11 +188,20 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
           .int()
           .optional()
           .describe('Optional serving container id (e.g. 1 = draft, 2 = bottle, 3 = can)'),
+        timezone: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            "The drinker's IANA timezone (e.g. America/New_York), which sets the check-in's local time. Defaults to " +
+              "UNTAPPD_TIMEZONE, else the server's own zone — which on a hosted connector is usually UTC, so pass it " +
+              'when you know where the user is.',
+          ),
         confirm: schemaConfirm,
       }),
     },
-    async ({ bid, rating, shout, foursquare_id, photo_path, geolat, geolng, container_id, confirm }) => {
-      const { timezone, gmt_offset } = localTimezone();
+    async ({ bid, rating, shout, foursquare_id, photo_path, geolat, geolng, container_id, timezone: requestedTz, confirm }) => {
+      const { timezone, gmt_offset } = checkinTimezone(requestedTz);
       let ext: string | undefined;
       if (photo_path !== undefined) {
         ext = photoExt(photo_path);

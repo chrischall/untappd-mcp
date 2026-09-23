@@ -92,6 +92,31 @@ describe('write tools (confirm-gated)', () => {
     expect(parse(r as never).checked_in).toBe(true);
   });
 
+  it('checkin sends the caller-supplied IANA timezone and its current GMT offset', async () => {
+    const r = await harness.callTool('untappd_checkin', { bid: 100, timezone: 'Asia/Kolkata' });
+    const form = parse(r as never).form as Record<string, unknown>;
+    expect(form.timezone).toBe('Asia/Kolkata');
+    expect(form.gmt_offset).toBe(5.5); // no DST, so stable year-round
+  });
+
+  it('checkin rejects a timezone that is not a valid IANA name', async () => {
+    const r = await harness.callTool('untappd_checkin', { bid: 100, timezone: 'Mars/Olympus', confirm: true });
+    expect((r as { isError?: boolean }).isError).toBe(true);
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it('checkin falls back to UNTAPPD_TIMEZONE (not the host process zone) when no timezone is given', async () => {
+    process.env.UNTAPPD_TIMEZONE = 'Asia/Kathmandu';
+    try {
+      const r = await harness.callTool('untappd_checkin', { bid: 100 });
+      const form = parse(r as never).form as Record<string, unknown>;
+      expect(form.timezone).toBe('Asia/Kathmandu');
+      expect(form.gmt_offset).toBe(5.75);
+    } finally {
+      delete process.env.UNTAPPD_TIMEZONE;
+    }
+  });
+
   it('checkin rejects a rating that is not a 0.25 multiple', async () => {
     const r = await harness.callTool('untappd_checkin', { bid: 100, rating: 4.1, confirm: true });
     expect((r as { isError?: boolean }).isError).toBe(true);
