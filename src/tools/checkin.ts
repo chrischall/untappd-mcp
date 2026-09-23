@@ -137,8 +137,11 @@ function checkinTimezone(requested: string | undefined): { timezone: string; gmt
 }
 
 // How far before the POST a recovered check-in's created_at may fall and still
-// count as the one this call made (tolerates clock skew with Untappd).
-const RECOVERY_WINDOW_MS = 5 * 60_000;
+// count as the one this call made. Only a small allowance for Untappd's
+// whole-second created_at and modest clock skew: a wider window would match an
+// earlier same-beer check-in (e.g. a prior timed-out attempt) and wrongly report
+// it as this call's — telling the caller not to retry a check-in that never landed.
+const RECOVERY_WINDOW_MS = 30_000;
 
 /**
  * Run a NON-idempotent write. A transport failure or timeout (UnreachableError)
@@ -158,7 +161,9 @@ async function nonIdempotentWrite<T>(run: () => Promise<T>, unknownOutcome: stri
 /**
  * After an outcome-unknown /checkin/add, look for the check-in it may have made:
  * the caller's own most recent check-ins, same beer, created since just before
- * the POST. Returns its id, or null when none is found or the lookup fails.
+ * the POST. Returns its id only when exactly one matches; null when none does,
+ * when more than one does (it can't tell which is this call's), or when the
+ * lookup fails — each of which the caller reports as an unknown outcome.
  */
 async function findRecentCheckin(client: UntappdClient, bid: number, sentAt: number): Promise<number | null> {
   const self = client.loginName;
@@ -168,13 +173,15 @@ async function findRecentCheckin(client: UntappdClient, bid: number, sentAt: num
       `/user/checkins/${encodeURIComponent(self)}`,
       { limit: 5 },
     );
+    const matches: number[] = [];
     for (const it of data?.checkins?.items ?? []) {
       const c = it as { checkin_id?: number; created_at?: string; beer?: { bid?: number } };
       const at = Date.parse(c.created_at ?? '');
       if (c.beer?.bid === bid && typeof c.checkin_id === 'number' && at >= sentAt - RECOVERY_WINDOW_MS) {
-        return c.checkin_id;
+        matches.push(c.checkin_id);
       }
     }
+    if (matches.length === 1) return matches[0];
   } catch {
     /* can't verify — the caller reports the outcome as unknown */
   }
