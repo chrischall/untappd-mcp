@@ -274,6 +274,28 @@ describe('write tools (confirm-gated)', () => {
     expect(text).toContain('untappd_user_checkins');
   });
 
+  it('checkin that times out does not claim an earlier same-beer check-in (e.g. a prior timed-out attempt) as its own', async () => {
+    write.mockRejectedValueOnce(new UnreachableError('Untappd'));
+    // Same beer, two minutes before this POST — a previous attempt, not this one.
+    get.mockResolvedValueOnce({ checkins: { items: [recentCheckin(3000, 100, new Date(Date.now() - 2 * 60_000))] } });
+    const r = await harness.callTool('untappd_checkin', { bid: 100, confirm: true });
+    expect((r as { isError?: boolean }).isError).toBe(true);
+    const text = JSON.stringify(r);
+    expect(text).toMatch(/may have been created/i);
+    expect(text).not.toContain('Do not retry');
+  });
+
+  it('checkin that times out reports outcome unknown when more than one same-beer check-in matches', async () => {
+    write.mockRejectedValueOnce(new UnreachableError('Untappd'));
+    const now = new Date();
+    get.mockResolvedValueOnce({ checkins: { items: [recentCheckin(5001, 100, now), recentCheckin(5000, 100, now)] } });
+    const r = await harness.callTool('untappd_checkin', { bid: 100, confirm: true });
+    expect((r as { isError?: boolean }).isError).toBe(true);
+    const text = JSON.stringify(r);
+    expect(text).toMatch(/may have been created/i);
+    expect(text).not.toContain('Do not retry');
+  });
+
   it('checkin that times out and cannot verify still warns instead of inviting a duplicate', async () => {
     write.mockRejectedValueOnce(new UnreachableError('Untappd'));
     get.mockRejectedValueOnce(new UnreachableError('Untappd'));
