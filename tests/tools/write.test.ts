@@ -2,13 +2,15 @@ import { writeFileSync, rmSync, mkdirSync, truncateSync, realpathSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
+import { UnreachableError } from '@chrischall/mcp-utils';
 import { UntappdClient } from '../../src/client.js';
 import { registerCheckinTools } from '../../src/tools/checkin.js';
 import { registerWishlistTools } from '../../src/tools/wishlist.js';
 import { createTestHarness } from '../helpers.js';
 
-const client = new UntappdClient();
+const client = new UntappdClient({ loginName: 'me' });
 const write = vi.spyOn(client, 'write').mockResolvedValue(undefined as never);
+const get = vi.spyOn(client, 'get').mockResolvedValue(undefined as never);
 const putBinary = vi.spyOn(client, 'putBinary').mockResolvedValue(undefined);
 
 const TMP_JPG = join(tmpdir(), 'untappd-test-photo.jpg');
@@ -30,6 +32,7 @@ let harness: Awaited<ReturnType<typeof createTestHarness>>;
 beforeEach(() => {
   write.mockClear();
   putBinary.mockClear();
+  get.mockReset();
 });
 afterAll(async () => {
   if (harness) await harness.close();
@@ -238,6 +241,70 @@ describe('write tools (confirm-gated)', () => {
     expect(String(out.photo_error)).toContain('999');
     // uploadComplete must NOT be called after the upload failed (only checkin/add ran)
     expect(write).toHaveBeenCalledTimes(1);
+  });
+
+  // A transport failure/timeout AFTER the POST was sent leaves the outcome unknown:
+  // Untappd may already have created it. A blind retry would double-post.
+  const recentCheckin = (id: number, bid: number, at: Date) => ({
+    checkin_id: id,
+    created_at: at.toUTCString().replace('GMT', '+0000'),
+    beer: { bid },
+  });
+
+  it('checkin that times out reports the check-in Untappd did create instead of failing', async () => {
+    write.mockRejectedValueOnce(new UnreachableError('Untappd'));
+    get.mockResolvedValueOnce({ checkins: { items: [recentCheckin(4242, 100, new Date()), recentCheckin(4000, 7, new Date())] } });
+    const r = await harness.callTool('untappd_checkin', { bid: 100, confirm: true });
+    const out = parse(r as never);
+    expect(get).toHaveBeenCalledWith('/user/checkins/me', { limit: 5 });
+    expect(out.checked_in).toBe(true);
+    expect(out.checkin_id).toBe(4242);
+    expect(out.recovered).toBe(true);
+    expect(write).toHaveBeenCalledTimes(1);
+  });
+
+  it('checkin that times out and left no check-in says the outcome is unknown and not to blindly retry', async () => {
+    write.mockRejectedValueOnce(new UnreachableError('Untappd'));
+    // Only an OLD check-in of the same beer — not one this call made.
+    get.mockResolvedValueOnce({ checkins: { items: [recentCheckin(1, 100, new Date(Date.now() - 3 * 3600_000))] } });
+    const r = await harness.callTool('untappd_checkin', { bid: 100, confirm: true });
+    expect((r as { isError?: boolean }).isError).toBe(true);
+    const text = JSON.stringify(r);
+    expect(text).toMatch(/may have been created/i);
+    expect(text).toContain('untappd_user_checkins');
+  });
+
+  it('checkin that times out and cannot verify still warns instead of inviting a duplicate', async () => {
+    write.mockRejectedValueOnce(new UnreachableError('Untappd'));
+    get.mockRejectedValueOnce(new UnreachableError('Untappd'));
+    const r = await harness.callTool('untappd_checkin', { bid: 100, confirm: true });
+    expect((r as { isError?: boolean }).isError).toBe(true);
+    expect(JSON.stringify(r)).toMatch(/may have been created/i);
+  });
+
+  it('checkin passes through ordinary (definite) API errors unchanged, with no recovery lookup', async () => {
+    write.mockRejectedValueOnce(new Error('Untappd POST /checkin/add failed (500): boom'));
+    const r = await harness.callTool('untappd_checkin', { bid: 100, confirm: true });
+    expect((r as { isError?: boolean }).isError).toBe(true);
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it('add_comment that times out says the comment may have posted and how to check', async () => {
+    write.mockRejectedValueOnce(new UnreachableError('Untappd'));
+    const r = await harness.callTool('untappd_add_comment', { checkin_id: 42, comment: 'nice', confirm: true });
+    expect((r as { isError?: boolean }).isError).toBe(true);
+    const text = JSON.stringify(r);
+    expect(text).toMatch(/may have been posted/i);
+    expect(text).toContain('untappd_checkin_info');
+  });
+
+  it('toast that times out warns that a retry could UN-toast', async () => {
+    write.mockRejectedValueOnce(new UnreachableError('Untappd'));
+    const r = await harness.callTool('untappd_toast', { checkin_id: 42, confirm: true });
+    expect((r as { isError?: boolean }).isError).toBe(true);
+    const text = JSON.stringify(r);
+    expect(text).toMatch(/toggle/i);
+    expect(text).toContain('untappd_checkin_info');
   });
 
   it('delete_checkin without confirm is a dry run', async () => {

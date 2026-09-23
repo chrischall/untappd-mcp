@@ -14,6 +14,7 @@ import {
   schemaConfirm,
   sniffMimeBytes,
   toolAnnotations,
+  UnreachableError,
 } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 
@@ -135,6 +136,51 @@ function checkinTimezone(requested: string | undefined): { timezone: string; gmt
   }
 }
 
+// How far before the POST a recovered check-in's created_at may fall and still
+// count as the one this call made (tolerates clock skew with Untappd).
+const RECOVERY_WINDOW_MS = 5 * 60_000;
+
+/**
+ * Run a NON-idempotent write. A transport failure or timeout (UnreachableError)
+ * may fire after Untappd already received and applied the request, so it is
+ * reported as "outcome unknown" — with how to check — rather than "unreachable",
+ * which invites a blind retry that double-posts (or, for a toggle, undoes it).
+ */
+async function nonIdempotentWrite<T>(run: () => Promise<T>, unknownOutcome: string): Promise<T> {
+  try {
+    return await run();
+  } catch (e) {
+    if (e instanceof UnreachableError) throw new McpToolError(unknownOutcome);
+    throw e;
+  }
+}
+
+/**
+ * After an outcome-unknown /checkin/add, look for the check-in it may have made:
+ * the caller's own most recent check-ins, same beer, created since just before
+ * the POST. Returns its id, or null when none is found or the lookup fails.
+ */
+async function findRecentCheckin(client: UntappdClient, bid: number, sentAt: number): Promise<number | null> {
+  const self = client.loginName;
+  if (!self) return null;
+  try {
+    const data = await client.get<{ checkins?: { items?: unknown[] } }>(
+      `/user/checkins/${encodeURIComponent(self)}`,
+      { limit: 5 },
+    );
+    for (const it of data?.checkins?.items ?? []) {
+      const c = it as { checkin_id?: number; created_at?: string; beer?: { bid?: number } };
+      const at = Date.parse(c.created_at ?? '');
+      if (c.beer?.bid === bid && typeof c.checkin_id === 'number' && at >= sentAt - RECOVERY_WINDOW_MS) {
+        return c.checkin_id;
+      }
+    }
+  } catch {
+    /* can't verify — the caller reports the outcome as unknown */
+  }
+  return null;
+}
+
 export function registerCheckinTools(server: McpServer, client: UntappdClient): void {
   server.registerTool(
     'untappd_toast',
@@ -159,7 +205,12 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
           note: 'Dry run — re-run with confirm: true to toggle your toast on this check-in.',
         });
       }
-      const data = await client.write<{ result?: string; like_type?: string }>('POST', `/checkin/toast/${checkin_id}`);
+      const data = await nonIdempotentWrite(
+        () => client.write<{ result?: string; like_type?: string }>('POST', `/checkin/toast/${checkin_id}`),
+        `Untappd did not answer the toast request for check-in ${checkin_id} in time, so it may or may not have ` +
+          'been applied. Toast is a TOGGLE: retrying could remove a toast that did land. Check with ' +
+          `untappd_checkin_info (checkin_id ${checkin_id}) before retrying.`,
+      );
       return minifiedResult({ toggled: true, checkin_id, result: data?.result, like_type: data?.like_type });
     },
   );
@@ -188,7 +239,11 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
           note: 'Dry run — re-run with confirm: true to post this comment to your Untappd account.',
         });
       }
-      const data = await client.write('POST', `/checkin/addcomment/${checkin_id}`, { form: { comment } });
+      const data = await nonIdempotentWrite(
+        () => client.write('POST', `/checkin/addcomment/${checkin_id}`, { form: { comment } }),
+        `Untappd did not answer in time, so the comment may have been posted already. Check the comments with ` +
+          `untappd_checkin_info (checkin_id ${checkin_id}) before retrying, or it may be posted twice.`,
+      );
       return minifiedResult({ posted: true, checkin_id, response: data });
     },
   );
@@ -324,10 +379,35 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
         blob = await fileBlob(photo.path, { maxBytes: MAX_PHOTO_BYTES, label: 'Photo', allowedRoots: photoRoots() });
       }
 
-      const data = await client.write<{
-        checkin_id?: number;
-        photo_upload?: { url?: string; destination_url?: string };
-      }>('POST', '/checkin/add', { form });
+      type AddResponse = { checkin_id?: number; photo_upload?: { url?: string; destination_url?: string } };
+      const sentAt = Date.now();
+      let data: AddResponse;
+      try {
+        data = await client.write<AddResponse>('POST', '/checkin/add', { form });
+      } catch (e) {
+        if (!(e instanceof UnreachableError)) throw e;
+        // The POST may have landed before the connection failed. Look before
+        // reporting failure: a retry of a check-in that DID land double-posts it
+        // to the public feed (and double-counts stats and badges).
+        const found = await findRecentCheckin(client, bid, sentAt);
+        if (found === null) {
+          throw new McpToolError(
+            'Untappd did not answer the check-in request in time, so the check-in may have been created anyway ' +
+              '(it could not be confirmed either way). Look at your latest check-ins with untappd_user_checkins ' +
+              'before retrying — retrying a check-in that did land posts it twice.',
+          );
+        }
+        return minifiedResult({
+          checked_in: true,
+          checkin_id: found,
+          recovered: true,
+          photo_attached: false,
+          ...(photo
+            ? { photo_error: `Check-in ${found} was created, but its photo upload URL was lost with the timed-out response, so no photo was attached.` }
+            : {}),
+          note: 'Untappd did not answer in time, but the check-in was found on your account — it was created. Do not retry.',
+        });
+      }
 
       // Photo is a follow-up S3 upload keyed to the returned checkin_id, then an
       // uploadComplete call. The check-in already exists at this point, so a
