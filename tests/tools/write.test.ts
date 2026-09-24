@@ -439,6 +439,22 @@ describe('write tools (confirm-token gated)', () => {
     }
   });
 
+  it('a same-size photo swapped in between the phases is refused (DRAFT_CHANGED) and nothing is posted', async () => {
+    const photo = join(tmpdir(), 'untappd-test-same-size-swap.jpg');
+    writeFileSync(photo, Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x01]));
+    try {
+      const p1 = parse((await harness.callTool('untappd_checkin', { bid: 100, photo_path: photo })) as never);
+      // Same path, same size, same type — only the bytes differ.
+      writeFileSync(photo, Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x02]));
+      const r = await harness.callTool('untappd_checkin', { bid: 100, photo_path: photo, confirmToken: p1.confirmToken });
+      expect(parse(r as never).error).toBe('DRAFT_CHANGED');
+      expect(write).not.toHaveBeenCalled();
+      expect(putBinary).not.toHaveBeenCalled();
+    } finally {
+      rmSync(photo, { force: true });
+    }
+  });
+
   it('MCP_CONFIRM_MODE=refuse refuses on a client that cannot be prompted, with no write', async () => {
     const saved = process.env.MCP_CONFIRM_MODE;
     process.env.MCP_CONFIRM_MODE = 'refuse';
