@@ -1,4 +1,6 @@
-import { realpathSync, statSync } from 'node:fs';
+import { createReadStream, realpathSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { pipeline } from 'node:stream/promises';
 import { delimiter, extname } from 'node:path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
@@ -98,6 +100,17 @@ async function checkPhoto(photoPath: string): Promise<CheckedPhoto> {
     );
   }
   return { path: real, size_bytes: size, ext, content_type: sniffed };
+}
+
+/**
+ * sha256 of the photo's bytes, streamed. Bound into the confirm token so a
+ * different image swapped in at the same path — even one of identical size and
+ * type — no longer matches the preview the user approved.
+ */
+async function photoSha256(path: string): Promise<string> {
+  const hash = createHash('sha256');
+  await pipeline(createReadStream(path), hash);
+  return hash.digest('hex');
 }
 
 // Untappd ratings are 0–5 in 0.25 increments; 0 (or omitted) means no rating.
@@ -378,9 +391,10 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
     async ({ bid, rating, shout, foursquare_id, photo_path, geolat, geolng, container_id, timezone: requestedTz, confirmToken }, ctx) => {
       const { timezone, gmt_offset } = checkinTimezone(requestedTz);
       // Vetted on every call, so the preview names the exact file (resolved path
-      // + size) that will be published — and a file that changes between the
-      // preview and the confirmed call no longer matches the token.
+      // + size) that will be published — and a file whose bytes change between
+      // the preview and the confirmed call no longer matches the token.
       const photo = photo_path !== undefined ? await checkPhoto(photo_path) : undefined;
+      const photo_sha256 = photo ? await photoSha256(photo.path) : undefined;
       const form: Record<string, string | number | undefined> = {
         bid,
         rating: rating !== undefined ? rating.toFixed(2) : undefined,
@@ -402,7 +416,7 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
         message: 'Review and confirm posting this check-in to your public Untappd feed:',
         confirmToken,
         target: bid,
-        payload: { ...request, photo },
+        payload: { ...request, photo, photo_sha256 },
         preview: {
           action: 'checkin',
           ...request,
