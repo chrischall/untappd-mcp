@@ -12,7 +12,7 @@
 
 - ESM + NodeNext: every relative import ends in `.js`, even from `.ts`.
 - Deferred-config-error pattern preserved: constructing a client with missing creds must NOT throw; the error surfaces on the first request needing that credential.
-- `zod@^4`, tool handlers return `textResult(...)`; writes stay `confirm`-gated (unchanged here).
+- `zod@^4`, tool handlers return `textResult(...)`; writes stay confirmation-gated (unchanged here).
 - No new runtime dependencies.
 - Version is managed by release-please; do NOT hand-edit `src/version.ts` or any version field.
 - The stdio server behavior and the public tool roster (37 tools) must be unchanged by this refactor — same tools, same endpoints, same outputs.

@@ -40,6 +40,21 @@ it goes stale.
 
 Copy `.env.example` to `.env` and fill it in for local use.
 
+### Confirmations
+
+Every write asks you to confirm it first. A client that can show a confirmation
+prompt (Claude Code) shows one. Elsewhere the write takes two calls: the first
+does nothing and returns a preview of the exact request plus a `confirmToken`,
+and only a repeat call with the same arguments and that token performs it. A
+token works once, for that tool and those arguments only; change anything and
+the call is refused with a fresh preview.
+
+| variable | default | |
+|---|---|---|
+| `MCP_CONFIRM_MODE` | `ask-user` | What a write does on a client that cannot show a confirmation prompt (claude.ai, Claude Desktop). `ask-user`: two steps — the first call does nothing and returns a preview plus a token, and the model must get your approval in chat before calling again with it. `auto`: the same two steps, but the model may use the token after reviewing the preview itself. `refuse`: writes are refused on such clients. A client that can show prompts (Claude Code) always gets the real prompt. An unrecognised value is treated as `refuse`. |
+| `MCP_CONFIRM_TTL_SECONDS` | `600` | How long a token stays valid. |
+| `MCP_CONFIRM_SECRET` | random per process | Signing key; set it only if tokens must survive a server restart. |
+
 ### Obtaining the client id / secret
 
 Untappd does not publish these; they live in the mobile app. Capture them from
@@ -65,8 +80,7 @@ Reads: `untappd_search_beer`, `untappd_beer_info`, `untappd_beer_activity`,
 `untappd_activity_feed`, `untappd_checkin_info`, `untappd_resolve`, `untappd_open_url`, `untappd_user_venues`, `untappd_venue_by_foursquare`, `untappd_trending`,
 `untappd_notifications`, `untappd_local_checkins`, `untappd_healthcheck`.
 
-Writes (confirm-gated — return a dry-run preview unless called with
-`confirm: true`): `untappd_toast`, `untappd_add_comment`, `untappd_delete_comment`, `untappd_checkin`,
+Writes (each asks you to confirm first — see [Confirmations](#confirmations)): `untappd_toast`, `untappd_add_comment`, `untappd_delete_comment`, `untappd_checkin`,
 `untappd_wishlist_add`, `untappd_wishlist_remove`, `untappd_delete_checkin`,
 `untappd_add_friend`, `untappd_accept_friend`, `untappd_reject_friend`, `untappd_remove_friend`.
 

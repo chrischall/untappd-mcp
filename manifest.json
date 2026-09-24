@@ -152,31 +152,31 @@
     },
     {
       "name": "untappd_toast",
-      "description": "Toast (like) a check-in on your account (confirm-gated)"
+      "description": "Toast (like) a check-in on your account (asks you to confirm first)"
     },
     {
       "name": "untappd_add_comment",
-      "description": "Comment on a check-in from your account (confirm-gated)"
+      "description": "Comment on a check-in from your account (asks you to confirm first)"
     },
     {
       "name": "untappd_delete_comment",
-      "description": "Delete one of your comments (confirm-gated)"
+      "description": "Delete one of your comments (asks you to confirm first)"
     },
     {
       "name": "untappd_checkin",
-      "description": "Post a new beer check-in, optionally with a photo (confirm-gated)"
+      "description": "Post a new beer check-in, optionally with a photo (asks you to confirm first)"
     },
     {
       "name": "untappd_delete_checkin",
-      "description": "Delete one of your check-ins (confirm-gated)"
+      "description": "Delete one of your check-ins (asks you to confirm first)"
     },
     {
       "name": "untappd_wishlist_add",
-      "description": "Add a beer to your wishlist (confirm-gated)"
+      "description": "Add a beer to your wishlist (asks you to confirm first)"
     },
     {
       "name": "untappd_wishlist_remove",
-      "description": "Remove a beer from your wishlist (confirm-gated)"
+      "description": "Remove a beer from your wishlist (asks you to confirm first)"
     },
     {
       "name": "untappd_healthcheck",
@@ -204,19 +204,19 @@
     },
     {
       "name": "untappd_add_friend",
-      "description": "Send a friend request (confirm-gated)"
+      "description": "Send a friend request (asks you to confirm first)"
     },
     {
       "name": "untappd_accept_friend",
-      "description": "Accept an incoming friend request (confirm-gated)"
+      "description": "Accept an incoming friend request (asks you to confirm first)"
     },
     {
       "name": "untappd_reject_friend",
-      "description": "Reject an incoming friend request (confirm-gated)"
+      "description": "Reject an incoming friend request (asks you to confirm first)"
     },
     {
       "name": "untappd_remove_friend",
-      "description": "Remove a friend or cancel a sent request (confirm-gated)"
+      "description": "Remove a friend or cancel a sent request (asks you to confirm first)"
     },
     {
       "name": "untappd_sync_checkins",

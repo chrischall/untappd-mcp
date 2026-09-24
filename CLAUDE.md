@@ -2,7 +2,7 @@
 
 MCP server for [Untappd](https://untappd.com) that talks to Untappd's **private
 mobile (v4) API** as the user's own account — search, profiles, check-ins,
-wishlists, badges, friends, feed, plus confirm-gated writes (check-in, toast,
+wishlists, badges, friends, feed, plus confirmation-gated writes (check-in, toast,
 comment, friend actions). There is no public/official API here: every endpoint
 and payload shape in this repo was reverse-engineered from the iPad app's
 traffic, so treat undocumented field names as observations, not contracts.
@@ -168,8 +168,13 @@ bump doesn't need a code change. Where credentials arrive through
   runtimes it's undefined and there is no local `.env`.
 - `VERSION` comes from `src/version.ts`, the single release-please marker;
   `tests/version-sync.test.ts` guards it.
-- **Writes are confirm-gated**: without `confirm: true` a write tool returns a
-  dry-run preview and makes **no network call**. Keep new writes to that shape.
+- **Writes are confirmation-gated** through `confirmWrite` (`src/tools/confirm.ts`,
+  mcp-utils' `requireConfirmationWithFallback` + `confirmationFromEnv`): a
+  prompt where the client supports one, else a phase-1 preview + `confirmToken`
+  that makes **no network call**, and a phase-2 call with that token. `payload`
+  must be exactly what the write sends (it is hashed into the token) and is
+  rebuilt from the args on every call. Keep new writes to that shape; the input
+  is `confirmToken: confirmTokenParam`, never a `confirm` boolean.
 - `untappd_checkin` opens the photo blob *before* POSTing the check-in (so a bad
   path can't orphan a photo-less check-in), and a failed S3 photo upload is
   surfaced as `photo_error` rather than thrown — the check-in already exists.

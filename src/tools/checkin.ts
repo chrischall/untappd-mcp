@@ -3,6 +3,7 @@ import { delimiter, extname } from 'node:path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import {
+  confirmTokenParam,
   McpToolError,
   assertPathWithinRoots,
   createHelpfulError,
@@ -11,12 +12,12 @@ import {
   minifiedResult,
   readEnvVar,
   readFileHead,
-  schemaConfirm,
   sniffMimeBytes,
   toolAnnotations,
   UnreachableError,
 } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
+import { CONFIRM_FLOW, confirmWrite } from './confirm.js';
 
 const CheckinIdSchema = z.number().int().positive().describe('Untappd check-in id');
 
@@ -52,7 +53,7 @@ function photoRoots(): string[] | undefined {
  * free-form, model-supplied path, so an injected instruction could aim it at
  * any file with an image-like name. Require the bytes to BE a JPEG/PNG that
  * matches the extension, cap the size, honour the optional UNTAPPD_PHOTO_DIR
- * allow-list, and return the resolved path + size so the dry run shows a human
+ * allow-list, and return the resolved path + size so the preview shows a human
  * exactly which file would be uploaded. Errors never echo the path back.
  */
 async function checkPhoto(photoPath: string): Promise<CheckedPhoto> {
@@ -195,23 +196,30 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
       title: 'Toast an Untappd check-in',
       description:
         "Toast (like) a check-in on YOUR account. This endpoint is a TOGGLE: calling it on a check-in you have " +
-        'already toasted removes the toast. Without confirm: true it returns a dry-run preview and makes NO network ' +
-        'call; with confirm: true it posts. Writes to your Untappd account and is visible to others.',
+        `already toasted removes the toast. Writes to your Untappd account and is visible to others. ${CONFIRM_FLOW}`,
       annotations: toolAnnotations({ title: 'Toast an Untappd check-in', readOnly: false, idempotent: false, openWorld: true, destructive: false }),
       inputSchema: z.object({
         checkin_id: CheckinIdSchema,
-        confirm: schemaConfirm,
+        confirmToken: confirmTokenParam,
       }),
     },
-    async ({ checkin_id, confirm }) => {
-      if (confirm !== true) {
-        return minifiedResult({
-          dryRun: true,
+    async ({ checkin_id, confirmToken }, ctx) => {
+      const request = { method: 'POST', path: `/checkin/toast/${checkin_id}` };
+      const gate = await confirmWrite(ctx, {
+        tool: 'untappd_toast',
+        action: 'untappd.toast',
+        message: 'Review and confirm toggling your toast on this Untappd check-in:',
+        confirmToken,
+        target: checkin_id,
+        payload: request,
+        preview: {
           action: 'toast',
           checkin_id,
-          note: 'Dry run — re-run with confirm: true to toggle your toast on this check-in.',
-        });
-      }
+          ...request,
+          note: 'Toggles your toast on this check-in (removes it if you have already toasted).',
+        },
+      });
+      if (gate) return gate;
       const data = await nonIdempotentWrite(
         () => client.write<{ result?: string; like_type?: string }>('POST', `/checkin/toast/${checkin_id}`),
         `Untappd did not answer the toast request for check-in ${checkin_id} in time, so it may or may not have ` +
@@ -227,25 +235,33 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
     {
       title: 'Comment on an Untappd check-in',
       description:
-        'Post a comment on a check-in from YOUR account. Without confirm: true it returns a dry-run preview and ' +
-        'makes NO network call; with confirm: true it posts. Writes to your Untappd account and is visible to others.',
+        'Post a comment on a check-in from YOUR account. Writes to your Untappd account and is visible to others. ' +
+        CONFIRM_FLOW,
       annotations: toolAnnotations({ title: 'Comment on an Untappd check-in', readOnly: false, idempotent: false, openWorld: true, destructive: false }),
       inputSchema: z.object({
         checkin_id: CheckinIdSchema,
         comment: z.string().min(1).max(2000).describe('Comment text to post'),
-        confirm: schemaConfirm,
+        confirmToken: confirmTokenParam,
       }),
     },
-    async ({ checkin_id, comment, confirm }) => {
-      if (confirm !== true) {
-        return minifiedResult({
-          dryRun: true,
+    async ({ checkin_id, comment, confirmToken }, ctx) => {
+      const request = { method: 'POST', path: `/checkin/addcomment/${checkin_id}`, form: { comment } };
+      const gate = await confirmWrite(ctx, {
+        tool: 'untappd_add_comment',
+        action: 'untappd.add_comment',
+        message: 'Review and confirm posting this comment from your Untappd account:',
+        confirmToken,
+        target: checkin_id,
+        payload: request,
+        preview: {
           action: 'add_comment',
           checkin_id,
           comment,
-          note: 'Dry run — re-run with confirm: true to post this comment to your Untappd account.',
-        });
-      }
+          ...request,
+          note: 'Posts this comment to the check-in from your Untappd account, visible to others.',
+        },
+      });
+      if (gate) return gate;
       const data = await nonIdempotentWrite(
         () => client.write('POST', `/checkin/addcomment/${checkin_id}`, { form: { comment } }),
         `Untappd did not answer in time, so the comment may have been posted already. Check the comments with ` +
@@ -260,23 +276,25 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
     {
       title: 'Delete a comment from an Untappd check-in',
       description:
-        'Delete one of YOUR comments by its comment id (the id from a check-in\'s comments list). Without ' +
-        'confirm: true it returns a dry-run preview and makes NO network call; with confirm: true it deletes.',
+        `Delete one of YOUR comments by its comment id (the id from a check-in's comments list). ${CONFIRM_FLOW}`,
       annotations: toolAnnotations({ title: 'Delete a comment from an Untappd check-in', readOnly: false, idempotent: true, openWorld: true, destructive: true }),
       inputSchema: z.object({
         comment_id: z.number().int().positive().describe('Untappd comment id (from a check-in\'s comments.items)'),
-        confirm: schemaConfirm,
+        confirmToken: confirmTokenParam,
       }),
     },
-    async ({ comment_id, confirm }) => {
-      if (confirm !== true) {
-        return minifiedResult({
-          dryRun: true,
-          action: 'delete_comment',
-          comment_id,
-          note: 'Dry run — re-run with confirm: true to delete this comment from your Untappd account.',
-        });
-      }
+    async ({ comment_id, confirmToken }, ctx) => {
+      const request = { method: 'POST', path: `/checkin/deletecomment/${comment_id}` };
+      const gate = await confirmWrite(ctx, {
+        tool: 'untappd_delete_comment',
+        action: 'untappd.delete_comment',
+        message: 'Review and confirm deleting this comment from your Untappd account:',
+        confirmToken,
+        target: comment_id,
+        payload: request,
+        preview: { action: 'delete_comment', comment_id, ...request, note: 'Deletes this comment from your Untappd account.' },
+      });
+      if (gate) return gate;
       const data = await client.write<{ result?: string }>('POST', `/checkin/deletecomment/${comment_id}`);
       return minifiedResult({ deleted: true, comment_id, result: data?.result });
     },
@@ -287,23 +305,30 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
     {
       title: 'Delete an Untappd check-in',
       description:
-        'Permanently delete one of YOUR check-ins by its id. This is destructive and cannot be undone. Without ' +
-        'confirm: true it returns a dry-run preview and makes NO network call; with confirm: true it deletes.',
+        `Permanently delete one of YOUR check-ins by its id. This is destructive and cannot be undone. ${CONFIRM_FLOW}`,
       annotations: toolAnnotations({ title: 'Delete an Untappd check-in', readOnly: false, idempotent: true, openWorld: true, destructive: true }),
       inputSchema: z.object({
         checkin_id: CheckinIdSchema,
-        confirm: schemaConfirm,
+        confirmToken: confirmTokenParam,
       }),
     },
-    async ({ checkin_id, confirm }) => {
-      if (confirm !== true) {
-        return minifiedResult({
-          dryRun: true,
+    async ({ checkin_id, confirmToken }, ctx) => {
+      const request = { method: 'POST', path: `/checkin/delete/${checkin_id}` };
+      const gate = await confirmWrite(ctx, {
+        tool: 'untappd_delete_checkin',
+        action: 'untappd.delete_checkin',
+        message: 'Review and confirm PERMANENTLY deleting this Untappd check-in:',
+        confirmToken,
+        target: checkin_id,
+        payload: request,
+        preview: {
           action: 'delete_checkin',
           checkin_id,
-          note: 'Dry run — re-run with confirm: true to PERMANENTLY delete this check-in. This cannot be undone.',
-        });
-      }
+          ...request,
+          note: 'PERMANENTLY deletes this check-in. This cannot be undone.',
+        },
+      });
+      if (gate) return gate;
       const data = await client.write<{ result?: string }>('POST', `/checkin/delete/${checkin_id}`);
       return minifiedResult({ deleted: true, checkin_id, result: data?.result });
     },
@@ -316,8 +341,8 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
       description:
         'Post a NEW beer check-in to YOUR Untappd account — this publishes to your public feed. Provide the beer id ' +
         '(bid) from untappd_search_beer; optionally a rating (0–5 in 0.25 steps), a shout (comment), a venue via ' +
-        'foursquare_id, and a local photo via photo_path (JPEG/PNG). Without confirm: true it returns a dry-run ' +
-        'preview of the exact fields and makes NO network call; with confirm: true it posts.',
+        'foursquare_id, and a local photo via photo_path (JPEG/PNG). The preview shows the exact fields and photo ' +
+        `that will be posted. ${CONFIRM_FLOW}`,
       annotations: toolAnnotations({ title: 'Check in a beer on Untappd', readOnly: false, idempotent: false, openWorld: true, destructive: false }),
       inputSchema: z.object({
         bid: z.number().int().positive().describe('Untappd beer id to check in (from untappd_search_beer)'),
@@ -329,7 +354,7 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
           .optional()
           .describe(
             'Optional path to a local JPEG/PNG photo (max 15 MB) to attach — it is published publicly. Only use a ' +
-              'file the user explicitly chose; the dry run shows the resolved path and size for them to confirm.',
+              'file the user explicitly chose; the preview shows the resolved path and size for them to confirm.',
           ),
         geolat: z.number().optional().describe('Optional latitude of the check-in'),
         geolng: z.number().optional().describe('Optional longitude of the check-in'),
@@ -347,13 +372,14 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
               "UNTAPPD_TIMEZONE, else the server's own zone — which on a hosted connector is usually UTC, so pass it " +
               'when you know where the user is.',
           ),
-        confirm: schemaConfirm,
+        confirmToken: confirmTokenParam,
       }),
     },
-    async ({ bid, rating, shout, foursquare_id, photo_path, geolat, geolng, container_id, timezone: requestedTz, confirm }) => {
+    async ({ bid, rating, shout, foursquare_id, photo_path, geolat, geolng, container_id, timezone: requestedTz, confirmToken }, ctx) => {
       const { timezone, gmt_offset } = checkinTimezone(requestedTz);
-      // Vetted on the dry run too, so the preview names the exact file (resolved
-      // path + size) that confirm: true would publish.
+      // Vetted on every call, so the preview names the exact file (resolved path
+      // + size) that will be published — and a file that changes between the
+      // preview and the confirmed call no longer matches the token.
       const photo = photo_path !== undefined ? await checkPhoto(photo_path) : undefined;
       const form: Record<string, string | number | undefined> = {
         bid,
@@ -369,15 +395,22 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
         photo_file_ext: photo?.ext,
         platform: 'ios',
       };
-      if (confirm !== true) {
-        return minifiedResult({
-          dryRun: true,
+      const request = { method: 'POST', path: '/checkin/add', form };
+      const gate = await confirmWrite(ctx, {
+        tool: 'untappd_checkin',
+        action: 'untappd.checkin',
+        message: 'Review and confirm posting this check-in to your public Untappd feed:',
+        confirmToken,
+        target: bid,
+        payload: { ...request, photo },
+        preview: {
           action: 'checkin',
-          form,
+          ...request,
           photo: photo ? { ...photo, note: 'this exact file will be uploaded PUBLICLY after the check-in is created' } : undefined,
-          note: 'Dry run — re-run with confirm: true to POST this check-in to your public Untappd feed.',
-        });
-      }
+          note: 'POSTs this check-in to your public Untappd feed.',
+        },
+      });
+      if (gate) return gate;
       // Open the photo BEFORE creating the check-in, so a missing/unreadable
       // file fails fast without leaving an orphaned photo-less check-in behind.
       let blob: Blob | undefined;
