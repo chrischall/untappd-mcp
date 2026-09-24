@@ -245,6 +245,10 @@
     {
       "name": "untappd_top_not_had",
       "description": "From a list of beer ids, the top N a user has NOT had, ranked by rating, with a style filter"
+    },
+    {
+      "name": "untappd_cache_forget",
+      "description": "Delete one user's cached check-ins, distinct beers and sync state from the local cache (confirmation-gated)"
     }
   ],
   "compatibility": {

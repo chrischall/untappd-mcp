@@ -86,7 +86,7 @@ Writes (each asks you to confirm first — see [Confirmations](#confirmations)):
 
 Check-in cache: `untappd_sync_checkins`, `untappd_sync_user_beers`,
 `untappd_cache_has_had`, `untappd_cache_has_had_many`, `untappd_cache_not_had`,
-`untappd_cache_query`, `untappd_top_not_had`.
+`untappd_cache_query`, `untappd_top_not_had`, `untappd_cache_forget`.
 
 ## Check-in cache
 
@@ -148,6 +148,15 @@ Syncing **another** user goes through the same authed endpoint as
 `untappd_user_checkins`, so Untappd's privacy rules apply: it only works if that
 account is public or your friend. Otherwise the sync returns a clear error
 telling you to add them as a friend first.
+
+**Retention.** Nothing in the cache expires: synced rows — including another
+user's dated check-ins, comments and venues — stay until you remove them. The
+file is created owner-only (directory `0700`, database `0600`, and older
+installs are tightened on open). `untappd_cache_forget` deletes one user's
+cached check-ins, distinct-beers list and sync state after a confirmation
+(preview shows the username and row counts); it touches only the local cache,
+never Untappd, and a later sync can re-fetch. Deleting the file removes
+everything.
 
 A cache holds only the check-ins the account it belongs to was allowed to
 fetch. `untappd_healthcheck` reports the running version and the exact tool set

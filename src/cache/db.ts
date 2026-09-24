@@ -105,4 +105,5 @@ export {
   type HasHadResult,
   type QueryFilters,
   type CacheStore,
+  type ForgetResult,
 } from './store.js';
