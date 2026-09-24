@@ -42,7 +42,7 @@ Most user tools default `username` to your configured account when omitted.
 
 ## Response shape (`view`)
 
-Thirteen of this server's 45 tools take `view: "compact" | "full"`, and
+Thirteen of this server's 46 tools take `view: "compact" | "full"`, and
 **`compact` is the DEFAULT** — the slim rung is what you get without asking
 for it.
 
@@ -104,14 +104,14 @@ silently manufactured.
 `full` already IS the upstream response and a third value would silently alias
 one that exists.
 
-### The 32 tools without `view`
+### The 33 tools without `view`
 
 Each for its own reason — and none of them will tell you it ignored the
 parameter, because an undeclared key is dropped by zod without a warning:
 
-- **The 11 confirmation-gated writes** (`untappd_checkin`, `untappd_toast`,
+- **The 12 confirmation-gated writes** (`untappd_checkin`, `untappd_toast`,
   `untappd_add_comment`, the two deletes, the wishlist pair, the four friend
-  actions) answer with a confirmation preview or a receipt. Nothing in a receipt is
+  actions, and the local `untappd_cache_forget`) answer with a confirmation preview or a receipt. Nothing in a receipt is
   decoration.
 - **`untappd_sync_checkins` / `untappd_sync_user_beers`** answer with sync
   PROGRESS — pages walked, `another_run_needed`, `backfill_complete`. Slimming
@@ -189,6 +189,12 @@ Query tools (has-had ones consult BOTH sources — a hit in either = had):
   capped at `api_budget` per run (partial/another_run_needed when exceeded).
 - `untappd_cache_query` — filter cached check-ins by brewery, style, `min_rating`,
   venue, and date range.
+
+**Retention.** The cache keeps what you sync until you remove it — including
+friends' dated check-ins, comments and venues. `untappd_cache_forget` (confirmation-gated)
+deletes one user's check-ins, distinct beers and sync state from the LOCAL cache
+only; Untappd is untouched and a later sync can re-fetch. The file is created
+owner-only (dir `0700`, file `0600`).
 
 Every cache read returns a `freshness` block reporting each source's completeness
 separately (plus `coverage_complete` and a `caveat` when incomplete), so you can

@@ -1,10 +1,11 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
-import { RateLimitError, createHelpfulError, minifiedResult, toolAnnotations } from '@chrischall/mcp-utils';
+import { RateLimitError, confirmTokenParam, createHelpfulError, minifiedResult, toolAnnotations } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 import { beerMetaFrom, type BeerMeta, type CacheStore, type SyncState } from '../cache/store.js';
 import { syncCheckins } from '../cache/sync.js';
 import { syncUserBeers } from '../cache/sync-beers.js';
+import { CONFIRM_FLOW, confirmWrite } from './confirm.js';
 
 // Re-fetch cached beer metadata at most this often; a hit newer than this skips
 // the beer/info API call.
@@ -436,6 +437,51 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         },
         freshness: await freshness(cache, user),
       });
+    },
+  );
+
+  server.registerTool(
+    'untappd_cache_forget',
+    {
+      title: "Forget a user's cached check-ins",
+      description:
+        "Delete everything the LOCAL cache holds for one user — their cached check-ins (beer, rating, comment, venue, " +
+        'date), distinct-beers list and sync state — e.g. after syncing a friend you no longer want a history of. Only ' +
+        'the local cache is touched; nothing on Untappd changes, and a later sync can re-fetch it. Shared beer ' +
+        'metadata is kept. The preview shows the username and exactly how many rows will be removed. Omit username ' +
+        `for your own account. ${CONFIRM_FLOW}`,
+      annotations: toolAnnotations({ title: "Forget a user's cached check-ins", readOnly: false, idempotent: true, openWorld: false, destructive: true }),
+      inputSchema: z.object({
+        username: UsernameArg,
+        confirmToken: confirmTokenParam,
+      }),
+    },
+    async ({ username, confirmToken }, ctx) => {
+      const user = resolveUser(username, client.loginName);
+      const cache = cacheProvider();
+      // Bound into the token: if a sync adds rows after the preview, the
+      // token no longer matches and the user re-confirms the real counts.
+      const counts = {
+        checkins: await cache.cachedCount(user),
+        distinct_beers: await cache.distinctBeersCount(user),
+      };
+      const gate = await confirmWrite(ctx, {
+        tool: 'untappd_cache_forget',
+        action: 'untappd.cache_forget',
+        message: `Review and confirm deleting ${user}'s data from the local Untappd cache:`,
+        confirmToken,
+        target: user.toLowerCase(),
+        payload: { username: user.toLowerCase(), ...counts },
+        preview: {
+          action: 'cache_forget',
+          username: user,
+          ...counts,
+          note: 'Deletes these rows from the LOCAL cache only; Untappd itself is unchanged and a re-sync can restore them.',
+        },
+      });
+      if (gate) return gate;
+      const removed = await cache.forgetUser(user);
+      return minifiedResult({ forgotten: true, username: user, removed });
     },
   );
 }

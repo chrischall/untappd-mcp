@@ -162,6 +162,19 @@ export interface CacheStore {
   getBeerMeta(bids: number[]): Promise<BeerMeta[]>;
   /** Upsert cached beer metadata (dedupe on bid). */
   upsertBeerMeta(rows: BeerMeta[]): Promise<void>;
+  /**
+   * Delete everything cached for one user (check-ins, distinct beers, sync
+   * state) and return how many rows each table lost. Shared `beer_meta` is
+   * global beer facts, not user data, and is kept.
+   */
+  forgetUser(username: string): Promise<ForgetResult>;
+}
+
+/** Rows removed by {@link CacheStore.forgetUser}, per table. */
+export interface ForgetResult {
+  checkins: number;
+  distinct_beers: number;
+  sync_state: number;
 }
 
 export type SqlParam = string | number | null;
@@ -651,6 +664,24 @@ export class CheckinStoreCore {
     ) as unknown as CheckinRow[];
   }
 
+  /** Delete one user's cached rows (case-insensitive) in a single transaction. */
+  forgetUser(username: string): ForgetResult {
+    const key = username.toLowerCase();
+    const count = (table: string) =>
+      Number(this.db.get(`SELECT COUNT(*) AS n FROM ${table} WHERE username = ?`, [key])?.n ?? 0);
+    const removed: ForgetResult = {
+      checkins: count('checkins'),
+      distinct_beers: count('distinct_beers'),
+      sync_state: count('sync_state'),
+    };
+    this.db.transaction(() => {
+      this.db.run('DELETE FROM checkins WHERE username = ?', [key]);
+      this.db.run('DELETE FROM distinct_beers WHERE username = ?', [key]);
+      this.db.run('DELETE FROM sync_state WHERE username = ?', [key]);
+    });
+    return removed;
+  }
+
   getBeerMeta(bids: number[]): BeerMeta[] {
     if (bids.length === 0) return [];
     const placeholders = bids.map(() => '?').join(', ');
@@ -724,6 +755,9 @@ export class LocalCacheStore implements CacheStore {
   }
   async upsertBeerMeta(rows: BeerMeta[]): Promise<void> {
     this.core.upsertBeerMeta(rows);
+  }
+  async forgetUser(username: string): Promise<ForgetResult> {
+    return this.core.forgetUser(username);
   }
 }
 

@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { readEnvVar } from '@chrischall/mcp-utils';
@@ -44,14 +44,50 @@ export class CheckinCache extends LocalCacheStore {
     super(new CheckinStoreCore(new NodeSqlDriver(db)));
   }
 
-  /** Open (creating parent dirs) a file-backed cache, or `:memory:` for tests. */
+  /**
+   * Open (creating parent dirs) a file-backed cache, or `:memory:` for tests.
+   * The file holds other people's dated check-in and venue history, so it is
+   * kept owner-only: dirs 0700, the db (and any -wal/-shm/-journal) 0600.
+   */
   static open(path: string): CheckinCache {
-    if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
-    return new CheckinCache(new DatabaseSync(path));
+    if (path !== ':memory:') preparePrivateFile(path);
+    const cache = new CheckinCache(new DatabaseSync(path));
+    if (path !== ':memory:') tightenSidecars(path);
+    return cache;
   }
 
   close(): void {
     this.db.close();
+  }
+}
+
+/**
+ * Create the cache's directory (0700 — `mode` applies to every dir mkdir
+ * creates) and the db file itself (0600) BEFORE SQLite opens it, so the file is
+ * never briefly umask-readable. Pre-existing loose entries from older versions
+ * are tightened too; chmod failures (e.g. a shared dir the user doesn't own)
+ * are best-effort, never fatal.
+ */
+function preparePrivateFile(path: string): void {
+  const dir = dirname(path);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  bestEffortChmod(dir, 0o700);
+  if (!existsSync(path)) closeSync(openSync(path, 'a', 0o600));
+  bestEffortChmod(path, 0o600);
+}
+
+/** SQLite side files inherit the db's mode, but re-assert in case a loose one lingers. */
+function tightenSidecars(path: string): void {
+  for (const suffix of ['-wal', '-shm', '-journal']) {
+    if (existsSync(path + suffix)) bestEffortChmod(path + suffix, 0o600);
+  }
+}
+
+function bestEffortChmod(path: string, mode: number): void {
+  try {
+    chmodSync(path, mode);
+  } catch {
+    /* best-effort — not every filesystem supports POSIX modes */
   }
 }
 
@@ -69,4 +105,5 @@ export {
   type HasHadResult,
   type QueryFilters,
   type CacheStore,
+  type ForgetResult,
 } from './store.js';

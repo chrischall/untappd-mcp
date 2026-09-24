@@ -138,6 +138,7 @@ Non-obvious behaviours that were each fixed the hard way:
   completeness **separately** plus a `caveat`, so a "not had" can be flagged as a
   possible false negative. New cache read tools must include it.
 - Usernames are keyed **lowercased**; other stored fields keep their original casing.
+- The cache holds OTHER users' dated venue history: `CheckinCache.open()` creates the dir `0700` and the db `0600` before SQLite opens it (and tightens old loose files). Retention is user-driven — `untappd_cache_forget` (confirm-gated, local-only) is the delete path; there is no TTL.
 - `escapeLike` replaces `%`/`_` in user input with a space (the LIKE patterns set no ESCAPE clause).
 
 ## Environment (stdio)
@@ -152,7 +153,7 @@ UNTAPPD_UTV            optional  API version param (default 4.0.0)
 UNTAPPD_USER_AGENT     optional  Default mimics Untappd/4.7.13 (ios; iPadOS 26.5)
 UNTAPPD_TIMEZONE       optional  IANA zone check-ins are stamped with when the call passes no `timezone` (default: process zone — UTC on a hosted connector)
 UNTAPPD_PHOTO_DIR      optional  Allow-list dir(s) for untappd_checkin photo_path (unset = any path; bytes are always sniffed as JPEG/PNG, 15 MB cap)
-UNTAPPD_CACHE_DB       optional  Cache SQLite path (default ~/.untappd-mcp/checkins.db). LOCAL ONLY
+UNTAPPD_CACHE_DB       optional  Cache SQLite path (default ~/.untappd-mcp/checkins.db, owner-only 0600). LOCAL ONLY
 ```
 
 The app-mimicking constants in `client.ts` (`appVersion`, device fields,
