@@ -159,7 +159,7 @@ throughout (it's the published product).
   Worker via `@cloudflare/vitest-pool-workers`.
 - **Manual gate:** deploy to a `*.workers.dev` URL; add it as a connector on
   **mobile + web**; log in with a real Untappd account; run a read
-  (`untappd_search_beer`) and a confirm-gated write dry-run.
+  (`untappd_search_beer`) and a confirmation-gated write preview.
 
 ## 8. Scope & phasing (each phase = its own PR)
 

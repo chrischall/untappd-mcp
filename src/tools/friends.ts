@@ -1,15 +1,16 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
-import { minifiedResult, schemaConfirm, toolAnnotations } from '@chrischall/mcp-utils';
+import { confirmTokenParam, minifiedResult, toolAnnotations } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
+import { CONFIRM_FLOW, confirmWrite } from './confirm.js';
 
 // The endpoint PATHS below are confirmed from the Untappd app's own JS bundle
 // (`friend/request`, `friend/accept`, `friend/reject`, `friend/remove`). The
 // HTTP method (POST) mirrors the other captured action-writes (toast/comment),
 // but — unlike the rest of this server's writes — these were NOT live-verified
 // against the API, because doing so would send real friend requests to / alter
-// real relationships with other people. They are confirm-gated so nothing fires
-// without an explicit confirm: true.
+// real relationships with other people. They are confirmation-gated so nothing
+// fires without the user approving the exact request first.
 
 const TargetUidSchema = z
   .number()
@@ -64,8 +65,7 @@ export function registerFriendActionTools(server: McpServer, client: UntappdClie
         title: action.title,
         description:
           `${action.detail} Acts on YOUR account and affects a real relationship with another person. ` +
-          'Without confirm: true it returns a dry-run preview and makes NO network call; with confirm: true it ' +
-          'performs the action. Note: this endpoint path is taken from the Untappd app but is not otherwise ' +
+          `${CONFIRM_FLOW} Note: this endpoint path is taken from the Untappd app but is not otherwise ` +
           'independently verified.',
         // All four reach ANOTHER PERSON — the description says so itself: "affects
         // a real relationship with another person". A friend request cannot be
@@ -74,18 +74,21 @@ export function registerFriendActionTools(server: McpServer, client: UntappdClie
         annotations: toolAnnotations({ title: action.title, readOnly: false, idempotent: true, openWorld: true, destructive: true }),
         inputSchema: z.object({
           target_uid: TargetUidSchema,
-          confirm: schemaConfirm,
+          confirmToken: confirmTokenParam,
         }),
       },
-      async ({ target_uid, confirm }) => {
-        if (confirm !== true) {
-          return minifiedResult({
-            dryRun: true,
-            action: action.path,
-            target_uid,
-            note: `Dry run — re-run with confirm: true to ${action.verb} user ${target_uid}.`,
-          });
-        }
+      async ({ target_uid, confirmToken }, ctx) => {
+        const request = { method: 'POST', path: `/friend/${action.path}/${target_uid}` };
+        const gate = await confirmWrite(ctx, {
+          tool: action.tool,
+          action: `untappd.friend_${action.path}`,
+          message: `Review and confirm: ${action.verb} Untappd user ${target_uid}.`,
+          confirmToken,
+          target: target_uid,
+          payload: request,
+          preview: { action: action.path, target_uid, ...request, note: `Will ${action.verb} user ${target_uid}.` },
+        });
+        if (gate) return gate;
         const data = await client.write<{ result?: string }>('POST', `/friend/${action.path}/${target_uid}`);
         return minifiedResult({ done: true, action: action.path, target_uid, result: data?.result });
       },

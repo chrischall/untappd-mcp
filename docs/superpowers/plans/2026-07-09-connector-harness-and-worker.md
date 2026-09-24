@@ -319,7 +319,7 @@ Document the exact deploy steps. The actual deploy requires the owner's Cloudfla
   3. `npx wrangler secret put UNTAPPD_CLIENT_ID` and `... UNTAPPD_CLIENT_SECRET` (the operator's captured app credentials).
   4. `npm run worker:deploy` → note the `https://untappd-connector.<subdomain>.workers.dev` URL.
   5. In claude.ai → Settings → Connectors → Add custom connector → paste `https://…workers.dev/mcp`. Complete the Untappd login when prompted.
-  6. Verify on the **mobile app**: the connector appears, and `untappd_search_beer` / a dry-run write work.
+  6. Verify on the **mobile app**: the connector appears, and `untappd_search_beer` / a write's confirmation preview work.
   7. Rotation/teardown notes: `wrangler secret delete`, `wrangler kv namespace delete`.
 - [ ] **Step 2: Add the README "Remote connector" section** summarizing what it is (unlisted shareable, per-user Untappd login) and linking `docs/DEPLOY-CONNECTOR.md`.
 - [ ] **Step 3: Commit** the docs.
