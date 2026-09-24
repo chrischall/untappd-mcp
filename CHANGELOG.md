@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.2.0](https://github.com/chrischall/untappd-mcp/compare/v2.1.3...v2.2.0) (2026-09-24)
+
+
+### Features
+
+* confirm writes with a preview token instead of confirm: true ([#199](https://github.com/chrischall/untappd-mcp/issues/199)) ([169fcb4](https://github.com/chrischall/untappd-mcp/commit/169fcb4317833dcfd74afd1d31446697e42ebc89))
+
+
+### Bug Fixes
+
+* **checkin:** refuse a confirm token when the photo's bytes changed since the preview ([#202](https://github.com/chrischall/untappd-mcp/issues/202)) ([bce389a](https://github.com/chrischall/untappd-mcp/commit/bce389a9b6c6e15c8c6e3c3f11fdbb036fe0caaf)), closes [#200](https://github.com/chrischall/untappd-mcp/issues/200)
+
 ## [2.1.3](https://github.com/chrischall/untappd-mcp/compare/v2.1.2...v2.1.3) (2026-09-23)
 
 
