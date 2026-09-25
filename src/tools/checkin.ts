@@ -90,7 +90,14 @@ async function checkPhoto(photoPath: string): Promise<CheckedPhoto> {
       hint: 'Attach a normal-sized JPEG or PNG photo.',
     });
   }
-  const sniffed = sniffMimeBytes(await readFileHead(real, 16));
+  // Re-check UNTAPPD_PHOTO_DIR at open time, so a swap after the check above can't escape it.
+  let head: Uint8Array;
+  try {
+    head = await readFileHead(real, 16, { allowedRoots: roots });
+  } catch {
+    throw new McpToolError('Photo file not found or not readable.');
+  }
+  const sniffed = sniffMimeBytes(head);
   if (sniffed !== PHOTO_CONTENT_TYPES[ext]) {
     throw createHelpfulError(
       sniffed === 'image/jpeg' || sniffed === 'image/png'
