@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.2.1](https://github.com/chrischall/untappd-mcp/compare/v2.2.0...v2.2.1) (2026-09-25)
+
+
+### Bug Fixes
+
+* **cache:** keep the local check-in cache owner-only and add untappd_cache_forget ([#206](https://github.com/chrischall/untappd-mcp/issues/206)) ([f6b8743](https://github.com/chrischall/untappd-mcp/commit/f6b87430335baab08e59a57916a5d676cb86157a))
+* **checkin:** confine the photo header read to UNTAPPD_PHOTO_DIR ([#207](https://github.com/chrischall/untappd-mcp/issues/207)) ([2972754](https://github.com/chrischall/untappd-mcp/commit/2972754cd9490f993feef66b51abb37b780d99b7))
+* **deps:** bump the production-dependencies group with 2 updates ([#204](https://github.com/chrischall/untappd-mcp/issues/204)) ([b5b5470](https://github.com/chrischall/untappd-mcp/commit/b5b5470aed29913e09884f61808995e560e5d09f))
+
 ## [2.2.0](https://github.com/chrischall/untappd-mcp/compare/v2.1.3...v2.2.0) (2026-09-24)
 
 
