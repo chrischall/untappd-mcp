@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.2.3](https://github.com/chrischall/untappd-mcp/compare/v2.2.2...v2.2.3) (2026-10-03)
+
+
+### Bug Fixes
+
+* **deps:** bump @chrischall/mcp-utils to 2.10.0 ([#214](https://github.com/chrischall/untappd-mcp/issues/214)) ([49eefb7](https://github.com/chrischall/untappd-mcp/commit/49eefb7269fb93e3f42f71d2445ab9f3167cd5f4))
+* **deps:** bump @chrischall/mcp-utils to 2.12.0 ([#216](https://github.com/chrischall/untappd-mcp/issues/216)) ([1ddc3fc](https://github.com/chrischall/untappd-mcp/commit/1ddc3fcd2205a345f829721744c7a8c31aa3cc19))
+* **deps:** bump @chrischall/mcp-utils to 2.13.0 ([#217](https://github.com/chrischall/untappd-mcp/issues/217)) ([810fce0](https://github.com/chrischall/untappd-mcp/commit/810fce06f22feb8bcd6462c3efa027fd09471588))
+* keep write approvals valid across a hosted restart (mcp-utils 2.11.0) ([#215](https://github.com/chrischall/untappd-mcp/issues/215)) ([0a5d877](https://github.com/chrischall/untappd-mcp/commit/0a5d8770cd44b181d505b68d70d0427dfeed52e5))
+* report CDN/WAF blocks as edge_blocked, not a rejected credential (mcp-utils 2.9.0) ([#212](https://github.com/chrischall/untappd-mcp/issues/212)) ([9bcacbf](https://github.com/chrischall/untappd-mcp/commit/9bcacbf40e6c32cb6084d789ae55ec1761f9ede4))
+
 ## [2.2.2](https://github.com/chrischall/untappd-mcp/compare/v2.2.1...v2.2.2) (2026-09-30)
 
 
