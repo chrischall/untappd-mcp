@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.4](https://github.com/chrischall/untappd-mcp/compare/v2.2.3...v2.2.4) (2026-10-05)
+
+
+### Bug Fixes
+
+* **deps:** require @chrischall/mcp-utils 2.14.0 and MCP SDK 2.3.0 ([#218](https://github.com/chrischall/untappd-mcp/issues/218)) ([6e46fb7](https://github.com/chrischall/untappd-mcp/commit/6e46fb78591b799949aae384ef361fd8c5d28bc3))
+
 ## [2.2.3](https://github.com/chrischall/untappd-mcp/compare/v2.2.2...v2.2.3) (2026-10-03)
 
 
