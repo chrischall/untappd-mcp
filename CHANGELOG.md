@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.3.0](https://github.com/chrischall/untappd-mcp/compare/v2.2.4...v2.3.0) (2026-10-07)
+
+
+### Features
+
+* **deps:** support MCP_CONFIRM_ELICITATION=off for clients that never show confirmation prompts ([#225](https://github.com/chrischall/untappd-mcp/issues/225)) ([1eaa306](https://github.com/chrischall/untappd-mcp/commit/1eaa3069466d226012b7c64363ce99c0da59715e))
+
+
+### Bug Fixes
+
+* **deps:** bump the production-dependencies group with 2 updates ([#222](https://github.com/chrischall/untappd-mcp/issues/222)) ([ed59462](https://github.com/chrischall/untappd-mcp/commit/ed59462dad658ac106a432e97dfbed1434df8b4d))
+
+
+### Documentation
+
+* document MCP_CONFIRM_ELICITATION ([#226](https://github.com/chrischall/untappd-mcp/issues/226)) ([81823ca](https://github.com/chrischall/untappd-mcp/commit/81823cac6e9127a08b4c54ad4848c82b9f189000))
+
 ## [2.2.4](https://github.com/chrischall/untappd-mcp/compare/v2.2.3...v2.2.4) (2026-10-05)
 
 
