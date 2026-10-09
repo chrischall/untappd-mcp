@@ -225,7 +225,8 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
       description:
         "Toast (like) a check-in on YOUR account. This endpoint is a TOGGLE: calling it on a check-in you have " +
         `already toasted removes the toast. Writes to your Untappd account and is visible to others. ${CONFIRM_FLOW}`,
-      annotations: toolAnnotations({ title: 'Toast an Untappd check-in', readOnly: false, idempotent: false, openWorld: true, destructive: false }),
+      // Destructive: a toast lands in the check-in owner's notifications, and toggling it back off cannot un-notify them.
+      annotations: toolAnnotations({ title: 'Toast an Untappd check-in', readOnly: false, idempotent: false, openWorld: true, destructive: true }),
       inputSchema: z.object({
         checkin_id: CheckinIdSchema,
         confirmToken: confirmTokenParam,
@@ -267,7 +268,8 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
       description:
         'Post a comment on a check-in from YOUR account. Writes to your Untappd account and is visible to others. ' +
         CONFIRM_FLOW,
-      annotations: toolAnnotations({ title: 'Comment on an Untappd check-in', readOnly: false, idempotent: false, openWorld: true, destructive: false }),
+      // Destructive: the comment reaches the check-in owner (and other readers); untappd_delete_comment removes it but cannot un-notify anyone.
+      annotations: toolAnnotations({ title: 'Comment on an Untappd check-in', readOnly: false, idempotent: false, openWorld: true, destructive: true }),
       inputSchema: z.object({
         checkin_id: CheckinIdSchema,
         comment: z.string().min(1).max(2000).describe('Comment text to post'),
@@ -379,7 +381,8 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
         '(bid) from untappd_search_beer; optionally a rating (0–5 in 0.25 steps), a shout (comment), a venue via ' +
         'foursquare_id, and a local photo via photo_path (JPEG/PNG). The preview shows the exact fields and photo ' +
         `that will be posted. ${CONFIRM_FLOW}`,
-      annotations: toolAnnotations({ title: 'Check in a beer on Untappd', readOnly: false, idempotent: false, openWorld: true, destructive: false }),
+      // Destructive: it publishes to your public feed, where friends see it; untappd_delete_checkin cannot unpublish what they saw.
+      annotations: toolAnnotations({ title: 'Check in a beer on Untappd', readOnly: false, idempotent: false, openWorld: true, destructive: true }),
       inputSchema: z.object({
         bid: z.number().int().positive().describe('Untappd beer id to check in (from untappd_search_beer)'),
         rating: RatingSchema.optional().describe('Rating 0–5 in 0.25 increments (omit for no rating)'),

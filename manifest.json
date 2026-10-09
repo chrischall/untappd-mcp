@@ -37,7 +37,13 @@
         "UNTAPPD_USERNAME": "${user_config.untappd_username}",
         "UNTAPPD_PASSWORD": "${user_config.untappd_password}",
         "UNTAPPD_CLIENT_ID": "${user_config.untappd_client_id}",
-        "UNTAPPD_CLIENT_SECRET": "${user_config.untappd_client_secret}"
+        "UNTAPPD_CLIENT_SECRET": "${user_config.untappd_client_secret}",
+        "UNTAPPD_DEVICE_ID": "${user_config.untappd_device_id}",
+        "UNTAPPD_UTV": "${user_config.untappd_utv}",
+        "UNTAPPD_USER_AGENT": "${user_config.untappd_user_agent}",
+        "UNTAPPD_TIMEZONE": "${user_config.untappd_timezone}",
+        "UNTAPPD_PHOTO_DIR": "${user_config.untappd_photo_dir}",
+        "UNTAPPD_CACHE_DB": "${user_config.untappd_cache_db}"
       }
     }
   },
@@ -65,16 +71,52 @@
     "untappd_client_id": {
       "type": "string",
       "title": "Untappd Client ID",
-      "description": "The Untappd mobile app client id. See the README for how to obtain it by intercepting the app's traffic.",
-      "required": true,
+      "description": "The Untappd mobile app client id. See the README for how to obtain it by intercepting the app's traffic. Needed to log in with username/password and for every write; a pre-seeded access token can read without it.",
+      "required": false,
       "sensitive": true
     },
     "untappd_client_secret": {
       "type": "string",
       "title": "Untappd Client Secret",
-      "description": "The Untappd mobile app client secret (obtained the same way as the client id).",
-      "required": true,
+      "description": "The Untappd mobile app client secret (obtained the same way as the client id). Needed to log in with username/password and for every write; a pre-seeded access token can read without it.",
+      "required": false,
       "sensitive": true
+    },
+    "untappd_device_id": {
+      "type": "string",
+      "title": "Untappd Device ID",
+      "description": "Stable device UUID the token is keyed to (a default is provided).",
+      "required": false
+    },
+    "untappd_utv": {
+      "type": "string",
+      "title": "Untappd API Version",
+      "description": "API version param (default 4.0.0).",
+      "required": false
+    },
+    "untappd_user_agent": {
+      "type": "string",
+      "title": "Untappd User-Agent",
+      "description": "Override the User-Agent (default mimics the app).",
+      "required": false
+    },
+    "untappd_timezone": {
+      "type": "string",
+      "title": "Check-in Timezone",
+      "description": "IANA timezone (e.g. America/New_York) that check-ins are stamped with when the call doesn't pass timezone. Set it when the server runs somewhere other than the drinker's zone (e.g. a hosted connector, usually UTC). Defaults to the server process's zone.",
+      "required": false
+    },
+    "untappd_photo_dir": {
+      "type": "string",
+      "title": "Photo Directory",
+      "description": "The directory untappd_checkin's photo_path must be inside (several allowed, separated by :). Defaults to ~/Downloads/untappd-mcp — put a photo there to attach it. Any other file is refused, so a prompt-injected shout or comment can't publish an arbitrary image from your disk.",
+      "required": false
+    },
+    "untappd_cache_db": {
+      "type": "string",
+      "title": "Cache Database Path",
+      "description": "Path to the local check-in cache SQLite file (default ~/.untappd-mcp/checkins.db; created owner-only — dir 0700, file 0600). Local/stdio only.",
+      "required": false
     }
   },
   "tools": [
@@ -109,6 +151,10 @@
     {
       "name": "untappd_venue_info",
       "description": "Get full detail for a venue by id"
+    },
+    {
+      "name": "untappd_venue_menu",
+      "description": "Get a venue's verified beer menu (section-paged)"
     },
     {
       "name": "untappd_venue_activity",
