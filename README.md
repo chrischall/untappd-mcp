@@ -13,9 +13,10 @@ activity feed; and post check-ins, toasts, and comments.
 
 Untappd's iPad/iPhone app authenticates with a username/password **xauth** login
 (`POST https://api.untappd.com/v4/xauth`) that returns an access token, then
-calls the v4 API. This server reproduces that exactly:
+calls the v4 API. This server reproduces that, except where the token goes:
 
-- Reads carry the token as an `access_token` query param.
+- Reads carry the token as an `Authorization: Bearer` header, never in the URL
+  (the app uses an `access_token` query param; the API accepts both).
 - Writes carry it as an `Authorization: Bearer` header (with the app's client
   credentials in the query), matching the app's real requests.
 
