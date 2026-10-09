@@ -295,6 +295,29 @@ describe('syncCheckins incremental + resume', () => {
   });
 });
 
+describe('syncCheckins on a page with items but no mappable rows', () => {
+  // An upstream shape change (no numeric checkin_id) leaves rowsOf() empty.
+  const unmappable = Array.from({ length: 3 }, (_, i) => ({ id: `x${i}`, beer: { bid: i + 1 } }));
+
+  it('backfill (first sync) raises a helpful shape error, not a TypeError', async () => {
+    const cache = CheckinCache.open(':memory:');
+    const { client } = fakeCheckinsClient(unmappable, { total: 3 });
+    const err = await syncCheckins(client, cache, 'mer', 5).catch((e: unknown) => e as Error);
+    expect(err).toBeInstanceOf(McpToolError);
+    expect(err.message).toMatch(/checkin_id/);
+  });
+
+  it('catch-up (cache already seeded) raises a helpful shape error, not a TypeError', async () => {
+    const cache = CheckinCache.open(':memory:');
+    await seedCheckins(cache, 'mer', makeHistory(5));
+    await cache.setState('mer', { newest_checkin_id: 5, backfill_complete: true, total_checkins: 5 });
+    const { client } = fakeCheckinsClient(unmappable, { total: 5 });
+    const err = await syncCheckins(client, cache, 'mer', 5).catch((e: unknown) => e as Error);
+    expect(err).toBeInstanceOf(McpToolError);
+    expect(err.message).toMatch(/checkin_id/);
+  });
+});
+
 describe('syncUserBeers (user/beers offset paging)', () => {
   it('pages the whole distinct-beers list across multiple pages', async () => {
     const cache = CheckinCache.open(':memory:');

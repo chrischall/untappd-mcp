@@ -58,6 +58,15 @@ function rowsOf(username: string, items: unknown[]): CheckinRow[] {
     const r = mapCheckinRow(username, it);
     if (r) rows.push(r);
   }
+  if (rows.length === 0 && items.length > 0) {
+    // Every item on a non-empty page failed to map — an upstream shape change,
+    // not the end of the history. Say so, rather than letting the caller index
+    // rows[0] / rows[rows.length - 1] and die with a bare TypeError.
+    throw createHelpfulError(
+      `Untappd returned ${items.length} check-in(s) for "${username}" with no numeric checkin_id; the response shape may have changed.`,
+      { hint: 'Progress from earlier pages is kept. Re-run the sync later; if it persists, the user/checkins parser needs updating.' },
+    );
+  }
   return rows;
 }
 
