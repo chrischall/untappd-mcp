@@ -240,3 +240,44 @@ describe('xauthLogin (standalone helper used by a hosted login flow)', () => {
     ).rejects.toThrow(/login failed/i);
   });
 });
+
+describe('request timeout covers the response body', () => {
+  /** A fetch that sends headers at once, then stalls the body until aborted (as real fetch does). */
+  function stallingBodyFetch(): typeof fetch {
+    return (async (_url: string | URL, init?: RequestInit) => {
+      const signal = init?.signal;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"meta":'));
+          signal?.addEventListener('abort', () => controller.error(new DOMException('aborted', 'AbortError')));
+        },
+      });
+      return new Response(body, { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as unknown as typeof fetch;
+  }
+
+  it('a read whose body stalls after the headers fails as unreachable instead of hanging', async () => {
+    vi.useFakeTimers();
+    try {
+      const client = new UntappdClient({ fetchImpl: stallingBodyFetch(), token: 'T', clientId: 'C', clientSecret: 'S' });
+      const p = client.get('/user/info/chris');
+      const settled = p.then(() => 'resolved', (e: Error) => e.name);
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(await settled).toBe('UnreachableError');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('an xauth login whose body stalls fails as unreachable instead of hanging', async () => {
+    vi.useFakeTimers();
+    try {
+      const p = xauthLogin({ username: 'u', password: 'p', clientId: 'C', clientSecret: 'S' }, { fetchImpl: stallingBodyFetch() });
+      const settled = p.then(() => 'resolved', (e: Error) => e.name);
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(await settled).toBe('UnreachableError');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
