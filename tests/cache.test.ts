@@ -648,6 +648,43 @@ describe('untappd_top_not_had', () => {
     }
   });
 
+  it('keeps stale-but-usable metadata (flagged stale) when its refresh is deferred or fails', async () => {
+    const cache = CheckinCache.open(':memory:');
+    const oldIso = new Date(Date.now() - 60 * 24 * 3600 * 1000).toISOString(); // > 30-day TTL
+    await cache.upsertBeerMeta([
+      mapMeta(951, { weighted: 4.9, nowIso: oldIso }), // refresh fails (unknown to the fake)
+      mapMeta(952, { weighted: 4.8, nowIso: oldIso }), // refresh deferred (over budget)
+    ]);
+    const { client } = fakeBeerInfoClient({});
+    const h = await harnessWith(cache, client);
+    try {
+      const out = parse(await h.callTool('untappd_top_not_had', { username: 'mer', bids: [951, 952], top_n: 5, api_budget: 1 }));
+      expect(out.summary.api_calls_used).toBe(1);
+      expect(out.summary.errors).toBe(1);
+      const ranked = out.ranked as Array<{ bid: number; stale?: boolean }>;
+      expect(ranked.map((r) => r.bid)).toEqual([951, 952]);
+      expect(ranked.every((r) => r.stale === true)).toBe(true);
+      expect(out.summary.stale).toBe(2);
+      expect(out.summary.partial).toBe(true);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('reports partial / another_run_needed when beer/info errors (a total outage is not a complete answer)', async () => {
+    const cache = CheckinCache.open(':memory:');
+    const { client } = fakeBeerInfoClient({});
+    const h = await harnessWith(cache, client);
+    try {
+      const out = parse(await h.callTool('untappd_top_not_had', { username: 'mer', bids: [111, 222] }));
+      expect(out.summary.errors).toBe(2);
+      expect(out.summary.partial).toBe(true);
+      expect(out.summary.another_run_needed).toBe(true);
+    } finally {
+      await h.close();
+    }
+  });
+
   it('style filter matches on the PARENT style, not just the beer style', async () => {
     const cache = CheckinCache.open(':memory:');
     const nowIso = new Date().toISOString();

@@ -318,7 +318,8 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         'the cache only (both sources, no API call). Beer ratings/styles come from a metadata cache; a beer/info API ' +
         'call is made only on a cache miss or if the cached metadata is >30 days old, capped at api_budget calls per ' +
         'run (~100 calls/hour limit) — if more are needed it returns partial: true / another_run_needed: true, so ' +
-        're-running fills the rest. Reports the same freshness/caveat block as untappd_cache_not_had. Omit username ' +
+        're-running fills the rest. A beer whose refresh is deferred or fails is still ranked on its older cached ' +
+        'metadata and marked stale: true. Reports the same freshness/caveat block as untappd_cache_not_had. Omit username ' +
         'for your own account.',
       annotations: toolAnnotations({ title: 'Top-rated beers a user has NOT had, from a candidate list', readOnly: false, idempotent: false, openWorld: true, destructive: false }),
       inputSchema: z.object({
@@ -395,7 +396,17 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
       }
       if (fetched.length) await cache.upsertBeerMeta(fetched);
 
-      const available = [...haveMeta, ...fetched];
+      // A bid whose refresh was deferred or failed still has its older cached
+      // metadata — rank it (flagged stale) rather than silently dropping a beer
+      // the cache knows about.
+      const refreshed = new Set(fetched.map((m) => m.bid));
+      const staleMeta: BeerMeta[] = [];
+      for (const bid of needFetch) {
+        const m = metaByBid.get(bid);
+        if (m && !refreshed.has(bid)) staleMeta.push(m);
+      }
+      const staleBids = new Set(staleMeta.map((m) => m.bid));
+      const available = [...haveMeta, ...fetched, ...staleMeta];
       const ratingOf = (m: BeerMeta): number => m.weighted_rating_score ?? m.rating_score ?? 0;
 
       // Style filter: substring against EITHER the beer style or its parent style.
@@ -419,9 +430,12 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
           abv: m.abv,
           rating: m.weighted_rating_score ?? m.rating_score,
           rating_count: m.rating_count,
+          ...(staleBids.has(m.bid) ? { stale: true } : {}),
         }));
 
-      const partial = deferred > 0;
+      // Errors leave beers unranked (or ranked on stale data) just like a
+      // deferral does, so a re-run is worth it in both cases.
+      const partial = deferred > 0 || errors > 0;
       return minifiedResult({
         username: user,
         ranked,
@@ -431,6 +445,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
           style_matched: style !== undefined ? matched.length : null,
           api_calls_used: apiCalls,
           errors,
+          stale: staleMeta.length,
           partial,
           another_run_needed: partial,
           ...(rateLimited ? { rate_limited: true } : {}),
