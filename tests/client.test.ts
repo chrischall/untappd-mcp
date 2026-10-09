@@ -26,7 +26,7 @@ function mockFetch(responses: Response[]) {
 const xauth = () => json({ response: { access_token: 'TOK123' } });
 
 describe('UntappdClient', () => {
-  it('logs in via xauth on first request, then reads with the token in the query', async () => {
+  it('logs in via xauth on first request, then reads with the token in a Bearer header, never the URL', async () => {
     const { impl, calls } = mockFetch([xauth(), json({ meta: { code: 200 }, response: { user: { uid: 1 } } })]);
     const client = new UntappdClient({ fetchImpl: impl, username: 'chris', password: 'pw', clientId: 'CID', clientSecret: 'CSEC' });
 
@@ -41,11 +41,13 @@ describe('UntappdClient', () => {
     expect(calls[0].body).toContain('user_name=chris');
     expect(calls[0].body).toContain('user_password=pw');
 
-    // Second call is the read, token in the query (not a Bearer header).
+    // Second call is the read: token in a Bearer header, never in the URL
+    // (URLs end up in proxy and server logs), and no app creds needed.
     expect(calls[1].url).toContain('/v4/user/info/chris');
-    expect(calls[1].url).toContain('access_token=TOK123');
+    expect(calls[1].headers.Authorization).toBe('Bearer TOK123');
+    expect(calls[1].url).not.toContain('access_token');
+    expect(calls[1].url).not.toContain('client_secret');
     expect(calls[1].url).toContain('compact=true');
-    expect(calls[1].headers.Authorization).toBeUndefined();
   });
 
   it('writes with an Authorization: Bearer header and client creds in the query', async () => {
@@ -75,7 +77,7 @@ describe('UntappdClient', () => {
 
     // login, read(401), login-again, read(200) → 4 calls; final read uses the fresh token.
     expect(calls).toHaveLength(4);
-    expect(calls[3].url).toContain('access_token=TOK2');
+    expect(calls[3].headers.Authorization).toBe('Bearer TOK2');
   });
 
   it('coalesces concurrent first requests into a single login', async () => {
@@ -129,7 +131,7 @@ describe('UntappdClient', () => {
       expect(client.configured).toBe(true);
       await client.get('/user/info/chris');
       expect(calls).toHaveLength(1);        // NO xauth login — the password was never needed
-      expect(calls[0].url).toContain('access_token=ENVTOK');
+      expect(calls[0].headers.Authorization).toBe('Bearer ENVTOK');
     } finally {
       vi.unstubAllEnvs();
     }
@@ -141,7 +143,7 @@ describe('UntappdClient', () => {
       const { impl, calls } = mockFetch([json({ meta: { code: 200 }, response: { user: { uid: 1 } } })]);
       const client = new UntappdClient({ fetchImpl: impl, token: 'OPTTOK', clientId: 'CID', clientSecret: 'CSEC' });
       await client.get('/user/info/chris');
-      expect(calls[0].url).toContain('access_token=OPTTOK');
+      expect(calls[0].headers.Authorization).toBe('Bearer OPTTOK');
     } finally {
       vi.unstubAllEnvs();
     }
@@ -193,7 +195,7 @@ describe('UntappdClient', () => {
     const client = new UntappdClient({ fetchImpl: impl, token: 'STALE', username: 'chris', password: 'pw', clientId: 'CID', clientSecret: 'CSEC' });
     await client.get('/user/info/chris');
     expect(calls).toHaveLength(3);            // 401 → xauth → retry
-    expect(calls[2].url).toContain('access_token=');
+    expect(calls[2].headers.Authorization).toBe('Bearer TOK123');
   });
 
   it('builds a working write-path client from token + app creds, no password', async () => {
@@ -207,12 +209,13 @@ describe('UntappdClient', () => {
     expect(client.configured).toBe(true);
   });
 
-  it('a token-seeded read sends the token in the query and never logs in', async () => {
+  it('a token-seeded read sends the token in a Bearer header and never logs in', async () => {
     const { impl, calls } = mockFetch([json({ meta: { code: 200 }, response: { user: { uid: 1 } } })]);
     const client = new UntappdClient({ fetchImpl: impl, token: 'TOK', clientId: 'CID', clientSecret: 'CSEC' });
     await client.get('/user/info/chris');
     expect(calls).toHaveLength(1);
-    expect(calls[0].url).toContain('access_token=TOK');
+    expect(calls[0].headers.Authorization).toBe('Bearer TOK');
+    expect(calls[0].url).not.toContain('access_token');
   });
 });
 

@@ -24,9 +24,11 @@ unlike several sibling MCPs, a coverage drop will not fail CI here.
 Untappd's app does a username+password **xauth** POST
 (`POST /v4/xauth?client_id=…&client_secret=…`, form body with `device_udid`,
 `app_version`, `multi_account=true`) and gets back an access token. This repo
-reproduces that byte-for-byte, including the app's split auth convention:
+reproduces that byte-for-byte, with one deliberate difference:
 
-- **Reads** carry the token as an `access_token` **query param**.
+- **Reads** carry the token as `Authorization: Bearer`, never in the URL. The
+  app puts it in an `access_token` query param, but the API accepts the header
+  (live-verified 2026-10-09), and URLs end up in proxy and server logs.
 - **Writes** carry it as `Authorization: Bearer` **plus** `client_id` /
   `client_secret` in the query. `UntappdClient.write()` attaches both centrally;
   every mutating tool routes through it.

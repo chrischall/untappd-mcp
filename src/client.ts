@@ -366,17 +366,19 @@ export class UntappdClient {
   ): Promise<T> {
     const token = await this.ensureToken();
     const headers = this.baseHeaders();
-    // The Untappd app carries the token as a query param on reads and as an
-    // `Authorization: Bearer` header on writes (with the client credentials in
-    // the query). We mirror that exactly — both shapes are the real captured
-    // requests the app itself makes.
+    // The token always travels in an `Authorization: Bearer` header, never the
+    // URL, where proxy and server logs would record it. The Untappd app itself
+    // puts it in the query on reads, but the API accepts the header for reads
+    // too (live-verified 2026-10-09 on /user/info, /beer/info and /search/beer,
+    // with no app creds). Writes also carry the client credentials in the
+    // query, as the app's captured write requests do.
+    headers['Authorization'] = `Bearer ${token}`;
     let query: Query;
     if (opts.auth === 'bearer') {
       const c = this.requireAppCreds();
-      headers['Authorization'] = `Bearer ${token}`;
       query = { ...opts.query, client_id: c.clientId, client_secret: c.clientSecret, utv: this.utv };
     } else {
-      query = { ...opts.query, access_token: token, utv: this.utv };
+      query = { ...opts.query, utv: this.utv };
     }
     const qs = buildQueryString(query);
     let body: string | undefined;
@@ -411,7 +413,7 @@ export class UntappdClient {
     return this.parseJson<T>(res, method, path);
   }
 
-  /** Authenticated read (token in the query, as the app does for GETs). */
+  /** Authenticated read (token in a Bearer header; no app creds needed). */
   async get<T>(path: string, query: Query = {}): Promise<T> {
     return this.request<T>('GET', path, { query, auth: 'query' });
   }

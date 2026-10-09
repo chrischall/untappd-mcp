@@ -4,7 +4,7 @@ import { registerUtilityTools } from '../src/tools/utilities.js';
 import { createTestHarness } from './helpers.js';
 
 // What each credential actually unlocks (src/client.ts `request()`):
-// - reads carry the token as `access_token` and need NOTHING else;
+// - reads carry the token as an `Authorization: Bearer` header and need NOTHING else;
 // - writes add `client_id` / `client_secret`, so they need the app creds;
 // - minting a token (xauth) needs username + password + both app creds.
 // So a token alone is a working, read-only configuration, and app creds
@@ -19,13 +19,15 @@ function json(body: unknown, status = 200): Response {
 
 function mockFetch(responses: Response[]) {
   const urls: string[] = [];
-  const impl = vi.fn(async (url: string | URL) => {
+  const auths: (string | undefined)[] = [];
+  const impl = vi.fn(async (url: string | URL, init?: RequestInit) => {
     urls.push(String(url));
+    auths.push((init?.headers as Record<string, string> | undefined)?.Authorization);
     const next = responses.shift();
     if (!next) throw new Error('no more mock responses');
     return next;
   });
-  return { impl: impl as unknown as typeof fetch, urls };
+  return { impl: impl as unknown as typeof fetch, urls, auths };
 }
 
 const feed = () => json({ meta: { code: 200 }, response: { checkins: { count: 0, items: [] } } });
@@ -51,13 +53,14 @@ describe('credential matrix: configured / errors / healthcheck agree with what c
 
   describe('token only', () => {
     it('is configured, reads without app creds, and reports writes as unavailable', async () => {
-      const { impl, urls } = mockFetch([feed(), feed()]);
+      const { impl, urls, auths } = mockFetch([feed(), feed()]);
       const client = new UntappdClient({ fetchImpl: impl, token: 'TOK' });
       expect(client.configured).toBe(true);
       expect(client.canWrite).toBe(false);
 
       await client.get('/checkin/recent', { limit: 1 });
-      expect(urls[0]).toContain('access_token=TOK');
+      expect(auths[0]).toBe('Bearer TOK');
+      expect(urls[0]).not.toContain('access_token');
       expect(urls[0]).not.toContain('client_id');
 
       const out = await healthcheck(client);
