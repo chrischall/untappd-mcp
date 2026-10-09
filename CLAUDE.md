@@ -144,8 +144,9 @@ Non-obvious behaviours that were each fixed the hard way:
 ## Environment (stdio)
 
 ```
-UNTAPPD_USERNAME       required  Untappd username or login email (also the default for user-scoped tools)
-UNTAPPD_PASSWORD       required  Untappd password — used only for the xauth login
+UNTAPPD_ACCESS_TOKEN   optional  Pre-seeded access token — no password needed (mapped in manifest.json + .mcp.json too)
+UNTAPPD_USERNAME       if no token  Untappd username or login email (also the default for user-scoped tools)
+UNTAPPD_PASSWORD       if no token  Untappd password — used only for the xauth login
 UNTAPPD_CLIENT_ID      required  Mobile-app client id (capture via HTTPS proxy; see README)
 UNTAPPD_CLIENT_SECRET  required  Mobile-app client secret
 UNTAPPD_DEVICE_ID      optional  Stable device UUID the token is keyed to

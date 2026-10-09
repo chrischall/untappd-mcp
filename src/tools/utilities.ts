@@ -27,7 +27,9 @@ export function registerUtilityTools(server: McpServer, client: UntappdClient): 
           ok: false,
           configured: false,
           ...build,
-          note: 'Untappd credentials are not set. Configure UNTAPPD_USERNAME, UNTAPPD_PASSWORD, UNTAPPD_CLIENT_ID, and UNTAPPD_CLIENT_SECRET.',
+          note:
+            'Untappd credentials are not set. Configure UNTAPPD_CLIENT_ID and UNTAPPD_CLIENT_SECRET, plus either ' +
+            'UNTAPPD_ACCESS_TOKEN (a token you already hold — no password needed) or UNTAPPD_USERNAME and UNTAPPD_PASSWORD.',
         });
       }
       const feed = await client.get<{ checkins?: { count?: number } }>('/checkin/recent', { limit: 1 });
