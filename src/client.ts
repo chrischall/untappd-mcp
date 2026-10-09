@@ -170,21 +170,33 @@ export async function xauthLogin(creds: XauthCredentials, opts: XauthOptions = {
   return token;
 }
 
-function missingCredsError(): McpToolError {
-  const missing = (
-    ['UNTAPPD_USERNAME', 'UNTAPPD_PASSWORD', 'UNTAPPD_CLIENT_ID', 'UNTAPPD_CLIENT_SECRET'] as const
-  ).filter((k) => !readEnvVar(k));
+/**
+ * No token and no complete login set: nothing can be called. Names exactly what
+ * is missing from the login set, because a token alone (no app creds) is a
+ * complete read-only setup — the app creds are not "required either way".
+ */
+function missingCredsError(missing: readonly string[]): McpToolError {
   // Both paths in the MESSAGE, not only `hint`: MCP serialization surfaces the
   // message and drops the hint, so a token path mentioned only there is
   // invisible exactly when someone is deciding what to configure.
   const remedy =
-    'Either set UNTAPPD_ACCESS_TOKEN (an access token you already hold — no password needed), or set ' +
-    'UNTAPPD_USERNAME and UNTAPPD_PASSWORD to log in for one. Either way UNTAPPD_CLIENT_ID and ' +
-    'UNTAPPD_CLIENT_SECRET (the Untappd mobile app client credentials) are required. See the README.';
+    'Either set UNTAPPD_ACCESS_TOKEN (an access token you already hold — reads need nothing else; writes also ' +
+    'need UNTAPPD_CLIENT_ID and UNTAPPD_CLIENT_SECRET), or set UNTAPPD_USERNAME, UNTAPPD_PASSWORD, ' +
+    'UNTAPPD_CLIENT_ID and UNTAPPD_CLIENT_SECRET (the Untappd mobile app client credentials) to log in for one. ' +
+    'See the README.';
   return createHelpfulError(
     `Untappd credentials are not configured — missing ${missing.join(', ') || 'credentials'}. ${remedy}`,
     { hint: remedy },
   );
+}
+
+/** A working token, but a write needs the app's client credentials too. */
+function missingWriteCredsError(missing: readonly string[]): McpToolError {
+  const remedy =
+    'Untappd writes (check-ins, toasts, comments, wishlist and friend actions) carry the mobile app client ' +
+    'credentials alongside the token; reads work without them. Set UNTAPPD_CLIENT_ID and UNTAPPD_CLIENT_SECRET ' +
+    '(see the README).';
+  return createHelpfulError(`This is a write, and it needs ${missing.join(' and ')}. ${remedy}`, { hint: remedy });
 }
 
 export class UntappdClient {
@@ -225,11 +237,32 @@ export class UntappdClient {
     this._loginName = opts.loginName ?? this.username;
   }
 
-  /** True when enough is configured to make authenticated calls. */
+  /**
+   * True when authenticated READS can be made: a token is held (reads carry
+   * only `access_token`), or the full login set can mint one. App creds alone
+   * cannot make any call. Writes additionally need the app creds — `canWrite`.
+   */
   get configured(): boolean {
-    // A pre-seeded token needs only app creds (for writes); otherwise a full login is required.
-    if (this.token) return Boolean(this.clientId && this.clientSecret);
-    return Boolean(this.clientId && this.clientSecret && this.username && this.password);
+    return Boolean(this.token) || this.loginMissing().length === 0;
+  }
+
+  /** True when writes can be made too: configured, plus the app's client credentials. */
+  get canWrite(): boolean {
+    return this.configured && this.appCredsMissing().length === 0;
+  }
+
+  private appCredsMissing(): string[] {
+    const missing: string[] = [];
+    if (!this.clientId) missing.push('UNTAPPD_CLIENT_ID');
+    if (!this.clientSecret) missing.push('UNTAPPD_CLIENT_SECRET');
+    return missing;
+  }
+
+  private loginMissing(): string[] {
+    const missing: string[] = [];
+    if (!this.username) missing.push('UNTAPPD_USERNAME');
+    if (!this.password) missing.push('UNTAPPD_PASSWORD');
+    return [...missing, ...this.appCredsMissing()];
   }
 
   /** The configured login name — the default `username` for user-scoped tools. */
@@ -237,17 +270,19 @@ export class UntappdClient {
     return this._loginName;
   }
 
+  /** App creds for a write; reached only once a token is in hand. */
   private requireAppCreds(): { clientId: string; clientSecret: string } {
     if (!this.clientId || !this.clientSecret) {
-      throw missingCredsError();
+      throw missingWriteCredsError(this.appCredsMissing());
     }
     return { clientId: this.clientId, clientSecret: this.clientSecret };
   }
 
   private requireLogin(): { username: string; password: string; clientId: string; clientSecret: string } {
-    const app = this.requireAppCreds();
-    if (!this.username || !this.password) throw missingCredsError();
-    return { ...app, username: this.username, password: this.password };
+    if (!this.username || !this.password || !this.clientId || !this.clientSecret) {
+      throw missingCredsError(this.loginMissing());
+    }
+    return { username: this.username, password: this.password, clientId: this.clientId, clientSecret: this.clientSecret };
   }
 
   private baseHeaders(): Record<string, string> {
