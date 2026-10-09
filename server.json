@@ -39,17 +39,59 @@
         },
         {
           "name": "UNTAPPD_CLIENT_ID",
-          "description": "Untappd mobile app client id (obtained by intercepting the app; see README).",
-          "isRequired": true,
+          "description": "Untappd mobile app client id (obtained by intercepting the app; see README). Needed to log in with username/password and for every write; a pre-seeded access token can read without it.",
+          "isRequired": false,
           "format": "string",
           "isSecret": true
         },
         {
           "name": "UNTAPPD_CLIENT_SECRET",
-          "description": "Untappd mobile app client secret.",
-          "isRequired": true,
+          "description": "Untappd mobile app client secret. Needed to log in with username/password and for every write; a pre-seeded access token can read without it.",
+          "isRequired": false,
           "format": "string",
           "isSecret": true
+        },
+        {
+          "name": "UNTAPPD_DEVICE_ID",
+          "description": "Stable device UUID the token is keyed to (a default is provided).",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "UNTAPPD_UTV",
+          "description": "API version param (default 4.0.0).",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "UNTAPPD_USER_AGENT",
+          "description": "Override the User-Agent (default mimics the app).",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "UNTAPPD_TIMEZONE",
+          "description": "IANA timezone (e.g. America/New_York) that check-ins are stamped with when the call doesn't pass timezone. Set it when the server runs somewhere other than the drinker's zone (e.g. a hosted connector, usually UTC). Defaults to the server process's zone.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "UNTAPPD_PHOTO_DIR",
+          "description": "The directory untappd_checkin's photo_path must be inside (several allowed, separated by :). Defaults to ~/Downloads/untappd-mcp — put a photo there to attach it. Any other file is refused, so a prompt-injected shout or comment can't publish an arbitrary image from your disk.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "UNTAPPD_CACHE_DB",
+          "description": "Path to the local check-in cache SQLite file (default ~/.untappd-mcp/checkins.db; created owner-only — dir 0700, file 0600). Local/stdio only.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
         }
       ]
     }
