@@ -172,7 +172,7 @@ bump doesn't need a code change. Where credentials arrive through
   `tests/version-sync.test.ts` guards it.
 - **Writes are confirmation-gated** through `confirmWrite` (`src/tools/confirm.ts`,
   mcp-utils' `requireConfirmationWithFallback` + `confirmationFromEnv`): a
-  prompt where the client supports one, else a phase-1 preview + `confirmToken`
+  prompt where the client supports one (unless `MCP_CONFIRM_ELICITATION=off`), else a phase-1 preview + `confirmToken`
   that makes **no network call**, and a phase-2 call with that token. `payload`
   must be exactly what the write sends (it is hashed into the token) and is
   rebuilt from the args on every call. Keep new writes to that shape; the input

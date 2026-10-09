@@ -143,7 +143,7 @@ parameter, because an undeclared key is dropped by zod without a warning:
 ## Write tools (confirmation-gated — these post to your public account)
 
 Each asks the user to confirm first. Where the client can show a confirmation
-prompt, it does. Otherwise the first call makes NO network call and returns
+prompt, it does (unless the server sets `MCP_CONFIRM_ELICITATION=off`). Otherwise the first call makes NO network call and returns
 `status: "confirmation-required"` with a `preview` of the exact request and a
 `confirmToken`; show the preview to the user, and only after they approve call
 the tool again with the same arguments plus `confirmToken`. A token works once
