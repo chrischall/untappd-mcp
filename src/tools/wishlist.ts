@@ -18,13 +18,15 @@ export function registerWishlistTools(server: McpServer, client: UntappdClient):
         confirmToken: confirmTokenParam,
       }),
     },
-    async ({ bid, confirmToken }, ctx) => {
+    async (args, ctx) => {
+      const { bid, confirmToken } = args;
       const request = { method: 'GET', path: '/user/wishlist/add', query: { bid } };
       const gate = await confirmWrite(ctx, {
         tool: 'untappd_wishlist_add',
         action: 'untappd.wishlist_add',
         message: 'Review and confirm adding this beer to your Untappd wishlist:',
         confirmToken,
+        args,
         target: bid,
         payload: request,
         preview: { action: 'wishlist_add', bid, ...request, note: 'Adds this beer to your Untappd wishlist.' },
@@ -46,13 +48,15 @@ export function registerWishlistTools(server: McpServer, client: UntappdClient):
         confirmToken: confirmTokenParam,
       }),
     },
-    async ({ bid, confirmToken }, ctx) => {
+    async (args, ctx) => {
+      const { bid, confirmToken } = args;
       const request = { method: 'GET', path: '/user/wishlist/delete', query: { bid } };
       const gate = await confirmWrite(ctx, {
         tool: 'untappd_wishlist_remove',
         action: 'untappd.wishlist_remove',
         message: 'Review and confirm removing this beer from your Untappd wishlist:',
         confirmToken,
+        args,
         target: bid,
         payload: request,
         preview: { action: 'wishlist_remove', bid, ...request, note: 'Removes this beer from your Untappd wishlist.' },
