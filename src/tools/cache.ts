@@ -471,7 +471,8 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         confirmToken: confirmTokenParam,
       }),
     },
-    async ({ username, confirmToken }, ctx) => {
+    async (args, ctx) => {
+      const { username, confirmToken } = args;
       const user = resolveUser(username, client.loginName);
       const cache = cacheProvider();
       // Bound into the token: if a sync adds rows after the preview, the
@@ -485,6 +486,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         action: 'untappd.cache_forget',
         message: `Review and confirm deleting ${user}'s data from the local Untappd cache:`,
         confirmToken,
+        args,
         target: user.toLowerCase(),
         payload: { username: user.toLowerCase(), ...counts },
         preview: {

@@ -231,13 +231,15 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
         confirmToken: confirmTokenParam,
       }),
     },
-    async ({ checkin_id, confirmToken }, ctx) => {
+    async (args, ctx) => {
+      const { checkin_id, confirmToken } = args;
       const request = { method: 'POST', path: `/checkin/toast/${checkin_id}` };
       const gate = await confirmWrite(ctx, {
         tool: 'untappd_toast',
         action: 'untappd.toast',
         message: 'Review and confirm toggling your toast on this Untappd check-in:',
         confirmToken,
+        args,
         target: checkin_id,
         payload: request,
         preview: {
@@ -272,13 +274,15 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
         confirmToken: confirmTokenParam,
       }),
     },
-    async ({ checkin_id, comment, confirmToken }, ctx) => {
+    async (args, ctx) => {
+      const { checkin_id, comment, confirmToken } = args;
       const request = { method: 'POST', path: `/checkin/addcomment/${checkin_id}`, form: { comment } };
       const gate = await confirmWrite(ctx, {
         tool: 'untappd_add_comment',
         action: 'untappd.add_comment',
         message: 'Review and confirm posting this comment from your Untappd account:',
         confirmToken,
+        args,
         target: checkin_id,
         payload: request,
         preview: {
@@ -311,13 +315,15 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
         confirmToken: confirmTokenParam,
       }),
     },
-    async ({ comment_id, confirmToken }, ctx) => {
+    async (args, ctx) => {
+      const { comment_id, confirmToken } = args;
       const request = { method: 'POST', path: `/checkin/deletecomment/${comment_id}` };
       const gate = await confirmWrite(ctx, {
         tool: 'untappd_delete_comment',
         action: 'untappd.delete_comment',
         message: 'Review and confirm deleting this comment from your Untappd account:',
         confirmToken,
+        args,
         target: comment_id,
         payload: request,
         preview: { action: 'delete_comment', comment_id, ...request, note: 'Deletes this comment from your Untappd account.' },
@@ -340,13 +346,15 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
         confirmToken: confirmTokenParam,
       }),
     },
-    async ({ checkin_id, confirmToken }, ctx) => {
+    async (args, ctx) => {
+      const { checkin_id, confirmToken } = args;
       const request = { method: 'POST', path: `/checkin/delete/${checkin_id}` };
       const gate = await confirmWrite(ctx, {
         tool: 'untappd_delete_checkin',
         action: 'untappd.delete_checkin',
         message: 'Review and confirm PERMANENTLY deleting this Untappd check-in:',
         confirmToken,
+        args,
         target: checkin_id,
         payload: request,
         preview: {
@@ -404,7 +412,8 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
         confirmToken: confirmTokenParam,
       }),
     },
-    async ({ bid, rating, shout, foursquare_id, photo_path, geolat, geolng, container_id, timezone: requestedTz, confirmToken }, ctx) => {
+    async (args, ctx) => {
+      const { bid, rating, shout, foursquare_id, photo_path, geolat, geolng, container_id, timezone: requestedTz, confirmToken } = args;
       const { timezone, gmt_offset } = checkinTimezone(requestedTz);
       // Vetted on every call, so the preview names the exact file (resolved path
       // + size) that will be published — and a file whose bytes change between
@@ -431,6 +440,7 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
         action: 'untappd.checkin',
         message: 'Review and confirm posting this check-in to your public Untappd feed:',
         confirmToken,
+        args,
         target: bid,
         payload: { ...request, photo, photo_sha256 },
         preview: {

@@ -77,13 +77,15 @@ export function registerFriendActionTools(server: McpServer, client: UntappdClie
           confirmToken: confirmTokenParam,
         }),
       },
-      async ({ target_uid, confirmToken }, ctx) => {
+      async (args, ctx) => {
+        const { target_uid, confirmToken } = args;
         const request = { method: 'POST', path: `/friend/${action.path}/${target_uid}` };
         const gate = await confirmWrite(ctx, {
           tool: action.tool,
           action: `untappd.friend_${action.path}`,
           message: `Review and confirm: ${action.verb} Untappd user ${target_uid}.`,
           confirmToken,
+          args,
           target: target_uid,
           payload: request,
           preview: { action: action.path, target_uid, ...request, note: `Will ${action.verb} user ${target_uid}.` },

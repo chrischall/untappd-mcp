@@ -15,6 +15,8 @@ export interface WriteConfirmation {
   message: string;
   /** The phase-2 token from the tool's input, or undefined on phase 1. */
   confirmToken: string | undefined;
+  /** The tool's validated arguments, bound into both the token and the elicitation acceptance (confirmToken is dropped for you). */
+  args: object;
   /** The primary id acted on. */
   target: string | number;
   /** Exactly what the write will send — hashed into the token. */
@@ -38,6 +40,9 @@ export function confirmWrite(ctx: ServerContext, c: WriteConfirmation) {
       details: c.preview,
       tool: c.tool,
       confirmToken: c.confirmToken,
+      // One process acts with one Untappd access token: a single-account server.
+      account: undefined,
+      args: c.args,
       subject: () => ({ target: String(c.target), payload: c.payload, preview: c.preview }),
     }),
   );
