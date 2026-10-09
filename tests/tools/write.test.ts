@@ -13,6 +13,10 @@ const write = vi.spyOn(client, 'write').mockResolvedValue(undefined as never);
 const get = vi.spyOn(client, 'get').mockResolvedValue(undefined as never);
 const putBinary = vi.spyOn(client, 'putBinary').mockResolvedValue(undefined);
 
+// Photos are confined to a photo directory by default; these fixtures live in tmpdir().
+const SAVED_PHOTO_DIR = process.env.UNTAPPD_PHOTO_DIR;
+process.env.UNTAPPD_PHOTO_DIR = tmpdir();
+
 const TMP_JPG = join(tmpdir(), 'untappd-test-photo.jpg');
 writeFileSync(TMP_JPG, Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00]));
 // Not an image at all, just named like one (e.g. a private document).
@@ -38,6 +42,8 @@ afterAll(async () => {
   if (harness) await harness.close();
   for (const f of [TMP_JPG, TMP_FAKE_JPG, TMP_PNG_AS_JPG, TMP_HUGE_JPG]) rmSync(f, { force: true });
   rmSync(TMP_PHOTO_DIR, { recursive: true, force: true });
+  if (SAVED_PHOTO_DIR === undefined) delete process.env.UNTAPPD_PHOTO_DIR;
+  else process.env.UNTAPPD_PHOTO_DIR = SAVED_PHOTO_DIR;
 });
 
 function parse(result: { content: { text: string }[] }): Record<string, unknown> {
@@ -204,7 +210,7 @@ describe('write tools (confirm-token gated)', () => {
       const ok = await harness.callTool('untappd_checkin', { bid: 100, photo_path: inside });
       expect(parse(ok as never).status).toBe('confirmation-required');
     } finally {
-      delete process.env.UNTAPPD_PHOTO_DIR;
+      process.env.UNTAPPD_PHOTO_DIR = tmpdir();
     }
   });
 
