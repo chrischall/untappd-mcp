@@ -77,9 +77,26 @@ describe('checkin photo header read honours UNTAPPD_PHOTO_DIR', () => {
     expect(write).not.toHaveBeenCalled();
   });
 
-  it('leaves the header read unconfined when UNTAPPD_PHOTO_DIR is unset', async () => {
+  it('confines photo_path to ~/Downloads/untappd-mcp when UNTAPPD_PHOTO_DIR is unset', async () => {
     delete process.env.UNTAPPD_PHOTO_DIR;
-    const r = await harness.callTool('untappd_checkin', { bid: 100, photo_path: OUTSIDE });
-    expect(parse(r).status).toBe('confirmation-required');
+    const savedHome = process.env.HOME;
+    process.env.HOME = ROOT;
+    try {
+      // Any other JPEG on the disk is refused by default.
+      const refused = await harness.callTool('untappd_checkin', { bid: 100, photo_path: OUTSIDE });
+      expect((refused as { isError?: boolean }).isError).toBe(true);
+      expect(JSON.stringify(refused)).toContain('Downloads/untappd-mcp');
+      expect(write).not.toHaveBeenCalled();
+
+      // A photo the user put in the default directory is accepted.
+      const defaultDir = join(ROOT, 'Downloads', 'untappd-mcp');
+      mkdirSync(defaultDir, { recursive: true });
+      const inside = join(defaultDir, 'pint.jpg');
+      writeFileSync(inside, JPEG);
+      const ok = await harness.callTool('untappd_checkin', { bid: 100, photo_path: inside });
+      expect(parse(ok).status).toBe('confirmation-required');
+    } finally {
+      process.env.HOME = savedHome;
+    }
   });
 });

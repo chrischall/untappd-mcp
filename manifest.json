@@ -33,6 +33,7 @@
         "${__dirname}/dist/bundle.js"
       ],
       "env": {
+        "UNTAPPD_ACCESS_TOKEN": "${user_config.untappd_access_token}",
         "UNTAPPD_USERNAME": "${user_config.untappd_username}",
         "UNTAPPD_PASSWORD": "${user_config.untappd_password}",
         "UNTAPPD_CLIENT_ID": "${user_config.untappd_client_id}",
@@ -41,17 +42,24 @@
     }
   },
   "user_config": {
+    "untappd_access_token": {
+      "type": "string",
+      "title": "Untappd Access Token",
+      "description": "Optional. An Untappd access token you already hold. Supply it and no password is needed (leave username/password blank); otherwise use username + password below.",
+      "required": false,
+      "sensitive": true
+    },
     "untappd_username": {
       "type": "string",
       "title": "Untappd Username",
-      "description": "Your Untappd username (or the email you log in with).",
-      "required": true
+      "description": "Your Untappd username (or the email you log in with). Required unless you supplied an access token; also the default account for user-scoped tools.",
+      "required": false
     },
     "untappd_password": {
       "type": "string",
       "title": "Untappd Password",
-      "description": "Your Untappd account password. Used only to log in via the mobile xauth endpoint; never stored server-side.",
-      "required": true,
+      "description": "Your Untappd account password. Required unless you supplied an access token. Used only to log in via the mobile xauth endpoint; never stored server-side.",
+      "required": false,
       "sensitive": true
     },
     "untappd_client_id": {

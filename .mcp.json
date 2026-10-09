@@ -4,6 +4,7 @@
       "command": "node",
       "args": ["${CLAUDE_PLUGIN_ROOT}/dist/index.js"],
       "env": {
+        "UNTAPPD_ACCESS_TOKEN": "${UNTAPPD_ACCESS_TOKEN}",
         "UNTAPPD_USERNAME": "${UNTAPPD_USERNAME}",
         "UNTAPPD_PASSWORD": "${UNTAPPD_PASSWORD}",
         "UNTAPPD_CLIENT_ID": "${UNTAPPD_CLIENT_ID}",

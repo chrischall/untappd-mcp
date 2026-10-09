@@ -17,16 +17,23 @@
       },
       "environmentVariables": [
         {
+          "name": "UNTAPPD_ACCESS_TOKEN",
+          "description": "An Untappd access token you already hold. Supply it and no password is needed (username/password become optional).",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true
+        },
+        {
           "name": "UNTAPPD_USERNAME",
-          "description": "Your Untappd username or login email.",
-          "isRequired": true,
+          "description": "Your Untappd username or login email. Required unless UNTAPPD_ACCESS_TOKEN is set.",
+          "isRequired": false,
           "format": "string",
           "isSecret": false
         },
         {
           "name": "UNTAPPD_PASSWORD",
-          "description": "Your Untappd account password (used only for xauth login).",
-          "isRequired": true,
+          "description": "Your Untappd account password (used only for xauth login). Required unless UNTAPPD_ACCESS_TOKEN is set.",
+          "isRequired": false,
           "format": "string",
           "isSecret": true
         },

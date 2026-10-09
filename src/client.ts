@@ -60,9 +60,15 @@ export interface ClientOptions {
   loginName?: string;
 }
 
+// Statuses whose Response may not carry a body (the constructor rejects one).
+const NULL_BODY_STATUSES = new Set([101, 103, 204, 205, 304]);
+
 // One HTTP attempt with a hard timeout, shared by the instance `send()` method
-// and the standalone `xauthLogin()` helper below. Network/timeout failures
-// become an UnreachableError; HTTP status handling is left to the caller.
+// and the standalone `xauthLogin()` helper below. The timeout covers reading
+// the BODY too, not just the headers: the body is buffered here, under the same
+// abort timer, so a server that sends headers and then stalls can't hang the
+// call (or, via the coalesced login, every call waiting on it). Network/timeout
+// failures become an UnreachableError; HTTP status handling is left to the caller.
 async function sendRequest(
   fetchImpl: typeof fetch,
   method: string,
@@ -72,12 +78,14 @@ async function sendRequest(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    return await fetchImpl(url, {
+    const res = await fetchImpl(url, {
       method,
       headers: init.headers,
       ...(init.body !== undefined ? { body: init.body } : {}),
       signal: controller.signal,
     });
+    const body = NULL_BODY_STATUSES.has(res.status) ? null : await res.arrayBuffer();
+    return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
   } catch {
     throw new UnreachableError(SERVICE);
   } finally {

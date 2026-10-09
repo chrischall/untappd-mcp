@@ -295,6 +295,29 @@ describe('syncCheckins incremental + resume', () => {
   });
 });
 
+describe('syncCheckins on a page with items but no mappable rows', () => {
+  // An upstream shape change (no numeric checkin_id) leaves rowsOf() empty.
+  const unmappable = Array.from({ length: 3 }, (_, i) => ({ id: `x${i}`, beer: { bid: i + 1 } }));
+
+  it('backfill (first sync) raises a helpful shape error, not a TypeError', async () => {
+    const cache = CheckinCache.open(':memory:');
+    const { client } = fakeCheckinsClient(unmappable, { total: 3 });
+    const err = await syncCheckins(client, cache, 'mer', 5).catch((e: unknown) => e as Error);
+    expect(err).toBeInstanceOf(McpToolError);
+    expect(err.message).toMatch(/checkin_id/);
+  });
+
+  it('catch-up (cache already seeded) raises a helpful shape error, not a TypeError', async () => {
+    const cache = CheckinCache.open(':memory:');
+    await seedCheckins(cache, 'mer', makeHistory(5));
+    await cache.setState('mer', { newest_checkin_id: 5, backfill_complete: true, total_checkins: 5 });
+    const { client } = fakeCheckinsClient(unmappable, { total: 5 });
+    const err = await syncCheckins(client, cache, 'mer', 5).catch((e: unknown) => e as Error);
+    expect(err).toBeInstanceOf(McpToolError);
+    expect(err.message).toMatch(/checkin_id/);
+  });
+});
+
 describe('syncUserBeers (user/beers offset paging)', () => {
   it('pages the whole distinct-beers list across multiple pages', async () => {
     const cache = CheckinCache.open(':memory:');
@@ -643,6 +666,43 @@ describe('untappd_top_not_had', () => {
       expect(out.summary.api_calls_used).toBe(3);
       expect(out.summary.errors).toBe(3);
       expect(out.ranked).toEqual([]);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('keeps stale-but-usable metadata (flagged stale) when its refresh is deferred or fails', async () => {
+    const cache = CheckinCache.open(':memory:');
+    const oldIso = new Date(Date.now() - 60 * 24 * 3600 * 1000).toISOString(); // > 30-day TTL
+    await cache.upsertBeerMeta([
+      mapMeta(951, { weighted: 4.9, nowIso: oldIso }), // refresh fails (unknown to the fake)
+      mapMeta(952, { weighted: 4.8, nowIso: oldIso }), // refresh deferred (over budget)
+    ]);
+    const { client } = fakeBeerInfoClient({});
+    const h = await harnessWith(cache, client);
+    try {
+      const out = parse(await h.callTool('untappd_top_not_had', { username: 'mer', bids: [951, 952], top_n: 5, api_budget: 1 }));
+      expect(out.summary.api_calls_used).toBe(1);
+      expect(out.summary.errors).toBe(1);
+      const ranked = out.ranked as Array<{ bid: number; stale?: boolean }>;
+      expect(ranked.map((r) => r.bid)).toEqual([951, 952]);
+      expect(ranked.every((r) => r.stale === true)).toBe(true);
+      expect(out.summary.stale).toBe(2);
+      expect(out.summary.partial).toBe(true);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('reports partial / another_run_needed when beer/info errors (a total outage is not a complete answer)', async () => {
+    const cache = CheckinCache.open(':memory:');
+    const { client } = fakeBeerInfoClient({});
+    const h = await harnessWith(cache, client);
+    try {
+      const out = parse(await h.callTool('untappd_top_not_had', { username: 'mer', bids: [111, 222] }));
+      expect(out.summary.errors).toBe(2);
+      expect(out.summary.partial).toBe(true);
+      expect(out.summary.another_run_needed).toBe(true);
     } finally {
       await h.close();
     }

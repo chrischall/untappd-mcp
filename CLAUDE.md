@@ -139,20 +139,21 @@ Non-obvious behaviours that were each fixed the hard way:
   possible false negative. New cache read tools must include it.
 - Usernames are keyed **lowercased**; other stored fields keep their original casing.
 - The cache holds OTHER users' dated venue history: `CheckinCache.open()` creates the dir `0700` and the db `0600` before SQLite opens it (and tightens old loose files). Retention is user-driven — `untappd_cache_forget` (confirm-gated, local-only) is the delete path; there is no TTL.
-- `escapeLike` replaces `%`/`_` in user input with a space (the LIKE patterns set no ESCAPE clause).
+- `escapeLike` backslash-escapes `%`/`_`/`\` in user input and every LIKE goes through `LIKE_MATCH` (`ESCAPE '\'`), so a name like `100% Brewing` matches literally. The rated sorts put unrated (NULL) check-ins last.
 
 ## Environment (stdio)
 
 ```
-UNTAPPD_USERNAME       required  Untappd username or login email (also the default for user-scoped tools)
-UNTAPPD_PASSWORD       required  Untappd password — used only for the xauth login
+UNTAPPD_ACCESS_TOKEN   optional  Pre-seeded access token — no password needed (mapped in manifest.json + .mcp.json too)
+UNTAPPD_USERNAME       if no token  Untappd username or login email (also the default for user-scoped tools)
+UNTAPPD_PASSWORD       if no token  Untappd password — used only for the xauth login
 UNTAPPD_CLIENT_ID      required  Mobile-app client id (capture via HTTPS proxy; see README)
 UNTAPPD_CLIENT_SECRET  required  Mobile-app client secret
 UNTAPPD_DEVICE_ID      optional  Stable device UUID the token is keyed to
 UNTAPPD_UTV            optional  API version param (default 4.0.0)
 UNTAPPD_USER_AGENT     optional  Default mimics Untappd/4.7.13 (ios; iPadOS 26.5)
 UNTAPPD_TIMEZONE       optional  IANA zone check-ins are stamped with when the call passes no `timezone` (default: process zone — UTC on a hosted connector)
-UNTAPPD_PHOTO_DIR      optional  Allow-list dir(s) for untappd_checkin photo_path (unset = any path; bytes are always sniffed as JPEG/PNG, 15 MB cap)
+UNTAPPD_PHOTO_DIR      optional  Allow-list dir(s) for untappd_checkin photo_path (default ~/Downloads/untappd-mcp — confined by default; bytes are always sniffed as JPEG/PNG, 15 MB cap)
 UNTAPPD_CACHE_DB       optional  Cache SQLite path (default ~/.untappd-mcp/checkins.db, owner-only 0600). LOCAL ONLY
 ```
 
@@ -171,7 +172,7 @@ bump doesn't need a code change. Where credentials arrive through
   `tests/version-sync.test.ts` guards it.
 - **Writes are confirmation-gated** through `confirmWrite` (`src/tools/confirm.ts`,
   mcp-utils' `requireConfirmationWithFallback` + `confirmationFromEnv`): a
-  prompt where the client supports one, else a phase-1 preview + `confirmToken`
+  prompt where the client supports one (unless `MCP_CONFIRM_ELICITATION=off`), else a phase-1 preview + `confirmToken`
   that makes **no network call**, and a phase-2 call with that token. `payload`
   must be exactly what the write sends (it is hashed into the token) and is
   rebuilt from the args on every call. Keep new writes to that shape; the input
