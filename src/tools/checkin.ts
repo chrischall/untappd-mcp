@@ -187,13 +187,13 @@ async function nonIdempotentWrite<T>(run: () => Promise<T>, unknownOutcome: stri
  * lookup fails — each of which the caller reports as an unknown outcome.
  */
 async function findRecentCheckin(client: UntappdClient, bid: number, sentAt: number): Promise<number | null> {
+  // With no configured username (a token-only deployment) use the self form —
+  // user/checkins with no username lists the token's own account — rather than
+  // giving up on a lookup that one call would settle.
   const self = client.loginName;
-  if (!self) return null;
+  const path = self ? `/user/checkins/${encodeURIComponent(self)}` : '/user/checkins';
   try {
-    const data = await client.get<{ checkins?: { items?: unknown[] } }>(
-      `/user/checkins/${encodeURIComponent(self)}`,
-      { limit: 5 },
-    );
+    const data = await client.get<{ checkins?: { items?: unknown[] } }>(path, { limit: 5 });
     const matches: number[] = [];
     for (const it of data?.checkins?.items ?? []) {
       const c = it as { checkin_id?: number; created_at?: string; beer?: { bid?: number } };
