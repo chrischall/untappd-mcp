@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.3.1](https://github.com/chrischall/untappd-mcp/compare/v2.3.0...v2.3.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* annotate tools truthfully and sync manifests with the served tools ([#230](https://github.com/chrischall/untappd-mcp/issues/230)) ([51412cd](https://github.com/chrischall/untappd-mcp/commit/51412cd3ebd283d18b1662614010c990426d5780))
+* declare the plugin MCP config under the mcpServers key Claude Code reads ([#233](https://github.com/chrischall/untappd-mcp/issues/233)) ([8afef51](https://github.com/chrischall/untappd-mcp/commit/8afef5156581d17acb89b1b4b6edd4ca615baeec))
+* **deps:** update @chrischall/mcp-utils to 3.0.0 ([#229](https://github.com/chrischall/untappd-mcp/issues/229)) ([bfed9a0](https://github.com/chrischall/untappd-mcp/commit/bfed9a021d4726d823f0baa662c7256f25c0ebf7))
+* report a token-only setup as configured ([#232](https://github.com/chrischall/untappd-mcp/issues/232)) ([bd08686](https://github.com/chrischall/untappd-mcp/commit/bd08686ec44945aef61910ca6e02e4d00d511e69)), closes [#231](https://github.com/chrischall/untappd-mcp/issues/231)
+* resolve low-severity audit findings ([#227](https://github.com/chrischall/untappd-mcp/issues/227)) ([0ed47b9](https://github.com/chrischall/untappd-mcp/commit/0ed47b9bcfbdfdd8c7fb37ae2542a6208af51b73))
+* **security:** send the Untappd access token in a header, not the URL ([#234](https://github.com/chrischall/untappd-mcp/issues/234)) ([5a5f7be](https://github.com/chrischall/untappd-mcp/commit/5a5f7bee8724e9762c10d8d7f122c392498dc283))
+
 ## [2.3.0](https://github.com/chrischall/untappd-mcp/compare/v2.2.4...v2.3.0) (2026-10-07)
 
 
