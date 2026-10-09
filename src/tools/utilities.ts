@@ -28,8 +28,9 @@ export function registerUtilityTools(server: McpServer, client: UntappdClient): 
           configured: false,
           ...build,
           note:
-            'Untappd credentials are not set. Configure UNTAPPD_CLIENT_ID and UNTAPPD_CLIENT_SECRET, plus either ' +
-            'UNTAPPD_ACCESS_TOKEN (a token you already hold — no password needed) or UNTAPPD_USERNAME and UNTAPPD_PASSWORD.',
+            'Untappd credentials are not set. Configure either UNTAPPD_ACCESS_TOKEN (a token you already hold — no ' +
+            'password needed; enough for reads) or UNTAPPD_USERNAME, UNTAPPD_PASSWORD, UNTAPPD_CLIENT_ID and ' +
+            'UNTAPPD_CLIENT_SECRET to log in. Writes also need UNTAPPD_CLIENT_ID and UNTAPPD_CLIENT_SECRET.',
         });
       }
       const feed = await client.get<{ checkins?: { count?: number } }>('/checkin/recent', { limit: 1 });
@@ -38,8 +39,12 @@ export function registerUtilityTools(server: McpServer, client: UntappdClient): 
         configured: true,
         account: client.loginName,
         feed_reachable: feed?.checkins !== undefined,
+        writes_enabled: client.canWrite,
         ...build,
-        note: 'Logged in to Untappd and fetched the friend feed successfully.',
+        note: client.canWrite
+          ? 'Logged in to Untappd and fetched the friend feed successfully.'
+          : 'Fetched the friend feed successfully with the access token. Reads work; writes (check-in, toast, ' +
+            'comment, wishlist, friend actions) need UNTAPPD_CLIENT_ID and UNTAPPD_CLIENT_SECRET as well.',
       });
     },
   );
