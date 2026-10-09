@@ -554,9 +554,9 @@ export class CheckinStoreCore {
     }
     if (opts.beerName !== undefined) {
       const like = `%${escapeLike(opts.beerName)}%`;
-      cClause.push('beer_name LIKE ? COLLATE NOCASE');
+      cClause.push(`beer_name ${LIKE_MATCH}`);
       cParams.push(like);
-      bClause.push('beer_name LIKE ? COLLATE NOCASE');
+      bClause.push(`beer_name ${LIKE_MATCH}`);
       bParams.push(like);
     }
     const cWhere = cClause.join(' AND ');
@@ -622,11 +622,11 @@ export class CheckinStoreCore {
       params.push(filters.brewery_id);
     }
     if (filters.brewery !== undefined) {
-      where.push('brewery_name LIKE ? COLLATE NOCASE');
+      where.push(`brewery_name ${LIKE_MATCH}`);
       params.push(`%${escapeLike(filters.brewery)}%`);
     }
     if (filters.style !== undefined) {
-      where.push('beer_style LIKE ? COLLATE NOCASE');
+      where.push(`beer_style ${LIKE_MATCH}`);
       params.push(`%${escapeLike(filters.style)}%`);
     }
     if (filters.min_rating !== undefined) {
@@ -634,7 +634,7 @@ export class CheckinStoreCore {
       params.push(filters.min_rating);
     }
     if (filters.venue !== undefined) {
-      where.push('venue_name LIKE ? COLLATE NOCASE');
+      where.push(`venue_name ${LIKE_MATCH}`);
       params.push(`%${escapeLike(filters.venue)}%`);
     }
     if (filters.venue_id !== undefined) {
@@ -653,9 +653,9 @@ export class CheckinStoreCore {
       filters.sort === 'oldest'
         ? 'created_at ASC, checkin_id ASC'
         : filters.sort === 'highest_rated'
-          ? 'rating DESC, created_at DESC'
+          ? 'rating IS NULL, rating DESC, created_at DESC'
           : filters.sort === 'lowest_rated'
-            ? 'rating ASC, created_at DESC'
+            ? 'rating IS NULL, rating ASC, created_at DESC'
             : 'created_at DESC, checkin_id DESC';
     const limit = Math.min(Math.max(filters.limit ?? 25, 1), 200);
     return this.db.all(
@@ -761,9 +761,12 @@ export class LocalCacheStore implements CacheStore {
   }
 }
 
-// Escape LIKE wildcards in user input so a literal % or _ isn't treated as a
-// wildcard. Our LIKE patterns don't set an ESCAPE clause, so we simply strip the
-// specials rather than rely on a non-portable escape convention.
+// Case-insensitive substring match whose pattern is built by escapeLike(): the
+// ESCAPE clause makes a backslash-prefixed %, _ or backslash match itself literally.
+const LIKE_MATCH = "LIKE ? COLLATE NOCASE ESCAPE '\\'";
+
+// Escape LIKE wildcards in user input so a literal % or _ in a beer/brewery/venue
+// name matches itself instead of acting as a wildcard (pair with LIKE_MATCH).
 function escapeLike(s: string): string {
-  return s.replace(/[%_]/g, ' ');
+  return s.replace(/[\\%_]/g, (c) => `\\${c}`);
 }

@@ -139,7 +139,7 @@ Non-obvious behaviours that were each fixed the hard way:
   possible false negative. New cache read tools must include it.
 - Usernames are keyed **lowercased**; other stored fields keep their original casing.
 - The cache holds OTHER users' dated venue history: `CheckinCache.open()` creates the dir `0700` and the db `0600` before SQLite opens it (and tightens old loose files). Retention is user-driven — `untappd_cache_forget` (confirm-gated, local-only) is the delete path; there is no TTL.
-- `escapeLike` replaces `%`/`_` in user input with a space (the LIKE patterns set no ESCAPE clause).
+- `escapeLike` backslash-escapes `%`/`_`/`\` in user input and every LIKE goes through `LIKE_MATCH` (`ESCAPE '\'`), so a name like `100% Brewing` matches literally. The rated sorts put unrated (NULL) check-ins last.
 
 ## Environment (stdio)
 
