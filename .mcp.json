@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "untappd": {
-      "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "untappd-mcp"],
       "env": {
         "UNTAPPD_ACCESS_TOKEN": "${UNTAPPD_ACCESS_TOKEN}",
         "UNTAPPD_USERNAME": "${UNTAPPD_USERNAME}",
