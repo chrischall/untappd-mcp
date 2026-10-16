@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { chmodSync, closeSync, existsSync, mkdirSync, openSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { readEnvVar } from '@chrischall/mcp-utils';
 import { CheckinStoreCore, LocalCacheStore, type SqlDriver, type SqlParam } from './store.js';
@@ -64,14 +64,18 @@ export class CheckinCache extends LocalCacheStore {
 /**
  * Create the cache's directory (0700 — `mode` applies to every dir mkdir
  * creates) and the db file itself (0600) BEFORE SQLite opens it, so the file is
- * never briefly umask-readable. Pre-existing loose entries from older versions
- * are tightened too; chmod failures (e.g. a shared dir the user doesn't own)
- * are best-effort, never fatal.
+ * never briefly umask-readable. The db file is always tightened, and so is the
+ * server's own default directory (`~/.untappd-mcp`, which an older version may
+ * have left loose). A directory the user pointed `UNTAPPD_CACHE_DB` into that
+ * already existed is left as it is: it may hold other files (a shared Dropbox
+ * folder), and making it owner-only would break access to them. chmod failures
+ * (e.g. a shared dir the user doesn't own) are best-effort, never fatal.
  */
 function preparePrivateFile(path: string): void {
   const dir = dirname(path);
+  const dirExisted = existsSync(dir);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  bestEffortChmod(dir, 0o700);
+  if (!dirExisted || resolve(dir) === resolve(defaultCacheDir())) bestEffortChmod(dir, 0o700);
   if (!existsSync(path)) closeSync(openSync(path, 'a', 0o600));
   bestEffortChmod(path, 0o600);
 }
@@ -93,7 +97,7 @@ function bestEffortChmod(path: string, mode: number): void {
 
 /** Default on-disk cache path: `$UNTAPPD_CACHE_DB` or `~/.untappd-mcp/checkins.db`. */
 export function defaultCachePath(): string {
-  return readEnvVar('UNTAPPD_CACHE_DB') ?? join(homedir(), '.untappd-mcp', 'checkins.db');
+  return readEnvVar('UNTAPPD_CACHE_DB') ?? join(defaultCacheDir(), 'checkins.db');
 }
 
 // Re-export the shared types/helpers tests and tools import from here so their
@@ -107,3 +111,8 @@ export {
   type CacheStore,
   type ForgetResult,
 } from './store.js';
+
+/** The directory the server owns by default: `~/.untappd-mcp`. */
+function defaultCacheDir(): string {
+  return join(homedir(), '.untappd-mcp');
+}
