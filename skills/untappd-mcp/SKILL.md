@@ -5,19 +5,35 @@ description: Search Untappd beers, breweries, and venues; read user profiles, ch
 
 # Untappd MCP
 
-Talks to Untappd's mobile (v4) API using your own account. Logs in via the app's
-`xauth` endpoint (username + password → access token) and calls the same
-endpoints the iPad app uses.
+Talks to Untappd's mobile (v4) API using your own account, calling the same
+endpoints the iPad app uses. Authenticates with an access token you already
+hold, or mints one via the app's `xauth` endpoint (username + password).
 
 ## Setup
 
-Set four environment variables (see the README for details):
+Environment variables (the README has the full table and how to capture the
+client credentials):
 
-- `UNTAPPD_USERNAME`, `UNTAPPD_PASSWORD` — your Untappd login.
-- `UNTAPPD_CLIENT_ID`, `UNTAPPD_CLIENT_SECRET` — the Untappd mobile app client
-  credentials (obtained by intercepting the app's traffic; see README).
+| Variable | Needed | Purpose |
+|---|---|---|
+| `UNTAPPD_ACCESS_TOKEN` | no | A token you already hold. With it, **no password is needed** — xauth is skipped. When it expires, the server says so; supply a fresh one. |
+| `UNTAPPD_USERNAME`, `UNTAPPD_PASSWORD` | if no token | Your Untappd login, used only to mint a token. Accounts with 2FA can't log in this way. |
+| `UNTAPPD_CLIENT_ID`, `UNTAPPD_CLIENT_SECRET` | for login & writes | The Untappd mobile app's client credentials. A pre-seeded token can read without them. |
+| `UNTAPPD_TIMEZONE` | no | IANA zone check-ins are stamped with when a call omits `timezone`. Defaults to the server's zone. |
+| `UNTAPPD_PHOTO_DIR` | no | Directory (or `:`-separated list) a check-in's `photo_path` must be inside. Default `~/Downloads/untappd-mcp`. |
+| `UNTAPPD_CACHE_DB` | no | Local check-in cache file (default `~/.untappd-mcp/checkins.db`). Local/stdio only. |
 
-Run `untappd_healthcheck` to confirm login works.
+Two things the server enforces that you should plan around:
+
+- **Photos:** `untappd_checkin`'s `photo_path` must be a file inside
+  `UNTAPPD_PHOTO_DIR` (default `~/Downloads/untappd-mcp`); anything else (e.g.
+  `~/Pictures/beer.jpg`) is refused. Ask the user to move the photo there first.
+- **Time zone:** on a hosted connector the server usually runs in UTC, so pass
+  `timezone` (the drinker's IANA zone, e.g. `America/New_York`) on
+  `untappd_checkin` unless `UNTAPPD_TIMEZONE` is set — otherwise the check-in is
+  stamped in the server's zone.
+
+Run `untappd_healthcheck` to confirm auth works.
 
 ## Read tools
 
