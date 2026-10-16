@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.3.2](https://github.com/chrischall/untappd-mcp/compare/v2.3.1...v2.3.2) (2026-10-16)
+
+
+### Bug Fixes
+
+* **cache:** leave a pre-existing user-chosen cache directory's permissions alone ([#238](https://github.com/chrischall/untappd-mcp/issues/238)) ([8e25be1](https://github.com/chrischall/untappd-mcp/commit/8e25be187cfa3d1763e4b0cf421db2909305636d))
+* **deps:** bump the production-dependencies group with 4 updates ([#236](https://github.com/chrischall/untappd-mcp/issues/236)) ([6762ddb](https://github.com/chrischall/untappd-mcp/commit/6762ddbbc993ec7741fca93ceb3ee54a0a731de5))
+* **plugin:** launch the published package so marketplace installs start ([#239](https://github.com/chrischall/untappd-mcp/issues/239)) ([ba86a63](https://github.com/chrischall/untappd-mcp/commit/ba86a6366868f0e715913f39865b2fcb5035bb70))
+
 ## [2.3.1](https://github.com/chrischall/untappd-mcp/compare/v2.3.0...v2.3.1) (2026-10-09)
 
 
