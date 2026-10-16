@@ -37,7 +37,7 @@ it goes stale.
 | `UNTAPPD_USER_AGENT` | no | Override the User-Agent (default mimics the app). |
 | `UNTAPPD_TIMEZONE` | no | IANA timezone (e.g. `America/New_York`) that check-ins are stamped with when the call doesn't pass `timezone`. Set it when the server runs somewhere other than the drinker's zone (e.g. a hosted connector, usually UTC). Defaults to the server process's zone. |
 | `UNTAPPD_PHOTO_DIR` | no | The directory `untappd_checkin`'s `photo_path` must be inside (several allowed, separated by `:`). Defaults to `~/Downloads/untappd-mcp` — put a photo there to attach it. Any other file is refused, so a prompt-injected shout or comment can't publish an arbitrary image from your disk. |
-| `UNTAPPD_CACHE_DB` | no | Path to the local check-in cache SQLite file (default `~/.untappd-mcp/checkins.db`; created owner-only — dir `0700`, file `0600`). Local/stdio only. |
+| `UNTAPPD_CACHE_DB` | no | Path to the local check-in cache SQLite file (default `~/.untappd-mcp/checkins.db`). The db file is always made owner-only (`0600`), and so are any directories the server creates plus the default `~/.untappd-mcp`; a directory you point this into that already exists keeps its permissions. Local/stdio only. |
 
 Copy `.env.example` to `.env` and fill it in for local use.
 
