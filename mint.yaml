@@ -5,6 +5,18 @@ summary: >-
   Search Untappd beers, breweries, and venues; read profiles, check-ins,
   wishlists, and your friend feed; and post check-ins, toasts, and comments
   to your account
+examples:
+  - prompt: >-
+      What's trending on Untappd right now? Split it into the big macro beers
+      and the smaller craft ones.
+    note: Read-only; uses the trending beers list.
+  - prompt: >-
+      Look up Tree House Brewing on Untappd and list their highest-rated beers.
+    note: Read-only; brewery search, then its beer list sorted by rating.
+  - prompt: >-
+      Here's the tap list at the bar I'm at. Which two of these have I not had
+      yet, ranked by rating?
+    note: Checks your synced check-in history; nothing is posted.
 env:
   - name: UNTAPPD_USERNAME
     required: true
