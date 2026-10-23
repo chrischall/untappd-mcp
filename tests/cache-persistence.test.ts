@@ -150,7 +150,7 @@ describe('cache persistence across processes (built server)', () => {
       expect(status).toMatchObject({
         cache_path: expectedPath,
         journal_mode: 'wal',
-        schema_version: 2,
+        schema_version: 3,
         users: [{ username: 'mer', cached_distinct_beers: 120, total_distinct_beers: 120, coverage_complete: true }],
       });
       expect(status.file_size_bytes).toBeGreaterThan(0);

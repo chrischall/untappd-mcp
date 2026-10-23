@@ -165,18 +165,24 @@ also lists the Tennessee Lager at 3.33, `possible` lists six candidates, and a
       "needs_confirmation": true }
   ],
   "unresolved": [{ "item": "ROTATING CIDER", "reason": "ask bartender" }],
-  "sync": { "mode": "backfill", "api_calls": 1, "coverage_complete": true,
-            "cached_distinct_beers": 1, "total_distinct_beers": 1, "another_run_needed": false },
+  "sync": { "mode": "backfill", "api_calls": 1 },
   "api_calls": 11,
   "api_budget": 60,
   "another_run_needed": false
 }
 ```
 
-If the budget runs out before the backfill finishes, `sync.coverage_complete` is
-`false`, `another_run_needed` is `true`, and the `freshness` caveat warns that a
-"not had" may be a false negative. Calling again continues from where it
-stopped.
+`sync` says what the refresh did; coverage lives in `freshness`. If the budget
+runs out before the backfill finishes, `freshness.coverage_complete` is `false`,
+`another_run_needed` is `true`, and the `freshness` caveat warns that a "not
+had" may be a false negative. Calling again continues from where it stopped.
+
+**Quota.** When an Untappd response carries `X-Ratelimit-Remaining`, the server
+remembers it for the hour, and every budgeted tool (`menu_pick`, `venue_pick`,
+`top_not_had`, both syncs) caps its budget to what's left. The result then
+includes `quota_remaining`, plus `budget_clamped_to_quota: true` when the cap
+applied. Untappd's public API documents the header; if the private API this
+server uses doesn't send it, budgets work exactly as before.
 
 `untappd_venue_pick` takes an Untappd venue URL (`https://untappd.com/v/<slug>/<id>`)
 or id instead of `items`. It pages through the venue's whole verified menu, takes

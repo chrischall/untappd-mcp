@@ -117,6 +117,9 @@ export interface SyncState {
   served_backfill_last: boolean;
 }
 
+/** The per-bid verdict {@link CacheStore.hasHadMany} returns (no per-check-in matches). */
+export type HasHadVerdict = Omit<HasHadResult, 'matches'>;
+
 export interface HasHadResult {
   had: boolean;
   count: number;
@@ -157,6 +160,8 @@ export interface CacheStore {
   getState(username: string): Promise<SyncState | undefined>;
   setState(username: string, patch: Partial<Omit<SyncState, 'username'>>): Promise<void>;
   hasHad(username: string, opts: { bid?: number; beerName?: string }): Promise<HasHadResult>;
+  /** Batch has-had by bid; every requested bid gets an entry. */
+  hasHadMany(username: string, bids: number[]): Promise<Map<number, HasHadVerdict>>;
   query(username: string, filters: QueryFilters): Promise<CheckinRow[]>;
   /** Read cached metadata for the given bids (only those present are returned). */
   getBeerMeta(bids: number[]): Promise<BeerMeta[]>;
@@ -435,6 +440,11 @@ export const VERSIONED_MIGRATIONS: ReadonlyArray<{ version: number; statements: 
        )`,
     ],
   },
+  {
+    // untappd_cache_query's default (and date-range) ordering.
+    version: 3,
+    statements: ['CREATE INDEX IF NOT EXISTS idx_checkins_user_created ON checkins(username, created_at)'],
+  },
 ];
 
 /** The schema version this code writes. */
@@ -502,8 +512,7 @@ export class CheckinStoreCore {
   upsertCheckins(username: string, rows: CheckinRow[]): number {
     if (rows.length === 0) return 0;
     const key = username.toLowerCase();
-    let before = 0;
-    let after = 0;
+    let added = 0;
     const sql = `
       INSERT INTO checkins
         (checkin_id, username, bid, beer_name, brewery_id, brewery_name, beer_style, abv, rating, comment, venue_id, venue_name, created_at)
@@ -513,27 +522,29 @@ export class CheckinStoreCore {
         brewery_id=excluded.brewery_id, brewery_name=excluded.brewery_name, beer_style=excluded.beer_style,
         abv=excluded.abv, rating=excluded.rating, comment=excluded.comment,
         venue_id=excluded.venue_id, venue_name=excluded.venue_name, created_at=excluded.created_at`;
-    // Count inside the write transaction so another process's concurrent
-    // inserts can't be mistaken for (or subtracted from) this batch's.
+    // "Net new" = ids this user didn't already have, read inside the write
+    // transaction so another process's concurrent inserts can't skew it. It
+    // looks up only this batch's ids; COUNT(*)-before/after scanned the user's
+    // whole history on every page, which made a long backfill quadratic.
     this.db.transaction(() => {
-      before = this.cachedCount(username);
+      const ids = [...new Set(rows.map((r) => r.checkin_id))];
+      const had = this.existing('checkins', 'checkin_id', key, ids);
+      added = ids.filter((id) => !had.has(id)).length;
       for (const r of rows) {
         this.db.run(sql, [
           r.checkin_id, key, r.bid, r.beer_name, r.brewery_id, r.brewery_name, r.beer_style,
           r.abv, r.rating, r.comment, r.venue_id, r.venue_name, r.created_at,
         ]);
       }
-      after = this.cachedCount(username);
     });
-    return after - before;
+    return added;
   }
 
   /** Upsert distinct-beer rows (dedupe on username+bid); return the NET new count. */
   upsertDistinctBeers(username: string, rows: DistinctBeerRow[]): number {
     if (rows.length === 0) return 0;
     const key = username.toLowerCase();
-    let before = 0;
-    let after = 0;
+    let added = 0;
     const sql = `
       INSERT INTO distinct_beers
         (username, bid, beer_name, brewery_id, brewery_name, beer_style, abv, rating, had_count, first_had, last_had)
@@ -543,16 +554,30 @@ export class CheckinStoreCore {
         beer_style=excluded.beer_style, abv=excluded.abv, rating=excluded.rating,
         had_count=excluded.had_count, first_had=excluded.first_had, last_had=excluded.last_had`;
     this.db.transaction(() => {
-      before = this.distinctBeersCount(username);
+      const bids = [...new Set(rows.map((r) => r.bid))];
+      const had = this.existing('distinct_beers', 'bid', key, bids);
+      added = bids.filter((b) => !had.has(b)).length;
       for (const r of rows) {
         this.db.run(sql, [
           key, r.bid, r.beer_name, r.brewery_id, r.brewery_name, r.beer_style, r.abv,
           r.rating, r.had_count, r.first_had, r.last_had,
         ]);
       }
-      after = this.distinctBeersCount(username);
     });
-    return after - before;
+    return added;
+  }
+
+  /** Which of `ids` already exist in `table.column` for this (lowercased) user. */
+  private existing(table: 'checkins' | 'distinct_beers', column: 'checkin_id' | 'bid', key: string, ids: number[]): Set<number> {
+    const found = new Set<number>();
+    for (const part of chunks(ids)) {
+      const rows = this.db.all(
+        `SELECT ${column} AS id FROM ${table} WHERE username = ? AND ${column} IN (${part.map(() => '?').join(', ')})`,
+        [key, ...part],
+      );
+      for (const r of rows) found.add(Number(r.id));
+    }
+    return found;
   }
 
   /** Total cached check-in rows for a user. */
@@ -735,6 +760,50 @@ export class CheckinStoreCore {
       sources,
       matches,
     };
+  }
+
+  /**
+   * {@link hasHad} for many bids at once, in two grouped queries per chunk
+   * instead of ~4 per bid. Same merge rules: a hit in either source counts,
+   * `count` prefers user/beers' authoritative had_count, dates and ratings take
+   * the max across both. No per-check-in `matches` — callers of the batch form
+   * only want the verdict. Every requested bid gets an entry.
+   */
+  hasHadMany(username: string, bids: number[]): Map<number, HasHadVerdict> {
+    const key = username.toLowerCase();
+    const out = new Map<number, HasHadVerdict>();
+    const unique = [...new Set(bids)];
+    for (const bid of unique) out.set(bid, { had: false, count: 0, last_date: null, best_rating: null, sources: [] });
+    for (const part of chunks(unique)) {
+      const ph = part.map(() => '?').join(', ');
+      for (const r of this.db.all(
+        `SELECT bid, COUNT(*) AS c, MAX(rating) AS best, MAX(created_at) AS last
+         FROM checkins WHERE username = ? AND bid IN (${ph}) GROUP BY bid`,
+        [key, ...part],
+      )) {
+        const v = out.get(Number(r.bid))!;
+        v.had = true;
+        v.count = Number(r.c);
+        v.best_rating = num(r.best);
+        v.last_date = str(r.last);
+        v.sources.push('checkins');
+      }
+      for (const r of this.db.all(
+        `SELECT bid, had_count, rating, last_had, first_had FROM distinct_beers WHERE username = ? AND bid IN (${ph})`,
+        [key, ...part],
+      )) {
+        const v = out.get(Number(r.bid))!;
+        v.had = true;
+        // Prefer the user/beers count; else keep the check-in-derived count; else 1.
+        v.count = num(r.had_count) ?? (v.count || 1);
+        const rating = num(r.rating);
+        if (rating !== null && (v.best_rating === null || rating > v.best_rating)) v.best_rating = rating;
+        const last = str(r.last_had) ?? str(r.first_had);
+        if (last && (v.last_date === null || last > v.last_date)) v.last_date = last;
+        v.sources.push('beers');
+      }
+    }
+    return out;
   }
 
   query(username: string, filters: QueryFilters): CheckinRow[] {
@@ -932,6 +1001,9 @@ export class LocalCacheStore implements CacheStore {
   async hasHad(username: string, opts: { bid?: number; beerName?: string }): Promise<HasHadResult> {
     return this.core.hasHad(username, opts);
   }
+  async hasHadMany(username: string, bids: number[]): Promise<Map<number, HasHadVerdict>> {
+    return this.core.hasHadMany(username, bids);
+  }
   async query(username: string, filters: QueryFilters): Promise<CheckinRow[]> {
     return this.core.query(username, filters);
   }
@@ -956,6 +1028,15 @@ export class LocalCacheStore implements CacheStore {
   async stats(): Promise<CacheStats> {
     return this.core.stats();
   }
+}
+
+// SQLite caps bound parameters per statement (999 on older builds); IN-lists
+// are split well under that.
+const IN_CHUNK = 500;
+function chunks<T>(xs: T[]): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < xs.length; i += IN_CHUNK) out.push(xs.slice(i, i + IN_CHUNK));
+  return out;
 }
 
 // Case-insensitive substring match whose pattern is built by escapeLike(): the

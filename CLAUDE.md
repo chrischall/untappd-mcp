@@ -155,6 +155,11 @@ Non-obvious behaviours that were each fixed the hard way:
 - **Incremental `user/beers` refresh stops at the first cached beer whose `last_had` AND `had_count`
   are unchanged** — not merely "already cached": a re-had beer moves to the top, and a new beer can
   sit below it.
+- **Batch, don't loop.** Use `hasHadMany(username, bids)` (two grouped queries per 500-bid chunk)
+  for any list; `hasHad` per bid costs ~4 queries each. `tests/cache-batch.test.ts` pins the two
+  to identical verdicts — change both or neither. Upsert "net new" counts look up only the batch's
+  ids; don't go back to COUNT(*) before/after (quadratic over a backfill).
+- `NodeSqlDriver` caches prepared statements by SQL text (bounded, cleared when full).
 - `escapeLike` backslash-escapes `%`/`_`/`\` in user input and every LIKE goes through `LIKE_MATCH` (`ESCAPE '\'`), so a name like `100% Brewing` matches literally. The rated sorts put unrated (NULL) check-ins last.
 
 ## Menu picks (`src/menu/`)
@@ -172,6 +177,12 @@ The sync gets what's left after reserving ~3 calls per uncached line, never less
 - Line→bid resolutions are cached in `item_resolutions` (global, not per user; key carries a
   version prefix — bump `RESOLUTION_KEY_VERSION` when scoring changes). Budget/429 failures are
   never cached.
+- Ratings for not-had beers: when 2+ come from one brewery, one `brewery/beer_list` call (top 50
+  by popularity, with ratings) replaces their `beer/info` calls; beers it misses fall back to
+  `beer/info`. The whole list is seeded into `beer_meta`.
+- `UntappdClient.quotaRemaining` is the last `X-Ratelimit-Remaining` seen within the hour, else
+  null. Whether the v4 API sends that header is UNVERIFIED (the public API documents it), so
+  `clampToQuota` (`src/quota.ts`) must keep treating null as "use the requested budget".
 - Search results carry NO rating. Don't seed `beer_meta` from them (that used to overwrite real
   ratings with null under a fresh timestamp); ratings come from `beer/info` or brewery/menu lists.
 

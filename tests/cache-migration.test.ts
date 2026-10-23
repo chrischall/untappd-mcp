@@ -51,8 +51,8 @@ describe('cache schema migration', () => {
     writeLegacyCache(path);
     const cache = CheckinCache.open(path);
     try {
-      expect(SCHEMA_VERSION).toBe(2);
-      expect((await cache.stats()).schema_version).toBe(2);
+      expect(SCHEMA_VERSION).toBe(3);
+      expect((await cache.stats()).schema_version).toBe(3);
       // Old rows survive…
       expect(await cache.cachedCount('mer')).toBe(1);
       expect(await cache.distinctBeersCount('mer')).toBe(1);
@@ -76,7 +76,7 @@ describe('cache schema migration', () => {
       cache.close();
     }
     const raw = new DatabaseSync(path);
-    expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 2 });
+    expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 3 });
     raw.close();
   });
 
@@ -89,8 +89,25 @@ describe('cache schema migration', () => {
     a.close();
     const b = CheckinCache.open(path);
     expect(await b.distinctBeersCount('mer')).toBe(1);
-    expect((await b.stats()).schema_version).toBe(2);
+    expect((await b.stats()).schema_version).toBe(3);
     b.close();
+  });
+
+  it('steps a v2 cache to v3 (adds the created_at index) without touching rows', async () => {
+    const path = join(tmp(), 'checkins.db');
+    const first = CheckinCache.open(path);
+    await first.setState('mer', { beers_total: 7 });
+    first.close();
+    const raw = new DatabaseSync(path);
+    raw.exec('DROP INDEX idx_checkins_user_created; PRAGMA user_version = 2');
+    raw.close();
+    const cache = CheckinCache.open(path);
+    expect((await cache.stats()).schema_version).toBe(3);
+    expect((await cache.getState('mer'))?.beers_total).toBe(7);
+    cache.close();
+    const after = new DatabaseSync(path);
+    expect(after.prepare("SELECT name FROM sqlite_master WHERE name = 'idx_checkins_user_created'").get()).toBeDefined();
+    after.close();
   });
 
   it('leaves a cache written by a NEWER build untouched instead of downgrading it', async () => {

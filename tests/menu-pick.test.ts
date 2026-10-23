@@ -33,6 +33,8 @@ interface FakeOpts {
   /** Answer 429 (with this Retry-After) the first time each listed path+query is requested. */
   rateLimitOnce?: Map<string, number | undefined>;
   venue?: unknown;
+  /** What the client reports as X-Ratelimit-Remaining (undefined = never seen). */
+  quota?: number;
 }
 
 /** Routes the endpoints the pipeline uses to the live-captured fixtures. */
@@ -68,7 +70,11 @@ function fakeClient(opts: FakeOpts = {}) {
       inFlight--;
     }
   };
-  const client = { get, get loginName() { return 'mer'; } } as unknown as UntappdClient;
+  const client = {
+    get,
+    get loginName() { return 'mer'; },
+    get quotaRemaining() { return opts.quota ?? null; },
+  } as unknown as UntappdClient;
   return { client, calls, maxInFlight: () => maxInFlight };
 }
 
@@ -182,7 +188,7 @@ describe('untappd_menu_pick', () => {
       { item: 'ROTATING DRAFT BEER', reason: 'ask bartender' },
       { item: 'ROTATING CIDER', reason: 'ask bartender' },
     ]);
-    expect(out.sync).toMatchObject({ mode: 'backfill', coverage_complete: true, api_calls: 1 });
+    expect(out.sync).toEqual({ mode: 'backfill', api_calls: 1 });
     expect(out.another_run_needed).toBe(false);
     expect(out.freshness.coverage_complete).toBe(true);
   });
@@ -223,13 +229,21 @@ describe('untappd_menu_pick', () => {
     expect(out.api_calls).toBe(4);
   });
 
+  it('cuts the budget to the quota Untappd reports and says so', async () => {
+    const s = await setup({ userBeers: [], quota: 2 });
+    const out = parse(await s.harness.callTool('untappd_menu_pick', { username: 'mer', items: MENU.slice(0, 4) }));
+    expect(s.calls.length).toBeLessThanOrEqual(2);
+    expect(out).toMatchObject({ api_budget: 2, quota_remaining: 2, budget_clamped_to_quota: true, another_run_needed: true });
+  });
+
   it('stays inside api_budget and says another run is needed', async () => {
     const big = Array.from({ length: 400 }, (_, i) => ({ bid: 9_000_000 + i, name: `B${i}` }));
     const s = await setup({ userBeers: big });
     const out = parse(await s.harness.callTool('untappd_menu_pick', { username: 'mer', items: MENU.slice(0, 4), api_budget: 6 }));
     expect(s.calls.length).toBeLessThanOrEqual(6);
     expect(out.api_calls).toBe(s.calls.length);
-    expect(out.sync).toMatchObject({ mode: 'backfill', coverage_complete: false });
+    expect(out.sync).toMatchObject({ mode: 'backfill' });
+    expect(out.freshness.coverage_complete).toBe(false);
     expect(out.another_run_needed).toBe(true);
     expect(out.freshness.caveat).toMatch(/false negative/);
   });
@@ -259,6 +273,33 @@ describe('untappd_venue_pick', () => {
     expect(out.venue).toMatchObject({ venue_id: 12345, name: 'Test Taproom', city: 'Nashville', menu_beers: 3, menu_complete: true });
     expect(out.picks.map((p: { bid: number }) => p.bid)).toEqual([1502190, 304831]);
     expect(out.had.map((h: { bid: number }) => h.bid)).toEqual([1893601]);
+  });
+
+  it('rates two beers from one brewery with ONE beer-list call, falling back to beer/info for the rest', async () => {
+    const abbey = (bid: number, name: string) => ({
+      beer: { bid, beer_name: name, beer_style: 'Belgian Blonde', beer_abv: 5 },
+      brewery: { brewery_id: 20035, brewery_name: 'The Black Abbey Brewing Company' },
+    });
+    const menu = {
+      venue: {
+        venue_name: 'Abbey Taproom',
+        location: { venue_city: 'Nashville' },
+        verfied_beers: {
+          total_count: 3,
+          items: [{ menu: { menu_id: 1, menu_name: 'Draft', sections: { items: [{ section_id: 1, section_name: 'On tap', items: [
+            abbey(349665, 'The Rose'), abbey(827528, 'Five Points IPA'), abbey(1893601, 'Not On The List'),
+          ] }] } } }],
+        },
+      },
+    };
+    const s = await setup({ userBeers: [], venue: menu });
+    const out = parse(await s.harness.callTool('untappd_venue_pick', { venue: 777, username: 'mer', top_n: 3 }));
+    expect(s.calls).toEqual(['/venue/info/777', '/user/beers/mer?offset=0', '/brewery/beer_list/20035', '/beer/info/1893601']);
+    expect(out.picks.map((p: { bid: number; global_rating: number }) => [p.bid, p.global_rating])).toEqual([
+      [1893601, 3.68], // from beer/info (not in the brewery list)
+      [827528, 3.65],
+      [349665, 3.62],
+    ]);
   });
 
   it('parses venue ids and URLs', () => {

@@ -6,6 +6,7 @@ import { beerMetaFrom, type BeerMeta, type CacheStore, type SyncState } from '..
 import { syncCheckins } from '../cache/sync.js';
 import { syncUserBeers } from '../cache/sync-beers.js';
 import { CONFIRM_FLOW, confirmWrite } from './confirm.js';
+import { clampToQuota } from '../quota.js';
 
 // Re-fetch cached beer metadata at most this often; a hit newer than this skips
 // the beer/info API call.
@@ -19,7 +20,7 @@ const BEER_META_TTL_MS = 30 * 24 * 60 * 60 * 1000;
  */
 export type CacheProvider = () => CacheStore;
 
-const UsernameArg = z
+export const UsernameArg = z
   .string()
   .min(1)
   .optional()
@@ -34,6 +35,12 @@ export function resolveUser(username: string | undefined, loginName: string | nu
     });
   }
   return u;
+}
+
+/** Report the quota only when Untappd told us it (and say when it cut the budget). */
+export function quotaFields(q: { quota_remaining: number | null; clamped: boolean }): Record<string, unknown> {
+  if (q.quota_remaining === null) return {};
+  return { quota_remaining: q.quota_remaining, ...(q.clamped ? { budget_clamped_to_quota: true } : {}) };
 }
 
 function pct(cached: number, total: number | null, complete: boolean): number | null {
@@ -157,11 +164,14 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
     },
     async ({ username, max_pages, force_backfill }) => {
       const user = resolveUser(username, client.loginName);
+      // Floor of 1: the shared catch-up/backfill page split (sync.ts) is only
+      // defined for a budget of at least one page.
+      const quota = clampToQuota(client, max_pages ?? 10, 1);
       const summary = await syncCheckins(client, cacheProvider(), user, {
-        maxPages: max_pages ?? 10,
+        maxPages: quota.budget,
         force: force_backfill ?? false,
       });
-      return minifiedResult(summary);
+      return minifiedResult({ ...summary, ...quotaFields(quota) });
     },
   );
 
@@ -190,8 +200,9 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
     },
     async ({ username, max_pages }) => {
       const user = resolveUser(username, client.loginName);
-      const summary = await syncUserBeers(client, cacheProvider(), user, max_pages ?? 10);
-      return minifiedResult(summary);
+      const quota = clampToQuota(client, max_pages ?? 10, 1);
+      const summary = await syncUserBeers(client, cacheProvider(), user, quota.budget);
+      return minifiedResult({ ...summary, ...quotaFields(quota) });
     },
   );
 
@@ -241,21 +252,18 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
     async ({ username, bids }) => {
       const user = resolveUser(username, client.loginName);
       const cache = cacheProvider();
-      const seen = new Set<number>();
+      const verdicts = await cache.hasHadMany(user, bids);
       const results = [];
       let hadCount = 0;
-      for (const bid of bids) {
-        if (seen.has(bid)) continue;
-        seen.add(bid);
-        const r = await cache.hasHad(user, { bid });
+      for (const [bid, r] of verdicts) {
         if (r.had) hadCount++;
         results.push({ bid, had: r.had, count: r.count, last_date: r.last_date, best_rating: r.best_rating, sources: r.sources });
       }
       return minifiedResult({
         username: user,
-        checked: seen.size,
+        checked: verdicts.size,
         had: hadCount,
-        not_had: seen.size - hadCount,
+        not_had: verdicts.size - hadCount,
         results,
         freshness: await freshness(cache, user),
       });
@@ -281,18 +289,13 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
     async ({ username, bids }) => {
       const user = resolveUser(username, client.loginName);
       const cache = cacheProvider();
-      const seen = new Set<number>();
+      const verdicts = await cache.hasHadMany(user, bids);
       const notHad: number[] = [];
       const had: number[] = [];
-      for (const bid of bids) {
-        if (seen.has(bid)) continue;
-        seen.add(bid);
-        if ((await cache.hasHad(user, { bid })).had) had.push(bid);
-        else notHad.push(bid);
-      }
+      for (const [bid, r] of verdicts) (r.had ? had : notHad).push(bid);
       return minifiedResult({
         username: user,
-        checked: seen.size,
+        checked: verdicts.size,
         not_had_count: notHad.length,
         had_count: had.length,
         not_had: notHad,
@@ -373,16 +376,15 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
       const user = resolveUser(username, client.loginName);
       const cache = cacheProvider();
       const topN = top_n ?? 2;
-      const budget = api_budget ?? 25;
+      const quota = clampToQuota(client, api_budget ?? 25);
+      const budget = quota.budget;
       const nowMs = Date.now();
       const nowIso = new Date().toISOString();
 
       // Dedupe candidates, then filter to not-had using the cache only (no API).
       const candidates = [...new Set(bids)];
-      const notHad: number[] = [];
-      for (const bid of candidates) {
-        if (!(await cache.hasHad(user, { bid })).had) notHad.push(bid);
-      }
+      const verdicts = await cache.hasHadMany(user, candidates);
+      const notHad = candidates.filter((bid) => !verdicts.get(bid)!.had);
 
       // Read cached metadata; a hit newer than the TTL is used as-is, otherwise
       // the bid needs a beer/info fetch.
@@ -478,6 +480,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
           partial,
           another_run_needed: partial,
           ...(rateLimited ? { rate_limited: true } : {}),
+          ...quotaFields(quota),
         },
         freshness: await freshness(cache, user),
       });

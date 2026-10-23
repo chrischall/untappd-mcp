@@ -3,14 +3,10 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import { createHelpfulError, minifiedResult, toolAnnotations } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 import { menuPick, venuePick, type PickDeps } from '../menu/pick.js';
-import { freshness, resolveUser, type CacheProvider } from './cache.js';
+import { freshness, quotaFields, resolveUser, UsernameArg, type CacheProvider } from './cache.js';
+import { clampToQuota } from '../quota.js';
 import { parseUntappdUrl } from './resolve.js';
 
-const UsernameArg = z
-  .string()
-  .min(1)
-  .optional()
-  .describe('Untappd username to pick for. Omit to use your own configured account (UNTAPPD_USERNAME).');
 const StyleFilter = z
   .string()
   .min(1)
@@ -58,9 +54,10 @@ export function registerMenuTools(
         'name match and check-in volume, venue_city as tie-breaker; resolutions are cached locally so repeat venues ' +
         'are instant); (3) treats "<Brewery> SEASONAL/ROTATING" as a list of possible beers (needs_confirmation) ' +
         'and "ROTATING CIDER"-style lines as unresolved ("ask bartender"); (4) checks every beer against the cache; ' +
-        '(5) ranks the not-had ones by global rating. Returns picks, not_had, had, possible, unresolved and a sync ' +
-        'block; if coverage is still incomplete a "not had" may be a false negative (see freshness) and ' +
-        'another_run_needed is true. Omit username for your own account.',
+        '(5) ranks the not-had ones by global rating. Returns picks, not_had, had, possible, unresolved, a sync ' +
+        'block (what the refresh did) and freshness (coverage); if coverage is still incomplete a "not had" may be ' +
+        'a false negative and another_run_needed is true. api_budget is also capped to the quota Untappd reports, ' +
+        'when it reports one. Omit username for your own account.',
       annotations: toolAnnotations({ title: "Pick beers off a tap list that a user hasn't had", readOnly: false, idempotent: false, openWorld: true, destructive: false }),
       inputSchema: z.object({
         username: UsernameArg,
@@ -79,6 +76,7 @@ export function registerMenuTools(
     async ({ username, items, style_filter, top_n, venue_city, api_budget, refresh_resolutions }) => {
       const user = resolveUser(username, client.loginName);
       const cache = cacheProvider();
+      const quota = clampToQuota(client, api_budget ?? 60);
       const out = await menuPick(
         client,
         cache,
@@ -87,13 +85,13 @@ export function registerMenuTools(
           items,
           styleFilter: style_filter,
           topN: top_n ?? 2,
-          apiBudget: api_budget ?? 60,
+          apiBudget: quota.budget,
           venueCity: venue_city,
           refreshResolutions: refresh_resolutions,
         },
         deps,
       );
-      return minifiedResult({ username: user, ...out, freshness: await freshness(cache, user) });
+      return minifiedResult({ username: user, ...out, ...quotaFields(quota), freshness: await freshness(cache, user) });
     },
   );
 
@@ -123,13 +121,14 @@ export function registerMenuTools(
       const venueId = parseVenueArg(venue);
       const user = resolveUser(username, client.loginName);
       const cache = cacheProvider();
+      const quota = clampToQuota(client, api_budget ?? 60);
       const out = await venuePick(
         client,
         cache,
-        { username: user, venueId, styleFilter: style_filter, topN: top_n ?? 2, apiBudget: api_budget ?? 60 },
+        { username: user, venueId, styleFilter: style_filter, topN: top_n ?? 2, apiBudget: quota.budget },
         deps,
       );
-      return minifiedResult({ username: user, ...out, freshness: await freshness(cache, user) });
+      return minifiedResult({ username: user, ...out, ...quotaFields(quota), freshness: await freshness(cache, user) });
     },
   );
 }

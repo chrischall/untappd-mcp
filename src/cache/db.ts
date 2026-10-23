@@ -1,4 +1,4 @@
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { chmodSync, closeSync, existsSync, mkdirSync, openSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
@@ -11,20 +11,36 @@ import { CheckinStoreCore, LocalCacheStore, type SqlDriver, type SqlParam } from
 // surface and manages the file handle. Another deployment can adapt a
 // different driver to the same surface.
 
+// Upper bound on cached prepared statements per connection.
+const STATEMENT_CACHE_MAX = 200;
+
 /** Adapts a `node:sqlite` DatabaseSync to the driver surface the core needs. */
 class NodeSqlDriver implements SqlDriver {
+  // Prepared statements, reused by SQL text: an upsert page runs the same
+  // INSERT 50 times. IN-lists make some SQL vary with the list length, so the
+  // cache is bounded and simply reset when full.
+  private readonly stmts = new Map<string, StatementSync>();
   constructor(private readonly db: DatabaseSync) {}
+  private prepared(sql: string): StatementSync {
+    let st = this.stmts.get(sql);
+    if (!st) {
+      if (this.stmts.size >= STATEMENT_CACHE_MAX) this.stmts.clear();
+      st = this.db.prepare(sql);
+      this.stmts.set(sql, st);
+    }
+    return st;
+  }
   execScript(sql: string): void {
     this.db.exec(sql);
   }
   run(sql: string, params: SqlParam[]): void {
-    this.db.prepare(sql).run(...params);
+    this.prepared(sql).run(...params);
   }
   get(sql: string, params: SqlParam[]): Record<string, unknown> | undefined {
-    return this.db.prepare(sql).get(...params) as Record<string, unknown> | undefined;
+    return this.prepared(sql).get(...params) as Record<string, unknown> | undefined;
   }
   all(sql: string, params: SqlParam[]): Record<string, unknown>[] {
-    return this.db.prepare(sql).all(...params) as Record<string, unknown>[];
+    return this.prepared(sql).all(...params) as Record<string, unknown>[];
   }
   transaction(fn: () => void): void {
     // IMMEDIATE takes the write lock up front. A DEFERRED transaction that
@@ -182,6 +198,7 @@ export {
   type CheckinRow,
   type SyncState,
   type HasHadResult,
+  type HasHadVerdict,
   type QueryFilters,
   type CacheStore,
   type ForgetResult,
