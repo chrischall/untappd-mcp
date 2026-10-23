@@ -92,6 +92,13 @@
           "isRequired": false,
           "format": "string",
           "isSecret": false
+        },
+        {
+          "name": "UNTAPPD_CACHE_DIR",
+          "description": "Directory for the cache instead of ~/.untappd-mcp (the file is checkins.db inside it). UNTAPPD_CACHE_DB wins if both are set. Local/stdio only.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
         }
       ]
     }

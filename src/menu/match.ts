@@ -88,7 +88,14 @@ export function normalizeLine(raw: string): NormalizedLine {
     if (tokens[tokens.length - 1] === t) continue;
     tokens.push(t);
   }
-  if (tokens.some((t) => GENERIC_WORDS.has(t))) {
+  // Generic only when nothing but filler follows the last generic word:
+  // "BLACK ABBEY SEASONAL" and "ROTATING DRAFT BEER" are, but "Widmer Rotator
+  // IPA" is a real beer whose name happens to contain one.
+  let lastGeneric = -1;
+  tokens.forEach((t, i) => {
+    if (GENERIC_WORDS.has(t)) lastGeneric = i;
+  });
+  if (lastGeneric !== -1 && tokens.slice(lastGeneric + 1).every((t) => GENERIC_FILLER.has(t))) {
     const rest = tokens.filter((t) => !GENERIC_WORDS.has(t) && !GENERIC_FILLER.has(t));
     return rest.length === 0
       ? { raw, kind: 'generic', tokens }

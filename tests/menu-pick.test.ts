@@ -124,6 +124,11 @@ describe('normalizeLine', () => {
     expect(normalizeLine('ROTATING CIDER').kind).toBe('generic');
   });
 
+  it('keeps a real beer whose name contains a generic word', () => {
+    expect(normalizeLine('WIDMER ROTATOR IPA')).toMatchObject({ kind: 'beer', tokens: ['widmer', 'rotator', 'ipa'] });
+    expect(normalizeLine('Guest Tap: Seasonal Saison')).toMatchObject({ kind: 'beer' });
+  });
+
   it('falls back to a style-less query', () => {
     expect(searchQueries(normalizeLine('I BELIEVE IN NASHVILLE BLONDE'))).toEqual([
       'i believe in nashville blonde',
