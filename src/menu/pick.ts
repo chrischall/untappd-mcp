@@ -22,7 +22,7 @@ import {
   type Candidate,
   type NormalizedLine,
 } from './match.js';
-import { walkVenueMenu } from './venue-menu.js';
+import { walkVenueMenu, type VenueMenuWalk } from './venue-menu.js';
 
 // Re-fetch cached beer metadata at most this often (matches untappd_top_not_had).
 const BEER_META_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -645,9 +645,14 @@ export async function venuePick(
   const counting = {
     get: (p: string, q?: Record<string, unknown>) => (menuCalls++, client.get(p, q as never)),
   } as unknown as UntappdClient;
-  const walk = await walkVenueMenu(counting, input.venueId, {
-    maxPages: Math.max(1, Math.min(VENUE_MENU_MAX_PAGES, budget.remaining - 1)),
-  });
+  // No budget at all (e.g. Untappd reported 0 calls left): don't fetch the
+  // menu — the floor of one page below is for a small budget, not an empty one.
+  const walk: VenueMenuWalk =
+    budget.remaining < 1
+      ? { beers: [], totalCount: 0, sawMenu: false, pagesFetched: 0, reachedEnd: false, nextOffset: 0, venueCity: null, venueName: null }
+      : await walkVenueMenu(counting, input.venueId, {
+          maxPages: Math.max(1, Math.min(VENUE_MENU_MAX_PAGES, budget.remaining - 1)),
+        });
   budget.used += menuCalls;
 
   const metaRows = walk.beers
@@ -676,7 +681,9 @@ export async function venuePick(
   const { rating_fetch_deferred, ...rest } = ranked;
   const unresolved: UnresolvedLine[] = walk.sawMenu
     ? []
-    : [{ item: `venue ${input.venueId}`, reason: 'venue has no verified menu on Untappd — use untappd_menu_pick with the tap list' }];
+    : walk.pagesFetched === 0
+      ? [{ item: `venue ${input.venueId}`, reason: 'api budget exhausted — run again to fetch the menu' }]
+      : [{ item: `venue ${input.venueId}`, reason: 'venue has no verified menu on Untappd — use untappd_menu_pick with the tap list' }];
   return {
     ...rest,
     unresolved,

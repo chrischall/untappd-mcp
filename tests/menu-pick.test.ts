@@ -302,6 +302,14 @@ describe('untappd_venue_pick', () => {
     ]);
   });
 
+  it('makes no API call at all when Untappd reports a quota of 0', async () => {
+    const s = await setup({ userBeers: [], venue, quota: 0 });
+    const out = parse(await s.harness.callTool('untappd_venue_pick', { venue: 12345, username: 'mer' }));
+    expect(s.calls).toEqual([]);
+    expect(out).toMatchObject({ api_calls: 0, api_budget: 0, budget_clamped_to_quota: true, another_run_needed: true });
+    expect(out.unresolved).toEqual([{ item: 'venue 12345', reason: 'api budget exhausted — run again to fetch the menu' }]);
+  });
+
   it('parses venue ids and URLs', () => {
     expect(parseVenueArg(42)).toBe(42);
     expect(parseVenueArg('42')).toBe(42);
