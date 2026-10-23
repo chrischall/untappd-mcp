@@ -43,7 +43,8 @@
         "UNTAPPD_USER_AGENT": "${user_config.untappd_user_agent}",
         "UNTAPPD_TIMEZONE": "${user_config.untappd_timezone}",
         "UNTAPPD_PHOTO_DIR": "${user_config.untappd_photo_dir}",
-        "UNTAPPD_CACHE_DB": "${user_config.untappd_cache_db}"
+        "UNTAPPD_CACHE_DB": "${user_config.untappd_cache_db}",
+        "UNTAPPD_CACHE_DIR": "${user_config.untappd_cache_dir}"
       }
     }
   },
@@ -116,6 +117,12 @@
       "type": "string",
       "title": "Cache Database Path",
       "description": "Path to the local check-in cache SQLite file (default ~/.untappd-mcp/checkins.db; created owner-only — dir 0700, file 0600). Local/stdio only.",
+      "required": false
+    },
+    "untappd_cache_dir": {
+      "type": "string",
+      "title": "Cache Directory",
+      "description": "Optional. Directory for the cache instead of ~/.untappd-mcp (the file is checkins.db inside it). Cache Database Path wins if both are set. Local/stdio only.",
       "required": false
     }
   },
