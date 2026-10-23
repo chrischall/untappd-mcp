@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.4.0](https://github.com/chrischall/untappd-mcp/compare/v2.3.2...v2.4.0) (2026-10-23)
+
+
+### Features
+
+* untappd_menu_pick / untappd_venue_pick + persistent, multi-process-safe cache ([#246](https://github.com/chrischall/untappd-mcp/issues/246)) ([29cf70e](https://github.com/chrischall/untappd-mcp/commit/29cf70e4864dc4b872aee1a223f73ee5a7dfebb3))
+
+
+### Bug Fixes
+
+* **deps:** bump the production-dependencies group with 3 updates ([#245](https://github.com/chrischall/untappd-mcp/issues/245)) ([25a169e](https://github.com/chrischall/untappd-mcp/commit/25a169e8f8a1ccd7ffaedbce358888e4c01d6a56))
+
+
+### Documentation
+
+* **mint:** add sample prompts for the public catalog ([#242](https://github.com/chrischall/untappd-mcp/issues/242)) ([a802120](https://github.com/chrischall/untappd-mcp/commit/a80212063df939e0a4ee4c67bf2e603a056d7a09))
+
 ## [2.3.2](https://github.com/chrischall/untappd-mcp/compare/v2.3.1...v2.3.2) (2026-10-16)
 
 
