@@ -18,6 +18,11 @@ export interface SyncBeersSummary {
   beers_complete: boolean;
   /** True when this run was a top-of-list refresh of an already-complete cache. */
   incremental: boolean;
+  /**
+   * Incremental runs only: the bid of the first item found unchanged in the
+   * cache, where paging stopped. Null when no such item was reached.
+   */
+  stopped_at_bid: number | null;
   another_run_needed: boolean;
   last_synced_at: string;
   note: string;
@@ -84,6 +89,7 @@ export async function syncUserBeers(
   let complete = false;
   let pages = 0;
   let added = 0;
+  let stoppedAtBid: number | null = null;
 
   const firstFetch = async (o: number): Promise<BeersPage> => {
     try {
@@ -106,15 +112,37 @@ export async function syncUserBeers(
     // An empty (e.g. first) page still means the list is fully paged.
     let atEnd = page.items.length === 0;
     if (!atEnd) {
-      const rows = rowsOf(rawUsername, page.items);
+      let rows = rowsOf(rawUsername, page.items);
+      // Incremental refresh of a complete cache: the list is sorted by each
+      // beer's MOST RECENT check-in, so the first item whose cached copy is
+      // unchanged (same last-had date and count) marks where this refresh
+      // meets the previous one — everything below it was last had earlier and
+      // is already cached. Stop there instead of paging the whole list. A beer
+      // that is cached but CHANGED (re-had since) does not stop the walk: a
+      // brand-new beer can sit below it.
+      let hitKnown = false;
+      if (refreshing) {
+        const known = new Map(
+          (await cache.getDistinctBeers(rawUsername, rows.map((r) => r.bid))).map((r) => [r.bid, r]),
+        );
+        const stop = rows.findIndex((r) => {
+          const k = known.get(r.bid);
+          return k !== undefined && k.last_had === r.last_had && k.had_count === r.had_count;
+        });
+        if (stop !== -1) {
+          hitKnown = true;
+          stoppedAtBid = rows[stop].bid;
+          rows = rows.slice(0, stop);
+        }
+      }
       const netNew = await cache.upsertDistinctBeers(rawUsername, rows);
       added += netNew;
       offset += page.items.length;
       // End conditions: caught the whole list, a short (final) page, or — during an
-      // incremental top refresh — a page that added nothing new.
-      if (total !== null && offset >= total) atEnd = true;
+      // incremental top refresh — reaching an unchanged cached beer.
+      if (hitKnown) atEnd = true;
+      else if (total !== null && offset >= total) atEnd = true;
       else if (page.items.length < PAGE_LIMIT) atEnd = true;
-      else if (refreshing && netNew === 0) atEnd = true;
       else if (rescanTarget !== null && (await gapNow()) <= rescanTarget) atEnd = true;
     }
     if (atEnd) {
@@ -168,6 +196,7 @@ export async function syncUserBeers(
     backfill_percent: percent,
     beers_complete: complete,
     incremental,
+    stopped_at_bid: stoppedAtBid,
     another_run_needed: anotherRunNeeded,
     last_synced_at: now(),
     note,

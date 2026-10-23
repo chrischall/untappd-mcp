@@ -14,8 +14,9 @@ import { registerWishlistTools } from './tools/wishlist.js';
 import { registerCheckinTools } from './tools/checkin.js';
 import { registerUtilityTools } from './tools/utilities.js';
 import { registerCacheTools } from './tools/cache.js';
+import { registerMenuTools } from './tools/menu.js';
 import { logRegisteredTools } from './tools/diagnostics.js';
-import { CheckinCache, defaultCachePath } from './cache/db.js';
+import { CheckinCache, defaultCachePath, describeCachePath } from './cache/db.js';
 import type { CacheStore } from './cache/store.js';
 
 // Build the env-based client once and inject it into each registrar. The
@@ -25,8 +26,12 @@ const client = new UntappdClient();
 
 // The stdio server backs the cache with a local `node:sqlite` file, opened lazily
 // on first cache-tool use so the server still boots when no path is configured.
+// The path is resolved (and logged) once at startup, so it can't drift with the
+// working directory a host happens to launch from.
+const cachePath = defaultCachePath();
+console.error(describeCachePath(cachePath));
 let nodeCache: CacheStore | undefined;
-const nodeCacheProvider = (): CacheStore => (nodeCache ??= CheckinCache.open(defaultCachePath()));
+const nodeCacheProvider = (): CacheStore => (nodeCache ??= CheckinCache.open(cachePath));
 
 await runMcp({
   name: 'untappd-mcp',
@@ -48,6 +53,7 @@ await runMcp({
     // The cache is backed by a local `node:sqlite` file here; the provider is
     // injectable, so another deployment can back the same tools differently.
     (s) => registerCacheTools(s, client, nodeCacheProvider),
+    (s) => registerMenuTools(s, client, nodeCacheProvider),
     // Keep last: logs the full registered toolset (count + names) at startup.
     (s) => logRegisteredTools(s, 'stdio'),
   ],

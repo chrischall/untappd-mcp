@@ -26,7 +26,7 @@ const UsernameArg = z
   .describe('Untappd username. Omit to use your own configured account (UNTAPPD_USERNAME).');
 
 /** Resolve the target username (raw, un-encoded) — explicit arg else configured login. */
-function resolveUser(username: string | undefined, loginName: string | null): string {
+export function resolveUser(username: string | undefined, loginName: string | null): string {
   const u = username ?? loginName;
   if (!u) {
     throw createHelpfulError('No username given and no configured account to fall back to.', {
@@ -47,7 +47,7 @@ function pct(cached: number, total: number | null, complete: boolean): number | 
  * by the API for non-self accounts) and the user/beers distinct-beers sync
  * (complete has-had coverage) — so a caller knows exactly which caveats apply.
  */
-async function freshness(cache: CacheStore, username: string): Promise<Record<string, unknown>> {
+export async function freshness(cache: CacheStore, username: string): Promise<Record<string, unknown>> {
   const state: SyncState | undefined = await cache.getState(username);
   const cachedCheckins = await cache.cachedCount(username);
   const cachedBeers = await cache.distinctBeersCount(username);
@@ -98,6 +98,35 @@ async function freshness(cache: CacheStore, username: string): Promise<Record<st
  * platform-specific code.
  */
 export function registerCacheTools(server: McpServer, client: UntappdClient, cacheProvider: CacheProvider): void {
+  server.registerTool(
+    'untappd_cache_status',
+    {
+      title: 'Show the local cache location, schema and per-user coverage',
+      description:
+        'Diagnostics for the LOCAL check-in cache — NO API call. Returns the resolved cache file path, its size on ' +
+        'disk (db + WAL), journal mode, schema version, the number of cached menu-line resolutions and beer-metadata ' +
+        'rows, and for every cached user: cached vs total distinct beers, cached check-ins, coverage_complete, the ' +
+        'resume offset of an unfinished user/beers backfill, and last_synced_at. Use it to confirm the cache ' +
+        'persisted across restarts or to see how far a backfill has got.',
+      annotations: toolAnnotations({ title: 'Show the local cache location, schema and per-user coverage', readOnly: true, idempotent: true, openWorld: false }),
+      inputSchema: z.object({}),
+    },
+    async () => {
+      const cache = cacheProvider();
+      const stats = await cache.stats();
+      // The file details only exist for a file-backed store (the node:sqlite
+      // CheckinCache); another backend reports the logical stats alone.
+      const file = (cache as Partial<{ fileInfo(): { path: string; bytes: number; journal_mode: string } }>).fileInfo?.();
+      return minifiedResult({
+        ...(file ? { cache_path: file.path, file_size_bytes: file.bytes, journal_mode: file.journal_mode } : {}),
+        schema_version: stats.schema_version,
+        resolution_cache_entries: stats.resolution_cache_entries,
+        beer_meta_entries: stats.beer_meta_entries,
+        users: stats.users,
+      });
+    },
+  );
+
   server.registerTool(
     'untappd_sync_checkins',
     {

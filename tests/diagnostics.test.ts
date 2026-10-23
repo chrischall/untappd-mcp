@@ -15,6 +15,7 @@ import { registerWishlistTools } from '../src/tools/wishlist.js';
 import { registerCheckinTools } from '../src/tools/checkin.js';
 import { registerUtilityTools } from '../src/tools/utilities.js';
 import { registerCacheTools } from '../src/tools/cache.js';
+import { registerMenuTools } from '../src/tools/menu.js';
 import { createTestHarness } from './helpers.js';
 
 const CACHE_TOOLS = [
@@ -54,6 +55,7 @@ describe('healthcheck build diagnostics', () => {
       registerCheckinTools(server, client);
       registerUtilityTools(server, client);
       registerCacheTools(server, client, () => cache);
+      registerMenuTools(server, client, () => cache);
     });
 
     const out = parse(await harness.callTool('untappd_healthcheck', {}));
@@ -62,8 +64,8 @@ describe('healthcheck build diagnostics', () => {
     const tools = out.tools as string[];
     // The full toolset (incl. the 8 cache tools) is registered — this is the
     // 46-tool set the server must expose.
-    expect(tools.length).toBe(46);
-    expect(out.tool_count).toBe(46);
+    expect(tools.length).toBe(49);
+    expect(out.tool_count).toBe(49);
     for (const name of CACHE_TOOLS) expect(tools).toContain(name);
 
     // The hash is the FNV-1a of the sorted names — stable and self-consistent.

@@ -168,6 +168,49 @@ export interface CacheStore {
    * global beer facts, not user data, and is kept.
    */
   forgetUser(username: string): Promise<ForgetResult>;
+  /** Cached distinct-beer rows for the given bids (only those present). */
+  getDistinctBeers(username: string, bids: number[]): Promise<DistinctBeerRow[]>;
+  /** Read cached menu-line resolutions by key (only those present are returned). */
+  getResolutions(keys: string[]): Promise<ItemResolution[]>;
+  /** Upsert menu-line resolutions (dedupe on key). */
+  upsertResolutions(rows: ItemResolution[]): Promise<void>;
+  /** Schema version, per-user coverage and table sizes. */
+  stats(): Promise<CacheStats>;
+}
+
+/**
+ * A cached menu-line → beer resolution (see src/menu/). Keyed by the
+ * NORMALISED line plus the venue city it was scored against, and shared across
+ * usernames: what "JACKALOPE FENNARIO IPA" means doesn't depend on who drinks it.
+ */
+export interface ItemResolution {
+  key: string;
+  /** The raw menu line that first produced this resolution (for display/debugging). */
+  item: string;
+  status: 'resolved' | 'possible' | 'unresolved';
+  bid: number | null;
+  /** JSON payload: the chosen beer for `resolved`, candidate list for `possible`, reason for `unresolved`. */
+  data: string | null;
+  resolved_at: string;
+}
+
+/** Per-user row of {@link CacheStats}. */
+export interface CacheUserStats {
+  username: string;
+  cached_distinct_beers: number;
+  total_distinct_beers: number | null;
+  cached_checkins: number;
+  coverage_complete: boolean;
+  beers_offset: number | null;
+  last_synced_at: string | null;
+}
+
+/** Whole-cache diagnostics for untappd_cache_status. */
+export interface CacheStats {
+  schema_version: number;
+  users: CacheUserStats[];
+  resolution_cache_entries: number;
+  beer_meta_entries: number;
 }
 
 /** Rows removed by {@link CacheStore.forgetUser}, per table. */
@@ -355,7 +398,11 @@ export const SCHEMA_STATEMENTS = [
    )`,
 ];
 
-/** Columns added after the initial release, each applied idempotently on open. */
+/**
+ * Columns added to the v1 tables before the schema was versioned. A database
+ * at user_version 0 may predate any of them, so each is applied idempotently
+ * (ADD COLUMN throws harmlessly when the column already exists).
+ */
 export const MIGRATIONS = [
   'ALTER TABLE sync_state ADD COLUMN catchup_max_id INTEGER',
   'ALTER TABLE sync_state ADD COLUMN checkins_truncated INTEGER NOT NULL DEFAULT 0',
@@ -368,22 +415,84 @@ export const MIGRATIONS = [
 ];
 
 /**
+ * Forward-only, versioned migrations, tracked in SQLite's `PRAGMA user_version`.
+ * Version 1 is the baseline (SCHEMA_STATEMENTS + the legacy MIGRATIONS above);
+ * every later change is appended here with the next version number and is
+ * ADDITIVE — a migration never drops or rewrites user rows, so upgrading can't
+ * silently wipe a cache that took an hour of rate-limited calls to fill.
+ */
+export const VERSIONED_MIGRATIONS: ReadonlyArray<{ version: number; statements: string[] }> = [
+  {
+    version: 2,
+    statements: [
+      `CREATE TABLE IF NOT EXISTS item_resolutions (
+         key         TEXT PRIMARY KEY,
+         item        TEXT NOT NULL,
+         status      TEXT NOT NULL,
+         bid         INTEGER,
+         data        TEXT,
+         resolved_at TEXT NOT NULL
+       )`,
+    ],
+  },
+];
+
+/** The schema version this code writes. */
+export const SCHEMA_VERSION = VERSIONED_MIGRATIONS.reduce((v, m) => Math.max(v, m.version), 1);
+
+/**
  * The cache logic over a synchronous {@link SqlDriver}. Usernames are keyed
  * case-insensitively via a lowercased key so `Mer1331` and `mer1331` share one
  * cache; stored rows keep whatever casing they arrived with in other fields.
  */
 export class CheckinStoreCore {
+  private version = 0;
+
   constructor(private readonly db: SqlDriver) {
-    for (const stmt of SCHEMA_STATEMENTS) this.db.execScript(stmt);
-    // Forward-compat for a table created before a column existed; each ADD COLUMN
-    // throws harmlessly if the column is already present.
-    for (const mig of MIGRATIONS) {
-      try {
-        this.db.execScript(mig);
-      } catch {
-        /* column already exists */
+    this.migrate();
+  }
+
+  /**
+   * Bring the schema up to {@link SCHEMA_VERSION}. Runs in ONE write
+   * transaction and re-reads the version inside it, so two processes opening a
+   * fresh file at once can't both apply the same step. A file written by a
+   * NEWER build is left untouched (its migrations are additive, so this build's
+   * queries still work) rather than "repaired" downwards.
+   */
+  private migrate(): void {
+    this.db.transaction(() => {
+      const current = Number(this.db.get('PRAGMA user_version', [])?.user_version ?? 0);
+      if (current > SCHEMA_VERSION) {
+        console.error(
+          `[untappd-mcp] cache schema v${current} is newer than this build (v${SCHEMA_VERSION}); using it as-is.`,
+        );
+        this.version = current;
+        return;
       }
-    }
+      if (current < 1) {
+        for (const stmt of SCHEMA_STATEMENTS) this.db.execScript(stmt);
+        // A pre-versioning file may lack any of these columns; each ADD COLUMN
+        // throws harmlessly if the column is already present.
+        for (const mig of MIGRATIONS) {
+          try {
+            this.db.execScript(mig);
+          } catch {
+            /* column already exists */
+          }
+        }
+      }
+      for (const m of VERSIONED_MIGRATIONS) {
+        if (m.version <= current) continue;
+        for (const stmt of m.statements) this.db.execScript(stmt);
+      }
+      if (current !== SCHEMA_VERSION) this.db.execScript(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+      this.version = SCHEMA_VERSION;
+    });
+  }
+
+  /** The schema version of the open database. */
+  schemaVersion(): number {
+    return this.version;
   }
 
   /**
@@ -393,7 +502,8 @@ export class CheckinStoreCore {
   upsertCheckins(username: string, rows: CheckinRow[]): number {
     if (rows.length === 0) return 0;
     const key = username.toLowerCase();
-    const before = this.cachedCount(username);
+    let before = 0;
+    let after = 0;
     const sql = `
       INSERT INTO checkins
         (checkin_id, username, bid, beer_name, brewery_id, brewery_name, beer_style, abv, rating, comment, venue_id, venue_name, created_at)
@@ -403,22 +513,27 @@ export class CheckinStoreCore {
         brewery_id=excluded.brewery_id, brewery_name=excluded.brewery_name, beer_style=excluded.beer_style,
         abv=excluded.abv, rating=excluded.rating, comment=excluded.comment,
         venue_id=excluded.venue_id, venue_name=excluded.venue_name, created_at=excluded.created_at`;
+    // Count inside the write transaction so another process's concurrent
+    // inserts can't be mistaken for (or subtracted from) this batch's.
     this.db.transaction(() => {
+      before = this.cachedCount(username);
       for (const r of rows) {
         this.db.run(sql, [
           r.checkin_id, key, r.bid, r.beer_name, r.brewery_id, r.brewery_name, r.beer_style,
           r.abv, r.rating, r.comment, r.venue_id, r.venue_name, r.created_at,
         ]);
       }
+      after = this.cachedCount(username);
     });
-    return this.cachedCount(username) - before;
+    return after - before;
   }
 
   /** Upsert distinct-beer rows (dedupe on username+bid); return the NET new count. */
   upsertDistinctBeers(username: string, rows: DistinctBeerRow[]): number {
     if (rows.length === 0) return 0;
     const key = username.toLowerCase();
-    const before = this.distinctBeersCount(username);
+    let before = 0;
+    let after = 0;
     const sql = `
       INSERT INTO distinct_beers
         (username, bid, beer_name, brewery_id, brewery_name, beer_style, abv, rating, had_count, first_had, last_had)
@@ -428,14 +543,16 @@ export class CheckinStoreCore {
         beer_style=excluded.beer_style, abv=excluded.abv, rating=excluded.rating,
         had_count=excluded.had_count, first_had=excluded.first_had, last_had=excluded.last_had`;
     this.db.transaction(() => {
+      before = this.distinctBeersCount(username);
       for (const r of rows) {
         this.db.run(sql, [
           key, r.bid, r.beer_name, r.brewery_id, r.brewery_name, r.beer_style, r.abv,
           r.rating, r.had_count, r.first_had, r.last_had,
         ]);
       }
+      after = this.distinctBeersCount(username);
     });
-    return this.distinctBeersCount(username) - before;
+    return after - before;
   }
 
   /** Total cached check-in rows for a user. */
@@ -492,6 +609,12 @@ export class CheckinStoreCore {
    * merge could not do that.
    */
   setState(username: string, patch: Partial<Omit<SyncState, 'username'>>): void {
+    // Read-merge-write in one write transaction, so a second process's patch
+    // can't land between the read and the write and be silently reverted.
+    this.db.transaction(() => this.mergeState(username, patch));
+  }
+
+  private mergeState(username: string, patch: Partial<Omit<SyncState, 'username'>>): void {
     const key = username.toLowerCase();
     const cur = this.getState(key);
     const pick = <K extends keyof Omit<SyncState, 'username'>>(k: K, fallback: SyncState[K]): SyncState[K] =>
@@ -682,6 +805,68 @@ export class CheckinStoreCore {
     return removed;
   }
 
+  getDistinctBeers(username: string, bids: number[]): DistinctBeerRow[] {
+    if (bids.length === 0) return [];
+    const placeholders = bids.map(() => '?').join(', ');
+    return this.db.all(
+      `SELECT * FROM distinct_beers WHERE username = ? AND bid IN (${placeholders})`,
+      [username.toLowerCase(), ...bids],
+    ) as unknown as DistinctBeerRow[];
+  }
+
+  getResolutions(keys: string[]): ItemResolution[] {
+    if (keys.length === 0) return [];
+    const placeholders = keys.map(() => '?').join(', ');
+    return this.db.all(
+      `SELECT * FROM item_resolutions WHERE key IN (${placeholders})`,
+      keys,
+    ) as unknown as ItemResolution[];
+  }
+
+  upsertResolutions(rows: ItemResolution[]): void {
+    if (rows.length === 0) return;
+    const sql = `
+      INSERT INTO item_resolutions (key, item, status, bid, data, resolved_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET
+        item=excluded.item, status=excluded.status, bid=excluded.bid,
+        data=excluded.data, resolved_at=excluded.resolved_at`;
+    this.db.transaction(() => {
+      for (const r of rows) this.db.run(sql, [r.key, r.item, r.status, r.bid, r.data, r.resolved_at]);
+    });
+  }
+
+  stats(): CacheStats {
+    const n = (sql: string) => Number(this.db.get(sql, [])?.n ?? 0);
+    const names = this.db
+      .all(
+        `SELECT username FROM sync_state
+         UNION SELECT DISTINCT username FROM distinct_beers
+         UNION SELECT DISTINCT username FROM checkins
+         ORDER BY username`,
+        [],
+      )
+      .map((r) => String(r.username));
+    const users = names.map((username): CacheUserStats => {
+      const st = this.getState(username);
+      return {
+        username,
+        cached_distinct_beers: this.distinctBeersCount(username),
+        total_distinct_beers: st?.beers_total ?? null,
+        cached_checkins: this.cachedCount(username),
+        coverage_complete: (st?.beers_complete ?? false) || (st?.backfill_complete ?? false),
+        beers_offset: st?.beers_offset ?? null,
+        last_synced_at: st?.last_synced_at ?? null,
+      };
+    });
+    return {
+      schema_version: this.version,
+      users,
+      resolution_cache_entries: n('SELECT COUNT(*) AS n FROM item_resolutions'),
+      beer_meta_entries: n('SELECT COUNT(*) AS n FROM beer_meta'),
+    };
+  }
+
   getBeerMeta(bids: number[]): BeerMeta[] {
     if (bids.length === 0) return [];
     const placeholders = bids.map(() => '?').join(', ');
@@ -758,6 +943,18 @@ export class LocalCacheStore implements CacheStore {
   }
   async forgetUser(username: string): Promise<ForgetResult> {
     return this.core.forgetUser(username);
+  }
+  async getDistinctBeers(username: string, bids: number[]): Promise<DistinctBeerRow[]> {
+    return this.core.getDistinctBeers(username, bids);
+  }
+  async getResolutions(keys: string[]): Promise<ItemResolution[]> {
+    return this.core.getResolutions(keys);
+  }
+  async upsertResolutions(rows: ItemResolution[]): Promise<void> {
+    this.core.upsertResolutions(rows);
+  }
+  async stats(): Promise<CacheStats> {
+    return this.core.stats();
   }
 }
 

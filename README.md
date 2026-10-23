@@ -37,7 +37,8 @@ it goes stale.
 | `UNTAPPD_USER_AGENT` | no | Override the User-Agent (default mimics the app). |
 | `UNTAPPD_TIMEZONE` | no | IANA timezone (e.g. `America/New_York`) that check-ins are stamped with when the call doesn't pass `timezone`. Set it when the server runs somewhere other than the drinker's zone (e.g. a hosted connector, usually UTC). Defaults to the server process's zone. |
 | `UNTAPPD_PHOTO_DIR` | no | The directory `untappd_checkin`'s `photo_path` must be inside (several allowed, separated by `:`). Defaults to `~/Downloads/untappd-mcp` — put a photo there to attach it. Any other file is refused, so a prompt-injected shout or comment can't publish an arbitrary image from your disk. |
-| `UNTAPPD_CACHE_DB` | no | Path to the local check-in cache SQLite file (default `~/.untappd-mcp/checkins.db`). The db file is always made owner-only (`0600`), and so are any directories the server creates plus the default `~/.untappd-mcp`; a directory you point this into that already exists keeps its permissions. Local/stdio only. |
+| `UNTAPPD_CACHE_DB` | no | Path to the local check-in cache SQLite file (default `~/.untappd-mcp/checkins.db`). A relative path or leading `~` resolves against your **home** directory, never the working directory, so every host (Claude Desktop, Claude Code, …) finds the same file; the resolved path is logged to stderr at startup. The db file is always made owner-only (`0600`), and so are any directories the server creates plus the default `~/.untappd-mcp`; a directory you point this into that already exists keeps its permissions. Local/stdio only. |
+| `UNTAPPD_CACHE_DIR` | no | Directory for the cache instead of `~/.untappd-mcp` (the file is `checkins.db` inside it). `UNTAPPD_CACHE_DB` wins if both are set. |
 
 Copy `.env.example` to `.env` and fill it in for local use.
 
@@ -88,7 +89,99 @@ Writes (each asks you to confirm first — see [Confirmations](#confirmations)):
 
 Check-in cache: `untappd_sync_checkins`, `untappd_sync_user_beers`,
 `untappd_cache_has_had`, `untappd_cache_has_had_many`, `untappd_cache_not_had`,
-`untappd_cache_query`, `untappd_top_not_had`, `untappd_cache_forget`.
+`untappd_cache_query`, `untappd_top_not_had`, `untappd_cache_status`, `untappd_cache_forget`.
+
+Menu picks: `untappd_menu_pick` (tap-list lines in, ranked not-had beers out),
+`untappd_venue_pick` (same, from a venue's Untappd menu).
+
+## Picking a beer off a menu
+
+`untappd_menu_pick` turns "find Mer a beer" from a menu photo into one call.
+Give it the lines as read off the board:
+
+```json
+{
+  "username": "mer",
+  "items": [
+    "HAP & HARRY'S TENNESSEE LAGER $6",
+    "I BELIEVE IN NASHVILLE BLONDE",
+    "JACKALOPE FENNARIO IPA",
+    "BEARDED IRIS HOMESTYLE",
+    "BLACK ABBEY SEASONAL",
+    "ROTATING CIDER"
+  ],
+  "venue_city": "Nashville",
+  "top_n": 2
+}
+```
+
+In one call it:
+
+1. **Freshens the cache.** If the user's distinct-beers list is already complete
+   it does an incremental refresh, stopping at the first beer that's cached and
+   unchanged (usually one page). If the list is empty or partial it backfills
+   in the same call until done or `api_budget` (default 60 calls, shared by
+   every step) runs out. You never need to call a sync tool first.
+2. **Resolves each line to a beer.** It strips prices, sizes, ABV and
+   punctuation, searches Untappd (falling back to a query without the style
+   word, because Untappd search matches every term), and scores the candidates
+   on brewery match, beer-name match (so "Homestyle" isn't read as "Double
+   Homestyle"), check-in volume (the canonical entry wins over a 3-check-in
+   duplicate) and `venue_city`. Up to 4 searches run at once, and a 429 is
+   retried with backoff. Resolutions are cached on disk, so the next visit to
+   the same venue costs no searches.
+3. **Handles generic lines.** `<Brewery> SEASONAL` / `ROTATING` becomes a
+   `possible` list of that brewery's seasonal-looking beers, marked
+   `needs_confirmation`. A line with no brewery (`ROTATING CIDER`) comes back
+   `unresolved: "ask bartender"`.
+4. **Checks every beer against the cache** (both sources, as `has_had_many` does).
+5. **Ranks the not-had beers** by global rating, applies `style_filter`, and
+   returns the top `top_n` as `picks`.
+
+Output for the call above, with Mer having had Fennario (abridged: `not_had`
+also lists the Tennessee Lager at 3.33, `possible` lists six candidates, and a
+`freshness` block is appended):
+
+```json
+{
+  "picks": [
+    { "item": "BEARDED IRIS HOMESTYLE", "bid": 1502190, "name": "Homestyle", "brewery": "Bearded Iris Brewing",
+      "style": "IPA - New England / Hazy", "abv": 6, "global_rating": 3.98,
+      "reason": "not had · 3.98 global rating · #1 of 3 not-had beers on this list" },
+    { "item": "I BELIEVE IN NASHVILLE BLONDE", "bid": 3780741, "name": "I Believe In Nashville",
+      "brewery": "I Believe Brewing Company", "style": "Blonde / Golden Ale - American", "abv": 4.5,
+      "global_rating": 3.54, "reason": "not had · 3.54 global rating · #2 of 3 not-had beers on this list" }
+  ],
+  "had": [
+    { "item": "JACKALOPE FENNARIO IPA", "bid": 1893601, "name": "Fennario", "brewery": "Jackalope Brewing Company",
+      "count": 3, "last_date": "2025-08-01T20:00:00.000Z", "user_rating": 3.75 }
+  ],
+  "possible": [
+    { "item": "BLACK ABBEY SEASONAL", "brewery": "The Black Abbey Brewing Company",
+      "reason": "seasonal-looking beers from this brewery",
+      "candidates": [
+        { "bid": 1223176, "name": "Chronicles Festbier", "style": "Festbier", "abv": 4.9, "global_rating": 3.672, "had": false }
+      ],
+      "needs_confirmation": true }
+  ],
+  "unresolved": [{ "item": "ROTATING CIDER", "reason": "ask bartender" }],
+  "sync": { "mode": "backfill", "api_calls": 1, "coverage_complete": true,
+            "cached_distinct_beers": 1, "total_distinct_beers": 1, "another_run_needed": false },
+  "api_calls": 11,
+  "api_budget": 60,
+  "another_run_needed": false
+}
+```
+
+If the budget runs out before the backfill finishes, `sync.coverage_complete` is
+`false`, `another_run_needed` is `true`, and the `freshness` caveat warns that a
+"not had" may be a false negative. Calling again continues from where it
+stopped.
+
+`untappd_venue_pick` takes an Untappd venue URL (`https://untappd.com/v/<slug>/<id>`)
+or id instead of `items`. It pages through the venue's whole verified menu, takes
+the venue's city from it, and runs the same check and ranking. Menu items already
+carry beer ids, so there is no search step.
 
 ## Check-in cache
 
@@ -96,9 +189,18 @@ The Untappd API only exposes paged lists (50 per page) and has **no** "has this
 user ever had beer X?" lookup — answering that from the API alone means paging an
 entire history (often 11k+ check-ins) against a tight ~100-calls/hour rate limit.
 These tools maintain a SQLite mirror so the question is answered instantly,
-offline, with zero API calls. The mirror is a local file
-(`node:sqlite`, path via `UNTAPPD_CACHE_DB`); the store is injectable, so another
+offline, with zero API calls. The mirror is a local SQLite file
+(`node:sqlite`, default `~/.untappd-mcp/checkins.db`, overridable with
+`UNTAPPD_CACHE_DB` / `UNTAPPD_CACHE_DIR`). The store is injectable, so another
 deployment can back it differently without the tools changing.
+
+**Persistence.** The file survives restarts, and a backfill that was cut off
+(rate limit, crash, host quit) resumes from its saved offset on the next sync.
+The file runs in WAL mode with a busy timeout and does every write in a
+transaction, so two hosts open at the same time can share it. The schema is
+versioned (`PRAGMA user_version`) and only ever migrated forward, adding
+columns and tables, so an upgrade never wipes it. `untappd_cache_status` shows
+the resolved path, size, schema version and per-user coverage.
 
 Two sync sources fill the cache:
 
