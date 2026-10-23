@@ -110,6 +110,7 @@ export interface Candidate {
   bid: number;
   name: string;
   brewery: string;
+  brewery_id: number | null;
   brewery_city: string | null;
   style: string | null;
   abv: number | null;
@@ -142,6 +143,7 @@ export function candidateFromSearch(item: unknown): Candidate | null {
     bid,
     name: strOr(beer.beer_name) ?? '',
     brewery: strOr(brewery.brewery_name) ?? '',
+    brewery_id: numOr(brewery.brewery_id, null),
     brewery_city: strOr(dict(brewery.location).brewery_city),
     style: strOr(beer.beer_style),
     abv: numOr(beer.beer_abv, null),

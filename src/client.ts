@@ -24,6 +24,8 @@ if (import.meta.url) {
 const BASE_URL = 'https://api.untappd.com/v4';
 const SERVICE = 'Untappd';
 const REQUEST_TIMEOUT_MS = 30_000;
+// Untappd's limit is per hour, so a remaining-count older than that says nothing.
+const QUOTA_WINDOW_MS = 60 * 60 * 1000;
 
 // Non-secret client constants that mimic the Untappd iPad app (v4.7.13). The
 // API accepts requests carrying these; NONE are user secrets (the secrets are
@@ -212,6 +214,8 @@ export class UntappdClient {
 
   private token: string | null;
   private loginInFlight: Promise<string> | null = null;
+  /** Last `X-Ratelimit-Remaining` seen, and when (see {@link quotaRemaining}). */
+  private lastQuota: { remaining: number; at: number } | null = null;
   private tokenIsSupplied: boolean;
 
   /**
@@ -268,6 +272,26 @@ export class UntappdClient {
   /** The configured login name — the default `username` for user-scoped tools. */
   get loginName(): string | null {
     return this._loginName;
+  }
+
+  /**
+   * Calls left this hour, from the most recent response's
+   * `X-Ratelimit-Remaining` — or null when no response has carried the header
+   * within the hour. Untappd's public API documents the header; whether the
+   * private v4 endpoints send it is unverified, so every consumer must treat
+   * null as "unknown" and fall back to its own budget.
+   */
+  get quotaRemaining(): number | null {
+    if (!this.lastQuota || Date.now() - this.lastQuota.at > QUOTA_WINDOW_MS) return null;
+    return this.lastQuota.remaining;
+  }
+
+  private noteQuota(res: Response): void {
+    const raw = res.headers.get('x-ratelimit-remaining');
+    const n = raw === null ? NaN : Number(raw);
+    if (raw !== null && raw.trim() !== '' && Number.isFinite(n) && n >= 0) {
+      this.lastQuota = { remaining: Math.floor(n), at: Date.now() };
+    }
   }
 
   /** App creds for a write; reached only once a token is in hand. */
@@ -391,6 +415,7 @@ export class UntappdClient {
       body = f.toString();
     }
     const res = await this.send(method, `${BASE_URL}${path}${qs}`, { headers, body });
+    this.noteQuota(res);
     // A 401 means the token went stale. Re-minting one needs a login, and a
     // deployment that SUPPLIED the token may have no username/password to log
     // in with — that fell through to `missingCredsError()` and told the

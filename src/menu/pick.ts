@@ -100,13 +100,14 @@ async function mapPool<T, R>(items: T[], n: number, fn: (t: T) => Promise<R>): P
 
 // ── 1. freshness ──
 
+/**
+ * What the sync step did. Coverage (cached vs total, completeness) is NOT
+ * repeated here — the tools append the standard `freshness` block, which
+ * already carries it per source.
+ */
 export interface SyncReport {
   mode: 'incremental' | 'backfill';
   api_calls: number;
-  coverage_complete: boolean;
-  cached_distinct_beers: number;
-  total_distinct_beers: number | null;
-  another_run_needed: boolean;
   /** Incremental runs: where paging stopped (the first unchanged cached beer). */
   stopped_at_bid?: number | null;
   rate_limited?: true;
@@ -118,14 +119,15 @@ export interface SyncReport {
  * Bring the user's distinct-beers cache up to date within `maxCalls`: an
  * incremental top-of-list refresh when the cache is complete (it stops at the
  * first unchanged cached beer), otherwise a backfill that resumes from the
- * persisted offset and pages until done or out of budget.
+ * persisted offset and pages until done or out of budget. `coverageComplete`
+ * is the state AFTER the sync.
  */
 export async function ensureFresh(
   client: UntappdClient,
   cache: CacheStore,
   username: string,
   maxCalls: number,
-): Promise<SyncReport> {
+): Promise<{ report: SyncReport; coverageComplete: boolean }> {
   const prior = await cache.getState(username);
   const mode = prior?.beers_complete ? 'incremental' : 'backfill';
   let calls = 0;
@@ -143,15 +145,9 @@ export async function ensureFresh(
     }
   }
   const state = await cache.getState(username);
-  const complete = (state?.beers_complete ?? false) || (state?.backfill_complete ?? false);
   return {
-    mode,
-    api_calls: calls,
-    coverage_complete: complete,
-    cached_distinct_beers: await cache.distinctBeersCount(username),
-    total_distinct_beers: state?.beers_total ?? null,
-    another_run_needed: !complete,
-    ...extra,
+    report: { mode, api_calls: calls, ...extra },
+    coverageComplete: (state?.beers_complete ?? false) || (state?.backfill_complete ?? false),
   };
 }
 
@@ -163,6 +159,8 @@ export interface ResolvedBeer {
   bid: number;
   name: string;
   brewery: string;
+  /** Lets ratings be fetched per brewery (one beer list) instead of per beer. */
+  brewery_id?: number | null;
   style: string | null;
   abv: number | null;
   /** Global rating, when the resolving source carried one. */
@@ -276,7 +274,7 @@ async function resolveBeerLine(line: NormalizedLine, ctx: ResolveCtx): Promise<L
   if (isConfident(top)) {
     return {
       kind: 'resolved',
-      beer: { item: line.raw, bid: top.bid, name: top.name, brewery: top.brewery, style: top.style, abv: top.abv },
+      beer: { item: line.raw, bid: top.bid, name: top.name, brewery: top.brewery, brewery_id: top.brewery_id, style: top.style, abv: top.abv },
       cached: false,
     };
   }
@@ -415,16 +413,18 @@ async function checkAndRank(
   const seen = new Set<number>();
   const had: HadBeer[] = [];
   const notHadBeers: ResolvedBeer[] = [];
+  const candidateBids = possible.flatMap((p) => p.candidates.map((c) => c.bid));
+  const verdicts = await cache.hasHadMany(username, [...resolved.map((r) => r.bid), ...candidateBids]);
   for (const r of resolved) {
     if (seen.has(r.bid)) continue;
     seen.add(r.bid);
-    const h = await cache.hasHad(username, { bid: r.bid });
+    const h = verdicts.get(r.bid)!;
     if (h.had) {
       had.push({ item: r.item, bid: r.bid, name: r.name, brewery: r.brewery, count: h.count, last_date: h.last_date, user_rating: h.best_rating });
     } else notHadBeers.push(r);
   }
   for (const p of possible) {
-    for (const c of p.candidates) c.had = (await cache.hasHad(username, { bid: c.bid })).had;
+    for (const c of p.candidates) c.had = verdicts.get(c.bid)!.had;
   }
 
   // Ratings: a fresh cached rating is used as-is; otherwise beer/info, within
@@ -434,8 +434,36 @@ async function checkAndRank(
   const metaByBid = new Map((await cache.getBeerMeta(notHadBeers.map((b) => b.bid))).map((m) => [m.bid, m]));
   const fresh = (m: BeerMeta | undefined) =>
     !!m && ratingOf(m) !== null && !!m.fetched_at && nowMs - Date.parse(m.fetched_at) < BEER_META_TTL_MS;
-  const need = notHadBeers.filter((b) => !fresh(metaByBid.get(b.bid)) && b.rating == null);
+  let need = notHadBeers.filter((b) => !fresh(metaByBid.get(b.bid)) && b.rating == null);
   let deferred = 0;
+  const newMeta: BeerMeta[] = [];
+
+  // Two or more beers from one brewery: its beer list (up to 50, most popular
+  // first, ratings included) is one call instead of one beer/info each. Beers
+  // the list doesn't reach fall through to beer/info below.
+  const byBrewery = new Map<number, ResolvedBeer[]>();
+  for (const b of need) {
+    if (typeof b.brewery_id === 'number') byBrewery.set(b.brewery_id, [...(byBrewery.get(b.brewery_id) ?? []), b]);
+  }
+  const groups = [...byBrewery.entries()].filter(([, bs]) => bs.length >= 2);
+  const lists = await mapPool(groups, ctx.concurrency, async ([breweryId]) => {
+    try {
+      const data = await guarded(ctx.budget, ctx.sleep, () =>
+        ctx.client.get<{ beers?: { items?: BreweryListItem[] } }>(`/brewery/beer_list/${breweryId}`, { limit: 50 }),
+      );
+      return (data?.beers?.items ?? [])
+        .map((i) => beerMetaFrom(i.beer, i.brewery, ctx.nowIso))
+        .filter((m): m is BeerMeta => m !== null && ratingOf(m) !== null);
+    } catch {
+      return []; // the per-beer fallback below still gets a try
+    }
+  });
+  for (const m of lists.flat()) {
+    newMeta.push(m);
+    metaByBid.set(m.bid, m);
+  }
+  need = need.filter((b) => !fresh(metaByBid.get(b.bid)));
+
   const fetched = await mapPool(need, ctx.concurrency, async (b) => {
     try {
       const data = await guarded(ctx.budget, ctx.sleep, () =>
@@ -447,9 +475,13 @@ async function checkAndRank(
       return null;
     }
   });
-  const newMeta = fetched.filter((m): m is BeerMeta => m !== null);
+  for (const m of fetched) {
+    if (!m) continue;
+    newMeta.push(m);
+    metaByBid.set(m.bid, m);
+  }
+  // Seeds the whole brewery list too, so later menus from it cost nothing.
   if (newMeta.length) await cache.upsertBeerMeta(newMeta);
-  for (const m of newMeta) metaByBid.set(m.bid, m);
 
   const not_had: NotHadBeer[] = notHadBeers.map((b) => {
     const m = metaByBid.get(b.bid);
@@ -537,7 +569,7 @@ export async function menuPick(
   // never less than one page (the incremental refresh's cost).
   const reserve = misses * 3;
   const syncCalls = Math.min(budget.remaining, Math.max(1, budget.remaining - reserve));
-  const sync = await ensureFresh(client, cache, input.username, syncCalls);
+  const { report: sync, coverageComplete } = await ensureFresh(client, cache, input.username, syncCalls);
   budget.used += sync.api_calls;
 
   const misIdx = outcomes.map((o, i) => (o === undefined ? i : -1)).filter((i) => i >= 0);
@@ -572,7 +604,7 @@ export async function menuPick(
     sync,
     api_calls: budget.used,
     api_budget: budget.limit,
-    another_run_needed: sync.another_run_needed || retryable,
+    another_run_needed: !coverageComplete || retryable,
   };
 }
 
@@ -628,6 +660,7 @@ export async function venuePick(
     bid: b.bid,
     name: typeof b.name === 'string' ? b.name.trim() : String(b.name ?? ''),
     brewery: typeof b.brewery === 'string' ? b.brewery.trim() : '',
+    brewery_id: typeof b.rawBrewery?.brewery_id === 'number' ? b.rawBrewery.brewery_id : null,
     style: typeof b.style === 'string' ? b.style : null,
     abv: typeof b.abv === 'number' ? b.abv : null,
   }));
@@ -635,7 +668,7 @@ export async function venuePick(
   const cachedMeta = await cache.getBeerMeta([...new Set(resolved.map((r) => r.bid))]);
   const reserve = distinctBids - cachedMeta.filter((m) => ratingOf(m) !== null).length;
   const syncCalls = Math.min(budget.remaining, Math.max(1, budget.remaining - reserve));
-  const sync = await ensureFresh(client, cache, input.username, syncCalls);
+  const { report: sync, coverageComplete } = await ensureFresh(client, cache, input.username, syncCalls);
   budget.used += sync.api_calls;
 
   const ctx = { client, cache, budget, sleep, venueCity: walk.venueCity ?? undefined, nowIso, concurrency };
@@ -659,6 +692,6 @@ export async function venuePick(
     sync,
     api_calls: budget.used,
     api_budget: budget.limit,
-    another_run_needed: sync.another_run_needed || rating_fetch_deferred > 0 || !walk.reachedEnd,
+    another_run_needed: !coverageComplete || rating_fetch_deferred > 0 || !walk.reachedEnd,
   };
 }
