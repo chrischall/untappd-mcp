@@ -141,7 +141,50 @@ Non-obvious behaviours that were each fixed the hard way:
   possible false negative. New cache read tools must include it.
 - Usernames are keyed **lowercased**; other stored fields keep their original casing.
 - The cache holds OTHER users' dated venue history: `CheckinCache.open()` creates the dir `0700` and the db `0600` before SQLite opens it (and tightens old loose files). Retention is user-driven — `untappd_cache_forget` (confirm-gated, local-only) is the delete path; there is no TTL.
+- **Schema is versioned** (`PRAGMA user_version`, `SCHEMA_VERSION` in `store.ts`). A change goes in
+  `VERSIONED_MIGRATIONS` with the next number and must be ADDITIVE: never drop/rewrite rows, since
+  refilling a cache costs hours of rate-limited calls. A file newer than the build is used as-is.
+  Migration runs in one write transaction that re-reads the version, so concurrent opens are safe.
+- **Two processes can share the file**: `db.ts` sets `busy_timeout` + WAL and the driver uses
+  `BEGIN IMMEDIATE` (a deferred read→write upgrade hits SQLITE_BUSY, which busy_timeout won't retry).
+  `setState` is read-merge-write inside one transaction; net-new counts are taken inside the upsert's.
+  `tests/cache-persistence.test.ts` proves it against the built bundle — it fails with "database is
+  locked" if either pragma goes.
+- **The cache path never depends on cwd**: relative/`~` overrides resolve against HOME, and
+  `index.ts` logs the resolved path at startup.
+- **Incremental `user/beers` refresh stops at the first cached beer whose `last_had` AND `had_count`
+  are unchanged** — not merely "already cached": a re-had beer moves to the top, and a new beer can
+  sit below it.
+- **Batch, don't loop.** Use `hasHadMany(username, bids)` (two grouped queries per 500-bid chunk)
+  for any list; `hasHad` per bid costs ~4 queries each. `tests/cache-batch.test.ts` pins the two
+  to identical verdicts — change both or neither. Upsert "net new" counts look up only the batch's
+  ids; don't go back to COUNT(*) before/after (quadratic over a backfill).
+- `NodeSqlDriver` caches prepared statements by SQL text (bounded, cleared when full).
 - `escapeLike` backslash-escapes `%`/`_`/`\` in user input and every LIKE goes through `LIKE_MATCH` (`ESCAPE '\'`), so a name like `100% Brewing` matches literally. The rated sorts put unrated (NULL) check-ins last.
+
+## Menu picks (`src/menu/`)
+
+`untappd_menu_pick` / `untappd_venue_pick` (`src/tools/menu.ts`) run one pipeline (`pick.ts`):
+sync → resolve lines → has-had check → rank, all under ONE per-call `api_budget` (default 60).
+The sync gets what's left after reserving ~3 calls per uncached line, never less than 1 page.
+
+- Untappd beer search ANDs every term (live: "i believe in nashville blonde" → 0 hits), so
+  `match.ts` tries the full line then a style-word-free fallback, and never maps `&` → "and".
+- Scoring weights name tokens over brewery tokens, penalises beer-name tokens missing from the
+  line (the Double/Triple Homestyle guard), adds log10(check-ins) so the canonical entry beats a
+  3-check-in duplicate, and uses `venue_city` as a tie-breaker. The fixtures in
+  `tests/fixtures/untappd-live.ts` are live captures; extend them rather than inventing payloads.
+- Line→bid resolutions are cached in `item_resolutions` (global, not per user; key carries a
+  version prefix — bump `RESOLUTION_KEY_VERSION` when scoring changes). Budget/429 failures are
+  never cached.
+- Ratings for not-had beers: when 2+ come from one brewery, one `brewery/beer_list` call (top 50
+  by popularity, with ratings) replaces their `beer/info` calls; beers it misses fall back to
+  `beer/info`. The whole list is seeded into `beer_meta`.
+- `UntappdClient.quotaRemaining` is the last `X-Ratelimit-Remaining` seen within the hour, else
+  null. Whether the v4 API sends that header is UNVERIFIED (the public API documents it), so
+  `clampToQuota` (`src/quota.ts`) must keep treating null as "use the requested budget".
+- Search results carry NO rating. Don't seed `beer_meta` from them (that used to overwrite real
+  ratings with null under a fresh timestamp); ratings come from `beer/info` or brewery/menu lists.
 
 ## Environment (stdio)
 
@@ -157,6 +200,7 @@ UNTAPPD_USER_AGENT     optional  Default mimics Untappd/4.7.13 (ios; iPadOS 26.5
 UNTAPPD_TIMEZONE       optional  IANA zone check-ins are stamped with when the call passes no `timezone` (default: process zone — UTC on a hosted connector)
 UNTAPPD_PHOTO_DIR      optional  Allow-list dir(s) for untappd_checkin photo_path (default ~/Downloads/untappd-mcp — confined by default; bytes are always sniffed as JPEG/PNG, 15 MB cap)
 UNTAPPD_CACHE_DB       optional  Cache SQLite path (default ~/.untappd-mcp/checkins.db, owner-only 0600). LOCAL ONLY
+UNTAPPD_CACHE_DIR      optional  Cache directory instead of ~/.untappd-mcp (file is checkins.db); CACHE_DB wins
 ```
 
 The app-mimicking constants in `client.ts` (`appVersion`, device fields,

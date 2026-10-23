@@ -1,6 +1,6 @@
-import { DatabaseSync } from 'node:sqlite';
-import { chmodSync, closeSync, existsSync, mkdirSync, openSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { DatabaseSync, type StatementSync } from 'node:sqlite';
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, statSync } from 'node:fs';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { readEnvVar } from '@chrischall/mcp-utils';
 import { CheckinStoreCore, LocalCacheStore, type SqlDriver, type SqlParam } from './store.js';
@@ -11,23 +11,42 @@ import { CheckinStoreCore, LocalCacheStore, type SqlDriver, type SqlParam } from
 // surface and manages the file handle. Another deployment can adapt a
 // different driver to the same surface.
 
+// Upper bound on cached prepared statements per connection.
+const STATEMENT_CACHE_MAX = 200;
+
 /** Adapts a `node:sqlite` DatabaseSync to the driver surface the core needs. */
 class NodeSqlDriver implements SqlDriver {
+  // Prepared statements, reused by SQL text: an upsert page runs the same
+  // INSERT 50 times. IN-lists make some SQL vary with the list length, so the
+  // cache is bounded and simply reset when full.
+  private readonly stmts = new Map<string, StatementSync>();
   constructor(private readonly db: DatabaseSync) {}
+  private prepared(sql: string): StatementSync {
+    let st = this.stmts.get(sql);
+    if (!st) {
+      if (this.stmts.size >= STATEMENT_CACHE_MAX) this.stmts.clear();
+      st = this.db.prepare(sql);
+      this.stmts.set(sql, st);
+    }
+    return st;
+  }
   execScript(sql: string): void {
     this.db.exec(sql);
   }
   run(sql: string, params: SqlParam[]): void {
-    this.db.prepare(sql).run(...params);
+    this.prepared(sql).run(...params);
   }
   get(sql: string, params: SqlParam[]): Record<string, unknown> | undefined {
-    return this.db.prepare(sql).get(...params) as Record<string, unknown> | undefined;
+    return this.prepared(sql).get(...params) as Record<string, unknown> | undefined;
   }
   all(sql: string, params: SqlParam[]): Record<string, unknown>[] {
-    return this.db.prepare(sql).all(...params) as Record<string, unknown>[];
+    return this.prepared(sql).all(...params) as Record<string, unknown>[];
   }
   transaction(fn: () => void): void {
-    this.db.exec('BEGIN');
+    // IMMEDIATE takes the write lock up front. A DEFERRED transaction that
+    // reads and then writes can hit SQLITE_BUSY on the lock upgrade, which
+    // busy_timeout does NOT retry — the failure mode of two hosts open at once.
+    this.db.exec('BEGIN IMMEDIATE');
     try {
       fn();
       this.db.exec('COMMIT');
@@ -40,7 +59,11 @@ class NodeSqlDriver implements SqlDriver {
 
 /** A file-backed check-in cache. `open()` creates parent dirs and the schema. */
 export class CheckinCache extends LocalCacheStore {
-  private constructor(private readonly db: DatabaseSync) {
+  private constructor(
+    private readonly db: DatabaseSync,
+    /** Absolute path of the backing file, or `:memory:`. */
+    readonly path: string,
+  ) {
     super(new CheckinStoreCore(new NodeSqlDriver(db)));
   }
 
@@ -51,9 +74,39 @@ export class CheckinCache extends LocalCacheStore {
    */
   static open(path: string): CheckinCache {
     if (path !== ':memory:') preparePrivateFile(path);
-    const cache = new CheckinCache(new DatabaseSync(path));
+    const db = new DatabaseSync(path);
+    // Set before the schema/migration transaction so even that waits out a
+    // second process instead of failing. WAL lets readers and one writer run
+    // concurrently (two hosts open at once); NORMAL sync is the WAL-safe default.
+    db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
+    if (path !== ':memory:') {
+      db.exec('PRAGMA journal_mode = WAL');
+      db.exec('PRAGMA synchronous = NORMAL');
+    }
+    const cache = new CheckinCache(db, path);
     if (path !== ':memory:') tightenSidecars(path);
     return cache;
+  }
+
+  /** The SQLite journal mode actually in effect (`wal` for a file, `memory` for :memory:). */
+  journalMode(): string {
+    const row = this.db.prepare('PRAGMA journal_mode').get() as { journal_mode?: string } | undefined;
+    return String(row?.journal_mode ?? 'unknown');
+  }
+
+  /** On-disk footprint: the db file plus its -wal/-shm side files. */
+  fileInfo(): { path: string; bytes: number; journal_mode: string } {
+    let bytes = 0;
+    if (this.path !== ':memory:') {
+      for (const suffix of ['', '-wal', '-shm']) {
+        try {
+          bytes += statSync(this.path + suffix).size;
+        } catch {
+          /* side file not present */
+        }
+      }
+    }
+    return { path: this.path, bytes, journal_mode: this.journalMode() };
   }
 
   close(): void {
@@ -95,9 +148,47 @@ function bestEffortChmod(path: string, mode: number): void {
   }
 }
 
-/** Default on-disk cache path: `$UNTAPPD_CACHE_DB` or `~/.untappd-mcp/checkins.db`. */
+// How long a write waits for another process's lock before failing.
+const BUSY_TIMEOUT_MS = 5000;
+
+/**
+ * The on-disk cache path, always ABSOLUTE: `$UNTAPPD_CACHE_DB` (a file), else
+ * `$UNTAPPD_CACHE_DIR/checkins.db`, else `~/.untappd-mcp/checkins.db`.
+ *
+ * It must not depend on how the host launched the server — Claude Desktop runs
+ * the .mcpb from its own extension dir, Claude Code from the project dir — so a
+ * relative override resolves against the HOME directory, never the working
+ * directory (which would silently give each host its own empty cache), and a
+ * leading `~` is expanded.
+ */
 export function defaultCachePath(): string {
-  return readEnvVar('UNTAPPD_CACHE_DB') ?? join(defaultCacheDir(), 'checkins.db');
+  const file = readEnvVar('UNTAPPD_CACHE_DB');
+  if (file) return file === ':memory:' ? file : absolutise(file);
+  const dir = readEnvVar('UNTAPPD_CACHE_DIR');
+  return join(dir ? absolutise(dir) : defaultCacheDir(), 'checkins.db');
+}
+
+function absolutise(p: string): string {
+  const expanded = p === '~' ? homedir() : p.startsWith('~/') ? join(homedir(), p.slice(2)) : p;
+  return isAbsolute(expanded) ? expanded : resolve(homedir(), expanded);
+}
+
+/** One stderr line naming the resolved cache file, for the startup log. */
+export function describeCachePath(path: string): string {
+  let state = 'not created yet';
+  try {
+    // Count the -wal too: after an unclean exit most recent writes live there.
+    let bytes = statSync(path).size;
+    try {
+      bytes += statSync(`${path}-wal`).size;
+    } catch {
+      /* no WAL */
+    }
+    state = `exists, ${bytes} bytes`;
+  } catch {
+    /* not created yet */
+  }
+  return `[untappd-mcp] cache: ${path} (${state})`;
 }
 
 // Re-export the shared types/helpers tests and tools import from here so their
@@ -107,9 +198,12 @@ export {
   type CheckinRow,
   type SyncState,
   type HasHadResult,
+  type HasHadVerdict,
   type QueryFilters,
   type CacheStore,
   type ForgetResult,
+  type CacheStats,
+  type ItemResolution,
 } from './store.js';
 
 /** The directory the server owns by default: `~/.untappd-mcp`. */

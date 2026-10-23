@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import { minifiedResult, resolveView, toolAnnotations, viewParam, viewResult } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 import { compactCheckins, UNTAPPD_VIEWS, upstreamCompact } from '../compact.js';
+import { walkVenueMenu } from '../menu/venue-menu.js';
 
 export function registerVenueTools(server: McpServer, client: UntappdClient): void {
   server.registerTool(
@@ -69,94 +70,19 @@ export function registerVenueTools(server: McpServer, client: UntappdClient): vo
       }),
     },
     async ({ venue_id, menu_id, section_limit, section_offset, max_pages, sort }) => {
-      // venue/info pages its MENUS with limit/offset, but caps each menu's SECTION
-      // list — echoing `section_limit`/`section_offset` back as accepted params
-      // (the response even carries a `section_offset ` key with a stray trailing
-      // space; the real param name is the clean one the web menu UI sends). We
-      // forward them and walk sections, deduping by menu+section+bid so overlapping
-      // or param-ignoring pages can't double-count. Per CLAUDE.md's rate-limit
-      // design this spends at most `max_pages` API calls per run and hands the
-      // caller next_section_offset to resume, rather than looping to completion.
-      //
-      // Termination is driven by SECTION availability, not a running beer count:
-      // a page that returns fewer sections than we asked for is the end of the
-      // list. That's what makes resuming correct — this tool is stateless across
-      // calls, so on a resumed tail (section_offset > 0) `beers.length` covers
-      // only this run and can never equal the whole-menu total, which would
-      // otherwise mislabel a finished tail as truncated.
-      const pageSize = section_limit ?? 50;
-      const budget = max_pages ?? 3;
+      // Per CLAUDE.md's rate-limit design this spends at most `max_pages` API
+      // calls per run and hands the caller next_section_offset to resume, rather
+      // than looping to completion. The walk itself lives in walkVenueMenu.
       const startOffset = section_offset ?? 0;
-      let offset = startOffset;
-      const seen = new Set<string>();
-      const beers: Array<Record<string, unknown>> = [];
-      let totalCount = 0;
-      let sawMenu = false;
-      let pagesFetched = 0;
-      let reachedEnd = false; // hit full coverage, or the section list ran out
-
-      for (let page = 0; page < budget; page++) {
-        const data = await client.get<{ venue?: Record<string, unknown> }>(`/venue/info/${venue_id}`, {
-          section_limit: pageSize,
-          section_offset: offset,
-          menu_id,
-          sort,
-        });
-        pagesFetched++;
-        const vb = (data?.venue as { verfied_beers?: Record<string, unknown> } | undefined)?.verfied_beers;
-        if (!vb) {
-          reachedEnd = true; // no menu payload — nothing more to page
-          break;
-        }
-        sawMenu = true;
-        let added = 0;
-        let matchedItemCount = 0;
-        let sectionsReturned = 0;
-        for (const wrap of (vb.items as Array<{ menu?: Record<string, unknown> }>) ?? []) {
-          const menu = wrap?.menu as Record<string, unknown> | undefined;
-          if (!menu) continue;
-          if (menu_id && menu.menu_id !== menu_id) continue;
-          if (typeof menu.total_item_count === 'number') matchedItemCount += menu.total_item_count;
-          const sections = (menu.sections as { items?: unknown[] } | undefined)?.items ?? [];
-          for (const section of sections as Array<Record<string, unknown>>) {
-            sectionsReturned++;
-            for (const it of (section.items as Array<Record<string, unknown>>) ?? []) {
-              const beer = it?.beer as Record<string, unknown> | undefined;
-              if (!beer || typeof beer.bid !== 'number') continue;
-              const key = `${String(menu.menu_id)}:${String(section.section_id)}:${beer.bid}`;
-              if (seen.has(key)) continue;
-              seen.add(key);
-              const sectionName = section.section_name;
-              beers.push({
-                bid: beer.bid,
-                name: beer.beer_name,
-                brewery: (it.brewery as { brewery_name?: unknown } | undefined)?.brewery_name,
-                style: beer.beer_style,
-                abv: beer.beer_abv,
-                price: (it.price as { value?: unknown } | undefined)?.value,
-                serving_type: it.serving_type,
-                menu: menu.menu_name,
-                section: typeof sectionName === 'string' ? sectionName.trim() : sectionName,
-              });
-              added++;
-            }
-          }
-        }
-        // Coverage target: with a menu_id filter, aim for THAT menu's own item
-        // count — verfied_beers.total_count spans every menu, so a single-menu
-        // slice could never reach it (it would burn the whole page budget and
-        // wrongly report a shortfall). Without a filter, the venue-wide total.
-        totalCount = menu_id ? matchedItemCount : typeof vb.total_count === 'number' ? vb.total_count : totalCount;
-        offset += pageSize;
-        if (totalCount > 0 && beers.length >= totalCount) {
-          reachedEnd = true; // full coverage from this walk
-          break;
-        }
-        if (sectionsReturned < pageSize || added === 0) {
-          reachedEnd = true; // a short (or all-duplicate) page is the end of the section list
-          break;
-        }
-      }
+      const walk = await walkVenueMenu(client, venue_id, {
+        menuId: menu_id,
+        sectionLimit: section_limit,
+        sectionOffset: startOffset,
+        maxPages: max_pages ?? 3,
+        sort,
+      });
+      const { totalCount, sawMenu, pagesFetched, reachedEnd } = walk;
+      const beers = walk.beers.map(({ rawBeer: _b, rawBrewery: _w, ...b }) => b);
 
       if (!sawMenu) {
         return minifiedResult({ venue_id, total_count: 0, returned: 0, pages_fetched: pagesFetched, another_run_needed: false, truncated: false, beers: [], note: 'No verified menu on this venue.' });
@@ -173,7 +99,7 @@ export function registerVenueTools(server: McpServer, client: UntappdClient): vo
         returned: beers.length,
         pages_fetched: pagesFetched,
         another_run_needed,
-        ...(another_run_needed ? { next_section_offset: offset } : {}),
+        ...(another_run_needed ? { next_section_offset: walk.nextOffset } : {}),
         truncated,
         beers,
       });

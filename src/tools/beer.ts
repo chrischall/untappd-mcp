@@ -19,9 +19,12 @@ async function seedBeerMeta(
   if (!cache) return;
   try {
     const now = new Date().toISOString();
+    // Search results carry no rating. Seeding one would overwrite a real cached
+    // rating with null under a fresh timestamp, so the ranking tools would
+    // trust it for 30 days — only rows that actually carry a rating are seeded.
     const rows = beers
       .map((b) => beerMetaFrom(b.beer, b.brewery, now))
-      .filter((m): m is BeerMeta => m !== null);
+      .filter((m): m is BeerMeta => m !== null && (m.weighted_rating_score ?? m.rating_score) !== null);
     if (rows.length) await cache().upsertBeerMeta(rows);
   } catch {
     /* best-effort seeding — never break the read */

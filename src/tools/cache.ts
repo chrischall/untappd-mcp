@@ -6,6 +6,7 @@ import { beerMetaFrom, type BeerMeta, type CacheStore, type SyncState } from '..
 import { syncCheckins } from '../cache/sync.js';
 import { syncUserBeers } from '../cache/sync-beers.js';
 import { CONFIRM_FLOW, confirmWrite } from './confirm.js';
+import { clampToQuota } from '../quota.js';
 
 // Re-fetch cached beer metadata at most this often; a hit newer than this skips
 // the beer/info API call.
@@ -19,14 +20,14 @@ const BEER_META_TTL_MS = 30 * 24 * 60 * 60 * 1000;
  */
 export type CacheProvider = () => CacheStore;
 
-const UsernameArg = z
+export const UsernameArg = z
   .string()
   .min(1)
   .optional()
   .describe('Untappd username. Omit to use your own configured account (UNTAPPD_USERNAME).');
 
 /** Resolve the target username (raw, un-encoded) — explicit arg else configured login. */
-function resolveUser(username: string | undefined, loginName: string | null): string {
+export function resolveUser(username: string | undefined, loginName: string | null): string {
   const u = username ?? loginName;
   if (!u) {
     throw createHelpfulError('No username given and no configured account to fall back to.', {
@@ -34,6 +35,12 @@ function resolveUser(username: string | undefined, loginName: string | null): st
     });
   }
   return u;
+}
+
+/** Report the quota only when Untappd told us it (and say when it cut the budget). */
+export function quotaFields(q: { quota_remaining: number | null; clamped: boolean }): Record<string, unknown> {
+  if (q.quota_remaining === null) return {};
+  return { quota_remaining: q.quota_remaining, ...(q.clamped ? { budget_clamped_to_quota: true } : {}) };
 }
 
 function pct(cached: number, total: number | null, complete: boolean): number | null {
@@ -47,7 +54,7 @@ function pct(cached: number, total: number | null, complete: boolean): number | 
  * by the API for non-self accounts) and the user/beers distinct-beers sync
  * (complete has-had coverage) — so a caller knows exactly which caveats apply.
  */
-async function freshness(cache: CacheStore, username: string): Promise<Record<string, unknown>> {
+export async function freshness(cache: CacheStore, username: string): Promise<Record<string, unknown>> {
   const state: SyncState | undefined = await cache.getState(username);
   const cachedCheckins = await cache.cachedCount(username);
   const cachedBeers = await cache.distinctBeersCount(username);
@@ -99,6 +106,35 @@ async function freshness(cache: CacheStore, username: string): Promise<Record<st
  */
 export function registerCacheTools(server: McpServer, client: UntappdClient, cacheProvider: CacheProvider): void {
   server.registerTool(
+    'untappd_cache_status',
+    {
+      title: 'Show the local cache location, schema and per-user coverage',
+      description:
+        'Diagnostics for the LOCAL check-in cache — NO API call. Returns the resolved cache file path, its size on ' +
+        'disk (db + WAL), journal mode, schema version, the number of cached menu-line resolutions and beer-metadata ' +
+        'rows, and for every cached user: cached vs total distinct beers, cached check-ins, coverage_complete, the ' +
+        'resume offset of an unfinished user/beers backfill, and last_synced_at. Use it to confirm the cache ' +
+        'persisted across restarts or to see how far a backfill has got.',
+      annotations: toolAnnotations({ title: 'Show the local cache location, schema and per-user coverage', readOnly: true, idempotent: true, openWorld: false }),
+      inputSchema: z.object({}),
+    },
+    async () => {
+      const cache = cacheProvider();
+      const stats = await cache.stats();
+      // The file details only exist for a file-backed store (the node:sqlite
+      // CheckinCache); another backend reports the logical stats alone.
+      const file = (cache as Partial<{ fileInfo(): { path: string; bytes: number; journal_mode: string } }>).fileInfo?.();
+      return minifiedResult({
+        ...(file ? { cache_path: file.path, file_size_bytes: file.bytes, journal_mode: file.journal_mode } : {}),
+        schema_version: stats.schema_version,
+        resolution_cache_entries: stats.resolution_cache_entries,
+        beer_meta_entries: stats.beer_meta_entries,
+        users: stats.users,
+      });
+    },
+  );
+
+  server.registerTool(
     'untappd_sync_checkins',
     {
       title: 'Sync a user\'s check-ins into the cache',
@@ -128,11 +164,14 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
     },
     async ({ username, max_pages, force_backfill }) => {
       const user = resolveUser(username, client.loginName);
+      // Floor of 1: the shared catch-up/backfill page split (sync.ts) is only
+      // defined for a budget of at least one page.
+      const quota = clampToQuota(client, max_pages ?? 10, 1);
       const summary = await syncCheckins(client, cacheProvider(), user, {
-        maxPages: max_pages ?? 10,
+        maxPages: quota.budget,
         force: force_backfill ?? false,
       });
-      return minifiedResult(summary);
+      return minifiedResult({ ...summary, ...quotaFields(quota) });
     },
   );
 
@@ -161,8 +200,9 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
     },
     async ({ username, max_pages }) => {
       const user = resolveUser(username, client.loginName);
-      const summary = await syncUserBeers(client, cacheProvider(), user, max_pages ?? 10);
-      return minifiedResult(summary);
+      const quota = clampToQuota(client, max_pages ?? 10, 1);
+      const summary = await syncUserBeers(client, cacheProvider(), user, quota.budget);
+      return minifiedResult({ ...summary, ...quotaFields(quota) });
     },
   );
 
@@ -212,21 +252,18 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
     async ({ username, bids }) => {
       const user = resolveUser(username, client.loginName);
       const cache = cacheProvider();
-      const seen = new Set<number>();
+      const verdicts = await cache.hasHadMany(user, bids);
       const results = [];
       let hadCount = 0;
-      for (const bid of bids) {
-        if (seen.has(bid)) continue;
-        seen.add(bid);
-        const r = await cache.hasHad(user, { bid });
+      for (const [bid, r] of verdicts) {
         if (r.had) hadCount++;
         results.push({ bid, had: r.had, count: r.count, last_date: r.last_date, best_rating: r.best_rating, sources: r.sources });
       }
       return minifiedResult({
         username: user,
-        checked: seen.size,
+        checked: verdicts.size,
         had: hadCount,
-        not_had: seen.size - hadCount,
+        not_had: verdicts.size - hadCount,
         results,
         freshness: await freshness(cache, user),
       });
@@ -252,18 +289,13 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
     async ({ username, bids }) => {
       const user = resolveUser(username, client.loginName);
       const cache = cacheProvider();
-      const seen = new Set<number>();
+      const verdicts = await cache.hasHadMany(user, bids);
       const notHad: number[] = [];
       const had: number[] = [];
-      for (const bid of bids) {
-        if (seen.has(bid)) continue;
-        seen.add(bid);
-        if ((await cache.hasHad(user, { bid })).had) had.push(bid);
-        else notHad.push(bid);
-      }
+      for (const [bid, r] of verdicts) (r.had ? had : notHad).push(bid);
       return minifiedResult({
         username: user,
-        checked: seen.size,
+        checked: verdicts.size,
         not_had_count: notHad.length,
         had_count: had.length,
         not_had: notHad,
@@ -344,16 +376,15 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
       const user = resolveUser(username, client.loginName);
       const cache = cacheProvider();
       const topN = top_n ?? 2;
-      const budget = api_budget ?? 25;
+      const quota = clampToQuota(client, api_budget ?? 25);
+      const budget = quota.budget;
       const nowMs = Date.now();
       const nowIso = new Date().toISOString();
 
       // Dedupe candidates, then filter to not-had using the cache only (no API).
       const candidates = [...new Set(bids)];
-      const notHad: number[] = [];
-      for (const bid of candidates) {
-        if (!(await cache.hasHad(user, { bid })).had) notHad.push(bid);
-      }
+      const verdicts = await cache.hasHadMany(user, candidates);
+      const notHad = candidates.filter((bid) => !verdicts.get(bid)!.had);
 
       // Read cached metadata; a hit newer than the TTL is used as-is, otherwise
       // the bid needs a beer/info fetch.
@@ -449,6 +480,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
           partial,
           another_run_needed: partial,
           ...(rateLimited ? { rate_limited: true } : {}),
+          ...quotaFields(quota),
         },
         freshness: await freshness(cache, user),
       });
