@@ -578,7 +578,9 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
       title: 'Batch-check many beers against the cache',
       description:
         'Cross-check a list of beer ids against a user\'s cached history in ONE call — NO API call. Consults BOTH ' +
-        'sources (check-ins + distinct beers). Returns had/not-had per bid (with count and last date when had). Ideal ' +
+        'sources (check-ins + distinct beers). Returns had/not-had per bid (with count and last date when had), plus ' +
+        'favorite {is_favorite, sources, reason} per bid and brewery_favorite when its brewery (from cached beer ' +
+        'metadata) is a favorite. Ideal ' +
         'for checking a whole venue menu at once. Pass usernames (instead of username) to check a GROUP: each bid ' +
         'then lists had_by / not_had_by and qualifies per mode — "none_had" (default: new to everyone) or ' +
         '"any_not_had" (at least one of them still needs it) — with qualifying_bids and a per-user freshness block. ' +
@@ -593,11 +595,21 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
     },
     async ({ username, usernames, mode, bids }) => {
       const cache = cacheProvider();
+      // One lookup for the whole batch (never per bid). Brewery ids come from cached beer metadata, when known.
+      const favoritesFor = async (users: string[]) => {
+        const breweryOf = new Map((await cache.getBeerMeta(bids)).map((b) => [b.bid, b.brewery_id]));
+        const favs = await favoriteLookup(cache, users, { beer: bids, brewery: [...breweryOf.values()] });
+        return (bid: number) => {
+          const brewery = favs.get('brewery', breweryOf.get(bid));
+          return { favorite: favs.get('beer', bid), ...(brewery.is_favorite ? { brewery_favorite: brewery } : {}) };
+        };
+      };
       if (usernames && usernames.length > 0) {
         const users = resolveUsers(username, usernames, client.loginName);
         const m: MultiUserMode = mode ?? DEFAULT_MULTI_USER_MODE;
         const group = await multiHasHad(cache, users, bids, m);
-        const results = [...group.values()];
+        const favOf = await favoritesFor(users);
+        const results = [...group.values()].map((r) => ({ ...r, ...favOf(r.bid) }));
         const qualifying = results.filter((r) => r.qualifies).map((r) => r.bid);
         return minifiedResult({
           usernames: users,
@@ -611,11 +623,12 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
       }
       const user = resolveUser(username, client.loginName);
       const verdicts = await cache.hasHadMany(user, bids);
+      const favOf = await favoritesFor([user]);
       const results = [];
       let hadCount = 0;
       for (const [bid, r] of verdicts) {
         if (r.had) hadCount++;
-        results.push({ bid, had: r.had, count: r.count, last_date: r.last_date, best_rating: r.best_rating, sources: r.sources });
+        results.push({ bid, had: r.had, count: r.count, last_date: r.last_date, best_rating: r.best_rating, sources: r.sources, ...favOf(bid) });
       }
       return minifiedResult({
         username: user,

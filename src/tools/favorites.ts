@@ -36,7 +36,7 @@ export function registerFavoriteTools(server: McpServer, client: UntappdClient, 
         'Add a MANUAL favorite — a beer, brewery or venue — with an optional note, to the local cache. ' +
         `${LOCAL_ONLY} Re-adding an existing favorite updates its note (omit note to keep it) and keeps its ` +
         'created_at. Manual favorites show in untappd_favorites_list (source "manual") and as the `favorite` field on ' +
-        'has_had, has_visited, brewery_beers, venue_menu and top_not_had results; a favorite brewery also boosts its ' +
+        'has_had, has_had_many, has_visited, brewery_beers, venue_menu and top_not_had results; a favorite brewery also boosts its ' +
         'beers in untappd_top_not_had. Omit username for your own account.',
       annotations: toolAnnotations({ title: 'Mark a beer, brewery or venue as a favorite (local)', readOnly: false, idempotent: true, openWorld: false, destructive: false }),
       inputSchema: z.object({

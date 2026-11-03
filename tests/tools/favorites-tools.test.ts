@@ -91,6 +91,26 @@ describe('favorite tools', () => {
     expect(no.favorite).toEqual({ is_favorite: false, sources: [], reason: null });
   });
 
+  it('cache_has_had_many carries a favorite field per bid, and brewery_favorite when the brewery is known', async () => {
+    await cache.addFavorite(U, 'beer', 3, 'crowd pleaser', '2026-01-01T00:00:00.000Z');
+    // 30 is not had; its cached metadata names favorite brewery 1. 31 is from a non-favorite brewery.
+    await cache.upsertBeerMeta([meta(30, 4.1, 1), meta(31, 4.1, 99)]);
+    const r = parse(await harness.callTool('untappd_cache_has_had_many', { username: U, bids: [1, 2, 3, 30, 31] }));
+    const byBid = Object.fromEntries(r.results.map((x: any) => [x.bid, x]));
+    expect(byBid[1].favorite).toEqual({ is_favorite: true, sources: ['derived'], reason: 'rated 4.5' });
+    expect(byBid[2].favorite).toEqual({ is_favorite: false, sources: [], reason: null });
+    expect(byBid[3].favorite).toEqual({ is_favorite: true, sources: ['manual'], reason: 'manual: crowd pleaser' });
+    expect(byBid[30]).toMatchObject({ had: false, favorite: { is_favorite: false }, brewery_favorite: { is_favorite: true, sources: ['derived'] } });
+    expect(byBid[31].brewery_favorite).toBeUndefined();
+
+    // Group mode carries the same fields.
+    const g = parse(await harness.callTool('untappd_cache_has_had_many', { usernames: [U, 'other'], bids: [1, 30] }));
+    const gByBid = Object.fromEntries(g.results.map((x: any) => [x.bid, x]));
+    expect(gByBid[1].favorite).toMatchObject({ is_favorite: true, sources: ['derived'] });
+    expect(gByBid[30].brewery_favorite).toMatchObject({ is_favorite: true });
+    expect(get).not.toHaveBeenCalled();
+  });
+
   it('cache_has_visited marks each matched venue', async () => {
     await cache.addFavorite(U, 'venue', 101, null, '2026-01-01T00:00:00.000Z');
     const r = parse(await harness.callTool('untappd_cache_has_visited', { username: U, queries: [{ name: 'Coppertail' }] }));

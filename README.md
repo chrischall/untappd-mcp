@@ -108,7 +108,7 @@ from the synced history — venues with ≥5 check-ins or visits spanning ≥3 d
 with ≥5 beers had and an average rating ≥3.75, or ≥15 beers; beers rated ≥4.25 or had ≥3 times —
 and every threshold can be overridden per call. **Manual** favorites are added and removed with
 `untappd_favorite_add` / `untappd_favorite_remove` (local table, optional note). Results from
-`untappd_cache_has_had`, `untappd_cache_has_visited`, `untappd_brewery_beers`, `untappd_venue_menu`
+`untappd_cache_has_had`, `untappd_cache_has_had_many`, `untappd_cache_has_visited`, `untappd_brewery_beers`, `untappd_venue_menu`
 and `untappd_top_not_had` carry a `favorite` field `{is_favorite, sources, reason}`, and
 `untappd_top_not_had` ranks wishlisted beers and beers from favorite breweries higher by default
 (`prefer_favorites: false` turns that off). The `untappd` source is reserved for Untappd's own
