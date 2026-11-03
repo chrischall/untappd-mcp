@@ -46,7 +46,9 @@ class NodeSqlDriver implements SqlDriver {
     // IMMEDIATE takes the write lock up front. A DEFERRED transaction that
     // reads and then writes can hit SQLITE_BUSY on the lock upgrade, which
     // busy_timeout does NOT retry — the failure mode of two hosts open at once.
-    this.db.exec('BEGIN IMMEDIATE');
+    // BEGIN itself can still get a handler-less SQLITE_BUSY (e.g. while another
+    // process recovers the WAL), so it is retried too.
+    retryBusy(() => this.db.exec('BEGIN IMMEDIATE'));
     try {
       fn();
       this.db.exec('COMMIT');
@@ -75,23 +77,34 @@ export class CheckinCache extends LocalCacheStore {
   static open(path: string): CheckinCache {
     if (path !== ':memory:') preparePrivateFile(path);
     const db = new DatabaseSync(path);
-    // Set before the schema/migration transaction so even that waits out a
-    // second process instead of failing. WAL lets readers and one writer run
-    // concurrently (two hosts open at once); NORMAL sync is the WAL-safe default.
-    db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
-    if (path !== ':memory:') {
-      db.exec('PRAGMA journal_mode = WAL');
-      db.exec('PRAGMA synchronous = NORMAL');
+    try {
+      // Set before the schema/migration transaction so even that waits out a
+      // second process instead of failing. WAL lets readers and one writer run
+      // concurrently (two hosts open at once); NORMAL sync is the WAL-safe default.
+      db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
+      if (path !== ':memory:') {
+        // Switching a fresh file to WAL needs an exclusive lock, and when another
+        // process is opening it too SQLite answers SQLITE_BUSY WITHOUT calling
+        // the busy handler (#256) — so busy_timeout never applies and this has
+        // to retry itself. Once the file is WAL (the switch is persistent) a
+        // later open skips the switch entirely.
+        retryBusy(() => {
+          if (journalModeOf(db) !== 'wal') db.exec('PRAGMA journal_mode = WAL');
+        });
+        db.exec('PRAGMA synchronous = NORMAL');
+      }
+      const cache = new CheckinCache(db, path);
+      if (path !== ':memory:') tightenSidecars(path);
+      return cache;
+    } catch (e) {
+      db.close();
+      throw e;
     }
-    const cache = new CheckinCache(db, path);
-    if (path !== ':memory:') tightenSidecars(path);
-    return cache;
   }
 
   /** The SQLite journal mode actually in effect (`wal` for a file, `memory` for :memory:). */
   journalMode(): string {
-    const row = this.db.prepare('PRAGMA journal_mode').get() as { journal_mode?: string } | undefined;
-    return String(row?.journal_mode ?? 'unknown');
+    return journalModeOf(this.db);
   }
 
   /** On-disk footprint: the db file plus its -wal/-shm side files. */
@@ -150,6 +163,41 @@ function bestEffortChmod(path: string, mode: number): void {
 
 // How long a write waits for another process's lock before failing.
 const BUSY_TIMEOUT_MS = 5000;
+
+function journalModeOf(db: DatabaseSync): string {
+  const row = db.prepare('PRAGMA journal_mode').get() as { journal_mode?: string } | undefined;
+  return String(row?.journal_mode ?? 'unknown');
+}
+
+/** SQLITE_BUSY / SQLITE_LOCKED, including their extended codes (e.g. BUSY_RECOVERY). */
+function isBusy(e: unknown): boolean {
+  const code = (e as { errcode?: unknown })?.errcode;
+  return typeof code === 'number' && ((code & 0xff) === 5 || (code & 0xff) === 6);
+}
+
+const sleepCell = new Int32Array(new SharedArrayBuffer(4));
+
+/**
+ * Run `fn`, retrying a SQLITE_BUSY that SQLite raised without consulting the
+ * busy handler, until {@link BUSY_TIMEOUT_MS} after the FIRST attempt. A BUSY
+ * that already waited out busy_timeout lands past that deadline and is thrown
+ * as-is, so the total wait never exceeds busy_timeout's. The driver is
+ * synchronous, so the backoff blocks (Atomics.wait) like busy_timeout does.
+ */
+export function retryBusy<T>(fn: () => T, timeoutMs = BUSY_TIMEOUT_MS): T {
+  const deadline = Date.now() + timeoutMs;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return fn();
+    } catch (e) {
+      const left = deadline - Date.now();
+      if (!isBusy(e) || left <= 0) throw e;
+      // 5, 10, 20 … ms, capped at 100, plus jitter so colliding opens spread out.
+      const wait = Math.min(100, 5 * 2 ** Math.min(attempt, 5)) + Math.random() * 5;
+      Atomics.wait(sleepCell, 0, 0, Math.min(wait, left));
+    }
+  }
+}
 
 /**
  * The on-disk cache path, always ABSOLUTE: `$UNTAPPD_CACHE_DB` (a file), else

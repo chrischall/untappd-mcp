@@ -156,7 +156,11 @@ Non-obvious behaviours that were each fixed the hard way:
   `BEGIN IMMEDIATE` (a deferred read→write upgrade hits SQLITE_BUSY, which busy_timeout won't retry).
   `setState` is read-merge-write inside one transaction; net-new counts are taken inside the upsert's.
   `tests/cache-persistence.test.ts` proves it against the built bundle — it fails with "database is
-  locked" if either pragma goes.
+  locked" if either pragma goes. **busy_timeout does not cover everything**: switching a NEW file to
+  WAL while another process opens it returns SQLITE_BUSY without calling the busy handler (#256), so
+  `open()` skips the switch when the file is already WAL and wraps it (and `BEGIN IMMEDIATE`) in
+  `retryBusy`, which shares busy_timeout's 5 s deadline. `tests/cache-concurrent-open.test.ts` races
+  8 processes on one fresh file.
 - **The cache path never depends on cwd**: relative/`~` overrides resolve against HOME, and
   `index.ts` logs the resolved path at startup.
 - **Incremental `user/beers` refresh stops at the first cached beer whose `last_had` AND `had_count`
