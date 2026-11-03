@@ -113,6 +113,22 @@ describe('cache-backed read tools (brewery_beers 7-day, venue_menu / venue_activ
     }
   });
 
+  // Production always has a username configured, so the cached path always
+  // looks favorites up. The shape must not depend on that (or on a local .env).
+  it('brewery_beers: the top-level keys match with and without the cache when a username is given', async () => {
+    const noCache = await createTestHarness((server) => registerBreweryTools(server, client));
+    try {
+      get.mockResolvedValue(BEER_PAGE as never);
+      const plain = parse(await noCache.callTool('untappd_brewery_beers', { brewery_id: 42, username: 'mer' }));
+      const cached = parse(await harness.callTool('untappd_brewery_beers', { brewery_id: 42, username: 'mer' }));
+      expect(Object.keys(cached).sort()).toEqual(Object.keys(plain).sort());
+      expect(plain.favorite).toBeNull();
+      expect(cached.favorite).toMatchObject({ is_favorite: false });
+    } finally {
+      await noCache.close();
+    }
+  });
+
   it('brewery_beers: view "full" always goes upstream and returns the raw page, but still seeds the cache', async () => {
     get.mockResolvedValue(BEER_PAGE as never);
     expect(parse(await harness.callTool('untappd_brewery_beers', { brewery_id: 42, view: 'full' }))).toEqual(BEER_PAGE);

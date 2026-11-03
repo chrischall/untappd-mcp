@@ -22,8 +22,10 @@ import {
 // the mcpb bundle). `loadDotenvSafely` swallows a missing dotenv module and
 // never lets .env override a host-provided value. Guard on `import.meta.url`:
 // in a non-Node runtime (Cloudflare Workers) it is undefined and there is no
-// local .env — secrets arrive via the platform's env bindings instead.
-if (import.meta.url) {
+// local .env — secrets arrive via the platform's env bindings instead. Under
+// vitest (VITEST is set, and inherited by any server a test spawns) it is skipped
+// too, so a developer's real credentials never change what the suite sees.
+if (import.meta.url && !process.env.VITEST) {
   const __dirname = dirname(fileURLToPath(import.meta.url));
   await loadDotenvSafely({ path: join(__dirname, '..', '.env'), override: false });
 }

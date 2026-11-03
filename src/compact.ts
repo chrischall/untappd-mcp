@@ -154,7 +154,9 @@ export function compactBreweryBeerList(
     source: r.source,
     fetched_at: r.fetched_at,
     expires_at: r.expires_at,
-    ...(favorites ? { favorite: favorites.brewery } : {}),
+    // Always present (null when favorites aren't known: no cache, or no username) so
+    // the cached and no-cache paths return the same keys.
+    favorite: favorites ? favorites.brewery : null,
     pagination: { offset: page.offset, limit: page.limit, next_offset: more ? page.offset + count : null },
     beers: {
       count,
