@@ -189,6 +189,13 @@ Non-obvious behaviours that were each fixed the hard way:
   in list `wishlist`). Rows are stamped with the pass's stamp (list `wishlist_pass`.last_synced_at,
   strictly later than the previous pass's), and only a FINISHED pass deletes rows with another stamp —
   a partial pass never removes anything.
+- **Group has-had (`multi-user.ts`)**: `cache_has_had_many` / `top_not_had` take `usernames[]` +
+  `mode` (`none_had` = nobody had it, `any_not_had` = someone hasn't). One `hasHadMany` per user;
+  the single-user path keeps its old output shape. Passing `username` AND `usernames` is rejected.
+- **Venue drinks (`venue-drinks.ts`, opt-in)**: `checkin/view` of each `user_venues` row's first/recent
+  check-in, one call each under `max_calls` + the rate guard. Only beer/brewery/date are stored (never
+  comments). A 404 is stored as a tombstone (bid AND beer_name null) so it is never re-asked;
+  other errors stay pending. `getVenueDrinks` hides tombstones.
 - **Batch, don't loop.** Use `hasHadMany(username, bids)` (two grouped queries per 500-bid chunk)
   for any list; `hasHad` per bid costs ~4 queries each. `tests/cache-batch.test.ts` pins the two
   to identical verdicts — change both or neither. Upsert "net new" counts look up only the batch's

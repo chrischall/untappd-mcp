@@ -7,6 +7,15 @@ import { syncCheckins } from '../cache/sync.js';
 import { syncUserBeers } from '../cache/sync-beers.js';
 import { syncUserVenues, VENUES_LIST, VENUES_MAX_PAGES_CAP, VENUES_REFRESH_LIST } from '../cache/sync-venues.js';
 import { syncWishlist, WISHLIST_MAX_PAGES_CAP } from '../cache/sync-wishlist.js';
+import { syncVenueDrinks, VENUE_DRINKS_DEFAULT_CALLS, VENUE_DRINKS_MAX_CALLS_CAP } from '../cache/venue-drinks.js';
+import {
+  DEFAULT_MULTI_USER_MODE,
+  MAX_GROUP_USERS,
+  MULTI_USER_MODES,
+  multiHasHad,
+  resolveUsers,
+  type MultiUserMode,
+} from '../cache/multi-user.js';
 import { CONFIRM_FLOW, confirmWrite } from './confirm.js';
 import { clampToQuota } from '../quota.js';
 import { rateLimitStatus } from '../ratelimit.js';
@@ -101,6 +110,45 @@ export async function freshness(cache: CacheStore, username: string): Promise<Re
     ...(caveat ? { caveat } : {}),
   };
 }
+
+/** Several users' has-had freshness: every block, all-complete, and one caveat naming the incomplete users. */
+export async function groupFreshness(cache: CacheStore, usernames: string[]): Promise<Record<string, unknown>> {
+  const byUser: Record<string, Record<string, unknown>> = {};
+  const incomplete: string[] = [];
+  for (const u of usernames) {
+    const f = await freshness(cache, u);
+    byUser[u] = f;
+    if (!f.coverage_complete) incomplete.push(u);
+  }
+  return {
+    coverage_complete: incomplete.length === 0,
+    by_user: byUser,
+    ...(incomplete.length
+      ? {
+          caveat:
+            `Has-had coverage is incomplete for ${incomplete.join(', ')} (see by_user) — a beer counted as not had by ` +
+            'them may be a false negative. Run untappd_sync_user_beers for each until complete.',
+        }
+      : {}),
+  };
+}
+
+const UsernamesArg = z
+  .array(z.string().min(1))
+  .min(1)
+  .max(MAX_GROUP_USERS)
+  .optional()
+  .describe(
+    `Check a GROUP of users (1–${MAX_GROUP_USERS}) instead of one — e.g. everyone at the table. Use instead of username; ` +
+      'each must be synced (untappd_sync_user_beers).',
+  );
+const ModeArg = z
+  .enum(MULTI_USER_MODES)
+  .optional()
+  .describe(
+    'With usernames: "none_had" (default) keeps beers NONE of them has had (new to everyone); "any_not_had" keeps ' +
+      'beers at least one of them has not had.',
+  );
 
 /**
  * Freshness block for venue-history reads (untappd_cache_has_visited): how much
@@ -322,6 +370,56 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
     },
   );
 
+  server.registerTool(
+    'untappd_sync_venue_drinks',
+    {
+      title: 'Fetch what a user drank on their first/latest visit to each venue (opt-in)',
+      description:
+        'OPT-IN, costs API calls: for a user\'s cached venue history (run untappd_sync_user_venues first), fetch the ' +
+        'FIRST and MOST-RECENT visit check-ins of each venue via checkin/view (works for any public check-in) and cache ' +
+        'the beer + date — a PARTIAL "what did they drink there" (two check-ins per venue at most, never the full ' +
+        'list). One call per check-in, most-visited venues first, at most max_calls per run (default ' +
+        `${VENUE_DRINKS_DEFAULT_CALLS}, max ${VENUE_DRINKS_MAX_CALLS_CAP}); already-cached check-ins are never re-fetched, ` +
+        'and deleted/private ones (404) are remembered and skipped. Narrow with venue_ids and which. Stops BEFORE the ' +
+        '~100 calls/hour rate limit (or cleanly on a 429) with stopped_for_rate_limit and rate_limit.resume_at; run ' +
+        'again until another_run_needed is false. Results appear in untappd_cache_has_visited under matches[].drinks. ' +
+        'Stores only beer, brewery and date — never comments. Omit username for your own account.',
+      annotations: toolAnnotations({
+        title: 'Fetch what a user drank on their first/latest visit to each venue (opt-in)',
+        readOnly: false,
+        idempotent: false,
+        openWorld: true,
+        destructive: false,
+      }),
+      inputSchema: z.object({
+        username: UsernameArg,
+        max_calls: z
+          .number()
+          .int()
+          .min(1)
+          .max(VENUE_DRINKS_MAX_CALLS_CAP)
+          .optional()
+          .describe(`checkin/view calls this run (default ${VENUE_DRINKS_DEFAULT_CALLS}, max ${VENUE_DRINKS_MAX_CALLS_CAP}). Each is one of the ~100 hourly calls.`),
+        venue_ids: z
+          .array(z.number().int().positive())
+          .min(1)
+          .max(100)
+          .optional()
+          .describe('Only these venues (from untappd_cache_has_visited). Default: every cached venue, most-visited first.'),
+        which: z
+          .enum(['both', 'first', 'recent'])
+          .optional()
+          .describe('Fetch each venue\'s first-visit check-in, most-recent one, or both (default both).'),
+      }),
+    },
+    async ({ username, max_calls, venue_ids, which }) => {
+      const user = resolveUser(username, client.loginName);
+      const quota = clampToQuota(client, max_calls ?? VENUE_DRINKS_DEFAULT_CALLS, 1);
+      const summary = await syncVenueDrinks(client, cacheProvider(), user, { maxCalls: quota.budget, venueIds: venue_ids, which });
+      return minifiedResult({ ...summary, ...quotaFields(quota) });
+    },
+  );
+
   const VenueQueryArg = z.object({
     label: z.string().max(200).optional().describe('Your own name for this query, echoed back (e.g. "Coppertail, Tampa")'),
     venue_ids: z.array(z.number().int().positive()).max(100).optional().describe('Exact Untappd venue ids'),
@@ -357,7 +455,8 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         'unioned with the name/geo match, and name + lat/lng together must both hold. Name/location matching matters ' +
         'because a brewery_id is NOT its taproom\'s venue_id, a brewery can have several venues, and Untappd keeps ' +
         '"… (duplicate of …)" venues — so expect, and check, several matches. Returns per query: visited, the matched ' +
-        'venues (first_visit, recent_visit, total_count, is_duplicate, distance_m), and total_visits; plus a freshness ' +
+        'venues (first_visit, recent_visit, total_count, is_duplicate, distance_m, and — once untappd_sync_venue_drinks ' +
+        'has fetched them — drinks: the beer from the first/recent visit check-ins), and total_visits; plus a freshness ' +
         'block (last_synced_at, coverage_complete, caveat). Run untappd_sync_user_venues first.',
       annotations: toolAnnotations({ title: 'Check if a user has been to a venue (from the cache)', readOnly: true, idempotent: true, openWorld: false }),
       inputSchema: z.object({
@@ -386,13 +485,20 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
       for (const { label, ...q } of queries) {
         const matches = await cache.findVisitedVenues(user, q as VenueQuery);
         if (matches.length > 0) visitedCount++;
+        const shown = matches.slice(0, limit);
+        const drinksByVenue = new Map<number, Array<Record<string, unknown>>>();
+        for (const d of await cache.getVenueDrinks(user, shown.map((m) => m.venue_id))) {
+          const list = drinksByVenue.get(d.venue_id) ?? [];
+          list.push({ checkin_id: d.checkin_id, bid: d.bid, beer_name: d.beer_name, brewery_name: d.brewery_name, created_at: d.created_at });
+          drinksByVenue.set(d.venue_id, list);
+        }
         results.push({
           ...(label !== undefined ? { label } : {}),
           query: q,
           visited: matches.length > 0,
           match_count: matches.length,
           total_visits: matches.reduce((n, m) => n + (m.total_count ?? 0), 0),
-          matches: matches.slice(0, limit).map((m) => ({
+          matches: shown.map((m) => ({
             venue_id: m.venue_id,
             name: m.name,
             category: m.category,
@@ -406,6 +512,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
             total_count: m.total_count,
             first_checkin_id: m.first_checkin_id,
             recent_checkin_id: m.recent_checkin_id,
+            ...(drinksByVenue.has(m.venue_id) ? { drinks: drinksByVenue.get(m.venue_id) } : {}),
           })),
         });
       }
@@ -454,17 +561,37 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
       description:
         'Cross-check a list of beer ids against a user\'s cached history in ONE call — NO API call. Consults BOTH ' +
         'sources (check-ins + distinct beers). Returns had/not-had per bid (with count and last date when had). Ideal ' +
-        'for checking a whole venue menu at once. Run untappd_sync_user_beers first; the freshness block flags if ' +
-        'coverage is incomplete.',
+        'for checking a whole venue menu at once. Pass usernames (instead of username) to check a GROUP: each bid ' +
+        'then lists had_by / not_had_by and qualifies per mode — "none_had" (default: new to everyone) or ' +
+        '"any_not_had" (at least one of them still needs it) — with qualifying_bids and a per-user freshness block. ' +
+        'Run untappd_sync_user_beers first (for every user); the freshness block flags if coverage is incomplete.',
       annotations: toolAnnotations({ title: 'Batch-check many beers against the cache', readOnly: true, idempotent: true, openWorld: false }),
       inputSchema: z.object({
         username: UsernameArg,
+        usernames: UsernamesArg,
+        mode: ModeArg,
         bids: z.array(z.number().int().positive()).min(1).max(500).describe('Beer ids to check (1–500)'),
       }),
     },
-    async ({ username, bids }) => {
-      const user = resolveUser(username, client.loginName);
+    async ({ username, usernames, mode, bids }) => {
       const cache = cacheProvider();
+      if (usernames && usernames.length > 0) {
+        const users = resolveUsers(username, usernames, client.loginName);
+        const m: MultiUserMode = mode ?? DEFAULT_MULTI_USER_MODE;
+        const group = await multiHasHad(cache, users, bids, m);
+        const results = [...group.values()];
+        const qualifying = results.filter((r) => r.qualifies).map((r) => r.bid);
+        return minifiedResult({
+          usernames: users,
+          mode: m,
+          checked: results.length,
+          qualifying: qualifying.length,
+          qualifying_bids: qualifying,
+          results,
+          freshness: await groupFreshness(cache, users),
+        });
+      }
+      const user = resolveUser(username, client.loginName);
       const verdicts = await cache.hasHadMany(user, bids);
       const results = [];
       let hadCount = 0;
@@ -565,10 +692,13 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         'run (~100 calls/hour limit) — if more are needed it returns partial: true / another_run_needed: true, so ' +
         're-running fills the rest. A beer whose refresh is deferred or fails is still ranked on its older cached ' +
         'metadata and marked stale: true. Reports the same freshness/caveat block as untappd_cache_not_had. Omit username ' +
-        'for your own account.',
+        'for your own account. For a GROUP pass usernames: mode "none_had" (default) ranks only beers new to everyone, ' +
+        '"any_not_had" ranks beers at least one of them still needs (each ranked beer lists not_had_by / had_by).',
       annotations: toolAnnotations({ title: 'Top-rated beers a user has NOT had, from a candidate list', readOnly: false, idempotent: false, openWorld: true, destructive: false }),
       inputSchema: z.object({
         username: UsernameArg,
+        usernames: UsernamesArg,
+        mode: ModeArg,
         bids: z.array(z.number().int().positive()).min(1).max(100).describe('Candidate beer ids (1–100)'),
         top_n: z.number().int().min(1).max(10).optional().describe('How many top beers to return (default 2, max 10)'),
         style: z
@@ -585,8 +715,10 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
           .describe('Max beer/info API calls this run for uncached/stale metadata (default 25). Keep modest to respect the ~100 calls/hour rate limit.'),
       }),
     },
-    async ({ username, bids, top_n, style, api_budget }) => {
-      const user = resolveUser(username, client.loginName);
+    async ({ username, usernames, mode, bids, top_n, style, api_budget }) => {
+      const group = usernames !== undefined && usernames.length > 0;
+      const users = resolveUsers(username, usernames, client.loginName);
+      const groupMode: MultiUserMode = mode ?? DEFAULT_MULTI_USER_MODE;
       const cache = cacheProvider();
       const topN = top_n ?? 2;
       const quota = clampToQuota(client, api_budget ?? 25);
@@ -595,9 +727,10 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
       const nowIso = new Date().toISOString();
 
       // Dedupe candidates, then filter to not-had using the cache only (no API).
+      // One user is the group case with one member (both modes mean "not had").
       const candidates = [...new Set(bids)];
-      const verdicts = await cache.hasHadMany(user, candidates);
-      const notHad = candidates.filter((bid) => !verdicts.get(bid)!.had);
+      const verdicts = await multiHasHad(cache, users, candidates, groupMode);
+      const notHad = candidates.filter((bid) => verdicts.get(bid)!.qualifies);
 
       // Read cached metadata; a hit newer than the TTL is used as-is, otherwise
       // the bid needs a beer/info fetch.
@@ -675,15 +808,22 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
           rating: m.weighted_rating_score ?? m.rating_score,
           rating_count: m.rating_count,
           ...(staleBids.has(m.bid) ? { stale: true } : {}),
+          ...(group
+            ? {
+                not_had_by: verdicts.get(m.bid)!.not_had_by,
+                had_by: verdicts.get(m.bid)!.had_by.map((x) => x.username),
+              }
+            : {}),
         }));
 
       // Errors leave beers unranked (or ranked on stale data) just like a
       // deferral does, so a re-run is worth it in both cases.
       const partial = deferred > 0 || errors > 0;
       return minifiedResult({
-        username: user,
+        ...(group ? { usernames: users } : { username: users[0] }),
         ranked,
         summary: {
+          ...(group ? { mode: groupMode } : {}),
           candidates: candidates.length,
           not_had: notHad.length,
           style_matched: style !== undefined ? matched.length : null,
@@ -695,7 +835,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
           ...(rateLimited ? { rate_limited: true } : {}),
           ...quotaFields(quota),
         },
-        freshness: await freshness(cache, user),
+        freshness: group ? await groupFreshness(cache, users) : await freshness(cache, users[0]),
       });
     },
   );

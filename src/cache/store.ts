@@ -278,6 +278,19 @@ export interface CacheStore {
   wishlistCount(username: string): Promise<number>;
   /** The user's cached wishlist; restricted to `bids` when given. */
   getWishlist(username: string, bids?: number[]): Promise<WishlistRow[]>;
+  /**
+   * The user's cached venues' first/recent check-ins with no `venue_drinks` row
+   * yet (a 404 tombstone counts as a row), most-visited venues first, a check-in
+   * id listed once. Restricted to `venueIds` / `which` when given.
+   */
+  venueDrinkCandidates(username: string, opts?: { venueIds?: number[]; which?: 'both' | 'first' | 'recent' }): Promise<VenueDrinkCandidate[]>;
+  /**
+   * Store fetched visit drinks. A row with `bid` and `beer_name` both null is a
+   * tombstone: the check-in is gone or private, so it is never asked for again.
+   */
+  upsertVenueDrinks(username: string, rows: VenueDrinkRow[], fetchedAt: string): Promise<void>;
+  /** Cached drinks (tombstones excluded) at the given venues, newest first. */
+  getVenueDrinks(username: string, venueIds: number[]): Promise<VenueDrinkRow[]>;
   /** Append API call observations to the shared log (see src/ratelimit.ts). Optional for non-file backends. */
   recordApiCalls?(rows: ApiCallObservation[]): Promise<void>;
   /** Logged API calls at or after `sinceMs` (epoch ms), oldest first. */
@@ -366,6 +379,24 @@ export interface WishlistRow {
   style: string | null;
   abv: number | null;
   added_at: string | null;
+}
+
+/** What a user drank on one visit to a venue (`venue_drinks`), from checkin/view. */
+export interface VenueDrinkRow {
+  venue_id: number;
+  checkin_id: number;
+  bid: number | null;
+  beer_name: string | null;
+  brewery_id: number | null;
+  brewery_name: string | null;
+  created_at: string | null;
+}
+
+/** A user_venues first/recent check-in whose drink is not cached yet. */
+export interface VenueDrinkCandidate {
+  venue_id: number;
+  checkin_id: number;
+  kind: 'first' | 'recent';
 }
 
 /** A short-TTL cached API response (`response_cache`). */
@@ -1814,6 +1845,93 @@ export class CheckinStoreCore {
     };
   }
 
+  venueDrinkCandidates(
+    username: string,
+    opts: { venueIds?: number[]; which?: 'both' | 'first' | 'recent' } = {},
+  ): VenueDrinkCandidate[] {
+    const key = username.toLowerCase();
+    const which = opts.which ?? 'both';
+    const venueFilter = (ids: number[]) => (ids.length ? ` AND u.venue_id IN (${ids.map(() => '?').join(', ')})` : '');
+    const parts: Array<{ col: string; kind: 'first' | 'recent' }> = [];
+    if (which !== 'recent') parts.push({ col: 'first_checkin_id', kind: 'first' });
+    if (which !== 'first') parts.push({ col: 'recent_checkin_id', kind: 'recent' });
+    const idSets = opts.venueIds && opts.venueIds.length > 0 ? chunks([...new Set(opts.venueIds)]) : [[]];
+    const rows: Row[] = [];
+    for (const ids of idSets) {
+      for (const { col, kind } of parts) {
+        rows.push(
+          ...this.db
+            .all(
+              `SELECT u.venue_id AS venue_id, u.${col} AS checkin_id, u.total_count AS total_count, u.recent_visit AS recent_visit
+               FROM user_venues u
+               WHERE u.username = ? AND u.${col} IS NOT NULL${venueFilter(ids)}
+                 AND NOT EXISTS (SELECT 1 FROM venue_drinks d WHERE d.username = u.username AND d.checkin_id = u.${col})`,
+              [key, ...ids],
+            )
+            .map((r) => ({ ...r, kind })),
+        );
+      }
+    }
+    rows.sort(
+      (a, b) =>
+        Number(b.total_count ?? 0) - Number(a.total_count ?? 0) ||
+        String(b.recent_visit ?? '').localeCompare(String(a.recent_visit ?? '')) ||
+        Number(a.venue_id) - Number(b.venue_id) ||
+        (a.kind === b.kind ? 0 : a.kind === 'first' ? -1 : 1),
+    );
+    const seen = new Set<number>();
+    const out: VenueDrinkCandidate[] = [];
+    for (const r of rows) {
+      const id = Number(r.checkin_id);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push({ venue_id: Number(r.venue_id), checkin_id: id, kind: r.kind as 'first' | 'recent' });
+    }
+    return out;
+  }
+
+  upsertVenueDrinks(username: string, rows: VenueDrinkRow[], fetchedAt: string): void {
+    if (rows.length === 0) return;
+    const key = username.toLowerCase();
+    const sql = `
+      INSERT INTO venue_drinks (username, venue_id, checkin_id, bid, beer_name, brewery_id, brewery_name, created_at, fetched_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(username, checkin_id) DO UPDATE SET
+        venue_id=excluded.venue_id, bid=excluded.bid, beer_name=excluded.beer_name, brewery_id=excluded.brewery_id,
+        brewery_name=excluded.brewery_name, created_at=excluded.created_at, fetched_at=excluded.fetched_at`;
+    this.db.transaction(() => {
+      for (const r of rows) {
+        this.db.run(sql, [key, r.venue_id, r.checkin_id, r.bid, r.beer_name, r.brewery_id, r.brewery_name, r.created_at, fetchedAt]);
+      }
+    });
+  }
+
+  getVenueDrinks(username: string, venueIds: number[]): VenueDrinkRow[] {
+    const key = username.toLowerCase();
+    const out: VenueDrinkRow[] = [];
+    for (const ids of chunks([...new Set(venueIds)])) {
+      if (ids.length === 0) continue;
+      const rows = this.db.all(
+        `SELECT venue_id, checkin_id, bid, beer_name, brewery_id, brewery_name, created_at FROM venue_drinks
+         WHERE username = ? AND venue_id IN (${ids.map(() => '?').join(', ')})
+           AND NOT (bid IS NULL AND beer_name IS NULL)`,
+        [key, ...ids],
+      );
+      for (const r of rows) {
+        out.push({
+          venue_id: Number(r.venue_id),
+          checkin_id: Number(r.checkin_id),
+          bid: num(r.bid),
+          beer_name: str(r.beer_name),
+          brewery_id: num(r.brewery_id),
+          brewery_name: str(r.brewery_name),
+          created_at: str(r.created_at),
+        });
+      }
+    }
+    return out.sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')) || b.checkin_id - a.checkin_id);
+  }
+
   getBeerMeta(bids: number[]): BeerMeta[] {
     if (bids.length === 0) return [];
     const placeholders = bids.map(() => '?').join(', ');
@@ -1947,6 +2065,18 @@ export class LocalCacheStore implements CacheStore {
   }
   async getWishlist(username: string, bids?: number[]): Promise<WishlistRow[]> {
     return this.core.getWishlist(username, bids);
+  }
+  async venueDrinkCandidates(
+    username: string,
+    opts?: { venueIds?: number[]; which?: 'both' | 'first' | 'recent' },
+  ): Promise<VenueDrinkCandidate[]> {
+    return this.core.venueDrinkCandidates(username, opts);
+  }
+  async upsertVenueDrinks(username: string, rows: VenueDrinkRow[], fetchedAt: string): Promise<void> {
+    this.core.upsertVenueDrinks(username, rows, fetchedAt);
+  }
+  async getVenueDrinks(username: string, venueIds: number[]): Promise<VenueDrinkRow[]> {
+    return this.core.getVenueDrinks(username, venueIds);
   }
   async recordApiCalls(rows: ApiCallObservation[]): Promise<void> {
     this.core.recordApiCalls(rows);

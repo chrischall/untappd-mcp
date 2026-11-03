@@ -205,6 +205,14 @@ Query tools (has-had ones consult BOTH sources — a hit in either = had):
   capped at `api_budget` per run (partial/another_run_needed when exceeded).
 - `untappd_cache_query` — filter cached check-ins by brewery, style, `min_rating`,
   venue, and date range.
+- **Groups:** `untappd_cache_has_had_many` and `untappd_top_not_had` take
+  `usernames` (instead of `username`) plus `mode`: `none_had` (default — new to
+  everyone) or `any_not_had` (at least one of them still needs it). Each beer
+  lists `had_by` / `not_had_by`; freshness is reported per user.
+- `untappd_sync_venue_drinks` — opt-in, costs one call per check-in: fetches the
+  beer from each cached venue's first/recent visit (`checkin/view`), budgeted by
+  `max_calls`; `untappd_cache_has_visited` then shows them as `drinks`. Partial
+  by design (two check-ins per venue at most).
 
 **Retention.** The cache keeps what you sync until you remove it — including
 friends' dated check-ins, comments and venues. `untappd_cache_forget` (confirmation-gated)

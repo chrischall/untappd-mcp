@@ -93,6 +93,15 @@ Check-in cache: `untappd_sync_checkins`, `untappd_sync_user_beers`,
 `untappd_cache_query`, `untappd_top_not_had`, `untappd_cache_status`, `untappd_cache_forget`,
 `untappd_sync_wishlist` (mirrors a user's wishlist locally so picks can boost wishlisted beers).
 
+Group checks: `untappd_cache_has_had_many` and `untappd_top_not_had` accept `usernames` (up to 10)
+with `mode: "none_had"` (default — beers new to everyone) or `"any_not_had"` (beers at least one of
+them still needs); each beer says who has and hasn't had it.
+
+What they drank at a venue (opt-in, costs calls): `untappd_sync_venue_drinks` fetches the beer from
+each cached venue's first and most-recent visit check-in (`checkin/view`, budgeted by `max_calls`,
+stops before the rate limit). It's a partial picture — two check-ins per venue at most — shown in
+`untappd_cache_has_visited` as `drinks`.
+
 Cached reads (to stretch the ~100 calls/hour limit): `untappd_brewery_beers` keeps each brewery's
 list for 7 days, and `untappd_venue_menu` / `untappd_venue_activity` keep results for 6 hours; each
 reports where the answer came from and takes `refresh: true` to re-fetch. Untappd's `have_had` on a

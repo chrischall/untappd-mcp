@@ -300,12 +300,16 @@
       "description": "Has a user been to these places? Batch match by venue id, name + city/state, or lat/lng radius, from the cache (no API call)"
     },
     {
+      "name": "untappd_sync_venue_drinks",
+      "description": "Opt-in: fetch the beer from each cached venue's first/recent visit check-in (partial 'what did they drink there'; budgeted by max_calls)"
+    },
+    {
       "name": "untappd_cache_has_had",
       "description": "Check if a user has had a beer, from the cache — both sources (no API call)"
     },
     {
       "name": "untappd_cache_has_had_many",
-      "description": "Batch had/not-had for many beer ids, from the cache (no API call)"
+      "description": "Batch had/not-had for many beer ids, for one user or a group (none_had / any_not_had), from the cache (no API call)"
     },
     {
       "name": "untappd_cache_not_had",
@@ -317,7 +321,7 @@
     },
     {
       "name": "untappd_top_not_had",
-      "description": "From a list of beer ids, the top N a user has NOT had, ranked by rating, with a style filter"
+      "description": "From a list of beer ids, the top N a user (or a whole group) has NOT had, ranked by rating, with a style filter"
     },
     {
       "name": "untappd_menu_pick",
