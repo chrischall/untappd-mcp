@@ -263,6 +263,21 @@ export interface CacheStore {
   findVisitedVenues(username: string, q: VenueQuery): Promise<VisitedVenue[]>;
   /** Schema version, per-user coverage and table sizes. */
   stats(): Promise<CacheStats>;
+  /** A brewery's cached beer list, or undefined if none is cached. */
+  getBreweryBeerList(breweryId: number): Promise<BreweryBeerList | undefined>;
+  /** Store one fetched beer_list page (restart drops the old snapshot first). */
+  saveBreweryBeerPage(page: BreweryBeerPage): Promise<void>;
+  /** A cached response by key, or undefined. */
+  getCachedResponse(key: string): Promise<CachedResponse | undefined>;
+  /** Store a response (and prune entries older than the retention window). */
+  putCachedResponse(key: string, kind: string, data: unknown, fetchedAt: string): Promise<void>;
+  /** Upsert wishlist rows stamped with this sync pass; returns how many were NEW. */
+  upsertWishlist(username: string, rows: WishlistRow[], passStamp: string): Promise<number>;
+  /** Delete wishlist rows not seen in the pass stamped `passStamp`; returns how many. */
+  pruneWishlist(username: string, passStamp: string): Promise<number>;
+  wishlistCount(username: string): Promise<number>;
+  /** The user's cached wishlist; restricted to `bids` when given. */
+  getWishlist(username: string, bids?: number[]): Promise<WishlistRow[]>;
   /** Append API call observations to the shared log (see src/ratelimit.ts). Optional for non-file backends. */
   recordApiCalls?(rows: ApiCallObservation[]): Promise<void>;
   /** Logged API calls at or after `sinceMs` (epoch ms), oldest first. */
@@ -295,6 +310,81 @@ export interface ItemResolution {
   resolved_at: string;
 }
 
+/**
+ * One beer of a brewery's cached beer list (`brewery_beers`): GLOBAL facts only.
+ * brewery/beer_list's `has_had` / `total_user_count` describe the AUTHENTICATED
+ * account, not whoever a tool is asked about, so they are never stored.
+ */
+export interface BreweryBeerRow {
+  brewery_id: number;
+  bid: number;
+  beer_name: string | null;
+  style: string | null;
+  abv: number | null;
+  rating_score: number | null;
+  rating_count: number | null;
+  checkin_count: number | null;
+  in_production: boolean | null;
+  /** 0-based position in Untappd's default (popularity) order, when fetched in it. */
+  popularity_rank: number | null;
+  fetched_at: string;
+}
+
+/** A brewery's cached beer list: header + rows (popularity order, unranked rows last). */
+export interface BreweryBeerList {
+  brewery_id: number;
+  brewery_name: string | null;
+  total_count: number | null;
+  /** How many beers from the top of the popularity order are cached contiguously. */
+  ranked_count: number;
+  /** When the current snapshot was started — the TTL clock. */
+  fetched_at: string;
+  beers: BreweryBeerRow[];
+}
+
+/** One fetched brewery/beer_list page to store (see {@link CacheStore.saveBreweryBeerPage}). */
+export interface BreweryBeerPage {
+  brewery_id: number;
+  brewery_name: string | null;
+  total_count: number | null;
+  rows: BreweryBeerRow[];
+  /** The page's offset when fetched in the default (popularity) order; null for any other sort. */
+  ranked_offset: number | null;
+  /** Items the page held (mapped or not) — advances the ranked prefix. */
+  item_count: number;
+  /** Drop the brewery's old rows and restart the TTL clock (stale or refresh). */
+  restart: boolean;
+  fetched_at: string;
+}
+
+/** One beer on a user's wishlist (`wishlist`). */
+export interface WishlistRow {
+  bid: number;
+  beer_name: string | null;
+  brewery_id: number | null;
+  brewery_name: string | null;
+  style: string | null;
+  abv: number | null;
+  added_at: string | null;
+}
+
+/** A short-TTL cached API response (`response_cache`). */
+export interface CachedResponse {
+  key: string;
+  kind: string;
+  data: unknown;
+  fetched_at: string;
+}
+
+/** Per-user wishlist mirror coverage (cache_status). */
+export interface WishlistCoverage {
+  cached: number;
+  total: number | null;
+  complete: boolean;
+  next_offset: number | null;
+  last_synced_at: string | null;
+}
+
 /** Per-user row of {@link CacheStats}. */
 export interface CacheUserStats {
   username: string;
@@ -306,6 +396,8 @@ export interface CacheUserStats {
   last_synced_at: string | null;
   /** user/venues coverage; null when the user's venue history was never synced. */
   venues: VenueCoverage | null;
+  /** Wishlist mirror coverage; null when the user's wishlist was never synced. */
+  wishlist: WishlistCoverage | null;
 }
 
 /** user/venues coverage for one user (cache_status, has_visited freshness). */
@@ -329,6 +421,10 @@ export interface CacheStats {
   beer_meta_entries: number;
   /** Rows in the shared `venues` table. */
   venue_entries: number;
+  /** Breweries with a cached beer list. */
+  brewery_lists: number;
+  /** Short-TTL cached responses (venue menus / activity). */
+  response_cache_entries: number;
 }
 
 /** Rows removed by {@link CacheStore.forgetUser}, per table. */
@@ -451,6 +547,55 @@ export function mapUserVenueItem(_username: string, item: unknown): UserVenueIte
       recent_checkin_id: num(c.recent_checkin_id),
       total_count: num(c.total_count),
     },
+  };
+}
+
+/**
+ * Map one brewery/beer_list item to a {@link BreweryBeerRow}. Takes only the
+ * global facts: the item's `has_had` / `total_user_count` are the AUTHENTICATED
+ * account's and are deliberately dropped. Returns null without a bid.
+ */
+export function mapBreweryBeerItem(
+  breweryId: number,
+  item: unknown,
+  fetchedAt: string,
+  popularityRank: number | null,
+): BreweryBeerRow | null {
+  const i = asDict(item);
+  const b = asDict(i.beer);
+  const bid = num(b.bid);
+  if (bid === null) return null;
+  const inProd = num(b.is_in_production);
+  return {
+    brewery_id: breweryId,
+    bid,
+    beer_name: str(b.beer_name),
+    style: str(b.beer_style),
+    abv: num(b.beer_abv),
+    rating_score: num(b.rating_score),
+    rating_count: num(b.rating_count),
+    checkin_count: num(i.total_count),
+    in_production: inProd === null ? null : inProd !== 0,
+    popularity_rank: popularityRank,
+    fetched_at: fetchedAt,
+  };
+}
+
+/** Map one user/wishlist item; null without a bid. */
+export function mapWishlistItem(item: unknown): WishlistRow | null {
+  const i = asDict(item);
+  const b = asDict(i.beer);
+  const bid = num(b.bid);
+  if (bid === null) return null;
+  const brw = asDict(i.brewery);
+  return {
+    bid,
+    beer_name: str(b.beer_name),
+    brewery_id: num(brw.brewery_id),
+    brewery_name: str(brw.brewery_name),
+    style: str(b.beer_style),
+    abv: num(b.beer_abv),
+    added_at: normaliseDate(i.created_at),
   };
 }
 
@@ -643,10 +788,14 @@ export const VERSIONED_MIGRATIONS: ReadonlyArray<{ version: number; statements: 
        )`,
       // brewery/beer_list results, per brewery, with a TTL on the list as a whole.
       // The response's have_had reflects the AUTHENTICATED account, so it is not stored.
+      // fetched_at is when the current snapshot STARTED (its TTL clock);
+      // ranked_count is how many beers from the top of Untappd's default
+      // (popularity) order are cached contiguously.
       `CREATE TABLE IF NOT EXISTS brewery_beer_lists (
          brewery_id   INTEGER PRIMARY KEY,
          brewery_name TEXT,
          total_count  INTEGER,
+         ranked_count INTEGER NOT NULL DEFAULT 0,
          fetched_at   TEXT NOT NULL
        )`,
       `CREATE TABLE IF NOT EXISTS brewery_beers (
@@ -659,6 +808,7 @@ export const VERSIONED_MIGRATIONS: ReadonlyArray<{ version: number; statements: 
          rating_count  INTEGER,
          checkin_count INTEGER,
          in_production INTEGER,
+         popularity_rank INTEGER,
          fetched_at    TEXT NOT NULL,
          PRIMARY KEY (brewery_id, bid)
        )`,
@@ -730,6 +880,9 @@ export const PER_USER_TABLES = [
   'favorites',
   'venue_drinks',
 ] as const;
+
+/** How long short-TTL cached responses are kept at all (longer than any TTL that can serve them). */
+export const RESPONSE_CACHE_RETENTION_MS = 48 * 60 * 60 * 1000;
 
 /** How long the persisted API call log is kept (it only needs the rolling hour). */
 const API_CALL_LOG_RETENTION_MS = 2 * 60 * 60 * 1000;
@@ -1401,7 +1554,8 @@ export class CheckinStoreCore {
          UNION SELECT DISTINCT username FROM distinct_beers
          UNION SELECT DISTINCT username FROM checkins
          UNION SELECT DISTINCT username FROM user_venues
-         UNION SELECT username FROM list_sync_state WHERE list = 'venues'
+         UNION SELECT username FROM list_sync_state WHERE list IN ('venues', 'wishlist')
+         UNION SELECT DISTINCT username FROM wishlist
          ORDER BY username`,
         [],
       )
@@ -1417,6 +1571,7 @@ export class CheckinStoreCore {
         beers_offset: st?.beers_offset ?? null,
         last_synced_at: st?.last_synced_at ?? null,
         venues: this.venueCoverage(username),
+        wishlist: this.wishlistCoverage(username),
       };
     });
     return {
@@ -1425,6 +1580,8 @@ export class CheckinStoreCore {
       resolution_cache_entries: n('SELECT COUNT(*) AS n FROM item_resolutions'),
       beer_meta_entries: n('SELECT COUNT(*) AS n FROM beer_meta'),
       venue_entries: n('SELECT COUNT(*) AS n FROM venues'),
+      brewery_lists: n('SELECT COUNT(*) AS n FROM brewery_beer_lists'),
+      response_cache_entries: n('SELECT COUNT(*) AS n FROM response_cache'),
     };
   }
 
@@ -1445,6 +1602,214 @@ export class CheckinStoreCore {
       refresh_in_progress: refreshing,
       percent: total && total > 0 ? Math.min(100, Math.round((cached / total) * 100)) : complete ? 100 : null,
       next_offset: refreshing ? refresh!.next_offset : (st?.next_offset ?? null),
+      last_synced_at: st?.last_synced_at ?? null,
+    };
+  }
+
+  getBreweryBeerList(breweryId: number): BreweryBeerList | undefined {
+    const h = this.db.get('SELECT * FROM brewery_beer_lists WHERE brewery_id = ?', [breweryId]);
+    if (!h) return undefined;
+    const beers = this.db
+      .all(
+        `SELECT * FROM brewery_beers WHERE brewery_id = ?
+         ORDER BY popularity_rank IS NULL, popularity_rank, checkin_count IS NULL, checkin_count DESC, bid`,
+        [breweryId],
+      )
+      .map((r): BreweryBeerRow => ({
+        brewery_id: Number(r.brewery_id),
+        bid: Number(r.bid),
+        beer_name: str(r.beer_name),
+        style: str(r.style),
+        abv: num(r.abv),
+        rating_score: num(r.rating_score),
+        rating_count: num(r.rating_count),
+        checkin_count: num(r.checkin_count),
+        in_production: r.in_production === null || r.in_production === undefined ? null : Number(r.in_production) !== 0,
+        popularity_rank: num(r.popularity_rank),
+        fetched_at: String(r.fetched_at),
+      }));
+    return {
+      brewery_id: breweryId,
+      brewery_name: str(h.brewery_name),
+      total_count: num(h.total_count),
+      ranked_count: Number(h.ranked_count ?? 0),
+      fetched_at: String(h.fetched_at),
+      beers,
+    };
+  }
+
+  /**
+   * Store one brewery/beer_list page in one transaction. `restart` (a stale or
+   * refreshed list) drops the old rows and restarts the TTL clock; otherwise the
+   * page is merged into the current snapshot, which keeps its fetched_at. A page
+   * fetched in popularity order at an offset inside the ranked prefix extends it.
+   */
+  saveBreweryBeerPage(page: BreweryBeerPage): void {
+    this.db.transaction(() => {
+      const cur = this.db.get('SELECT * FROM brewery_beer_lists WHERE brewery_id = ?', [page.brewery_id]);
+      const fresh = page.restart || !cur;
+      if (page.restart) this.db.run('DELETE FROM brewery_beers WHERE brewery_id = ?', [page.brewery_id]);
+      let ranked = fresh ? 0 : Number(cur!.ranked_count ?? 0);
+      if (page.ranked_offset !== null && page.ranked_offset <= ranked) {
+        ranked = Math.max(ranked, page.ranked_offset + page.item_count);
+      }
+      this.db.run(
+        `INSERT INTO brewery_beer_lists (brewery_id, brewery_name, total_count, ranked_count, fetched_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(brewery_id) DO UPDATE SET
+           brewery_name = COALESCE(excluded.brewery_name, brewery_beer_lists.brewery_name),
+           total_count = COALESCE(excluded.total_count, brewery_beer_lists.total_count),
+           ranked_count = excluded.ranked_count,
+           fetched_at = excluded.fetched_at`,
+        [
+          page.brewery_id,
+          page.brewery_name,
+          page.total_count,
+          ranked,
+          fresh ? page.fetched_at : String(cur!.fetched_at),
+        ],
+      );
+      for (const r of page.rows) {
+        this.db.run(
+          `INSERT INTO brewery_beers (brewery_id, bid, beer_name, style, abv, rating_score, rating_count,
+             checkin_count, in_production, popularity_rank, fetched_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(brewery_id, bid) DO UPDATE SET
+             beer_name = excluded.beer_name, style = excluded.style, abv = excluded.abv,
+             rating_score = excluded.rating_score, rating_count = excluded.rating_count,
+             checkin_count = excluded.checkin_count, in_production = excluded.in_production,
+             popularity_rank = COALESCE(excluded.popularity_rank, brewery_beers.popularity_rank),
+             fetched_at = excluded.fetched_at`,
+          [
+            r.brewery_id,
+            r.bid,
+            r.beer_name,
+            r.style,
+            r.abv,
+            r.rating_score,
+            r.rating_count,
+            r.checkin_count,
+            r.in_production === null ? null : r.in_production ? 1 : 0,
+            r.popularity_rank,
+            r.fetched_at,
+          ],
+        );
+      }
+    });
+  }
+
+  getCachedResponse(key: string): CachedResponse | undefined {
+    const r = this.db.get('SELECT * FROM response_cache WHERE key = ?', [key]);
+    if (!r) return undefined;
+    let data: unknown;
+    try {
+      data = JSON.parse(String(r.data));
+    } catch {
+      return undefined;
+    }
+    return { key, kind: String(r.kind), data, fetched_at: String(r.fetched_at) };
+  }
+
+  putCachedResponse(key: string, kind: string, data: unknown, fetchedAt: string): void {
+    this.db.transaction(() => {
+      this.db.run(
+        `INSERT INTO response_cache (key, kind, data, fetched_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET kind = excluded.kind, data = excluded.data, fetched_at = excluded.fetched_at`,
+        [key, kind, JSON.stringify(data ?? null), fetchedAt],
+      );
+      // These responses hold other people's recent check-ins; keep them only
+      // as long as any TTL could still serve them.
+      const cutoff = new Date(Date.parse(fetchedAt) - RESPONSE_CACHE_RETENTION_MS).toISOString();
+      this.db.run('DELETE FROM response_cache WHERE fetched_at < ?', [cutoff]);
+    });
+  }
+
+  upsertWishlist(username: string, rows: WishlistRow[], passStamp: string): number {
+    if (rows.length === 0) return 0;
+    const key = username.toLowerCase();
+    let added = 0;
+    this.db.transaction(() => {
+      const bids = rows.map((r) => r.bid);
+      const known = new Set<number>();
+      for (const c of chunks(bids)) {
+        for (const r of this.db.all(
+          `SELECT bid FROM wishlist WHERE username = ? AND bid IN (${c.map(() => '?').join(', ')})`,
+          [key, ...c],
+        )) {
+          known.add(Number(r.bid));
+        }
+      }
+      for (const r of rows) {
+        if (!known.has(r.bid)) {
+          added++;
+          known.add(r.bid);
+        }
+        this.db.run(
+          `INSERT INTO wishlist (username, bid, beer_name, brewery_id, brewery_name, style, abv, added_at, synced_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(username, bid) DO UPDATE SET
+             beer_name = excluded.beer_name, brewery_id = excluded.brewery_id, brewery_name = excluded.brewery_name,
+             style = excluded.style, abv = excluded.abv, added_at = excluded.added_at, synced_at = excluded.synced_at`,
+          [key, r.bid, r.beer_name, r.brewery_id, r.brewery_name, r.style, r.abv, r.added_at, passStamp],
+        );
+      }
+    });
+    return added;
+  }
+
+  pruneWishlist(username: string, passStamp: string): number {
+    let removed = 0;
+    this.db.transaction(() => {
+      const key = username.toLowerCase();
+      removed = Number(
+        this.db.get('SELECT COUNT(*) AS n FROM wishlist WHERE username = ? AND synced_at <> ?', [key, passStamp])?.n ?? 0,
+      );
+      this.db.run('DELETE FROM wishlist WHERE username = ? AND synced_at <> ?', [key, passStamp]);
+    });
+    return removed;
+  }
+
+  wishlistCount(username: string): number {
+    return Number(this.db.get('SELECT COUNT(*) AS n FROM wishlist WHERE username = ?', [username.toLowerCase()])?.n ?? 0);
+  }
+
+  getWishlist(username: string, bids?: number[]): WishlistRow[] {
+    const key = username.toLowerCase();
+    const map = (r: Row): WishlistRow => ({
+      bid: Number(r.bid),
+      beer_name: str(r.beer_name),
+      brewery_id: num(r.brewery_id),
+      brewery_name: str(r.brewery_name),
+      style: str(r.style),
+      abv: num(r.abv),
+      added_at: str(r.added_at),
+    });
+    if (bids === undefined) {
+      return this.db.all('SELECT * FROM wishlist WHERE username = ? ORDER BY added_at DESC, bid', [key]).map(map);
+    }
+    const out: WishlistRow[] = [];
+    for (const c of chunks(bids)) {
+      if (c.length === 0) continue;
+      out.push(
+        ...this.db
+          .all(`SELECT * FROM wishlist WHERE username = ? AND bid IN (${c.map(() => '?').join(', ')})`, [key, ...c])
+          .map(map),
+      );
+    }
+    return out;
+  }
+
+  /** The user's wishlist mirror coverage, or null if it was never synced. */
+  wishlistCoverage(username: string): WishlistCoverage | null {
+    // Literal key: WISHLIST_LIST in sync-wishlist.ts.
+    const st = this.getListState(username, 'wishlist');
+    const cached = this.wishlistCount(username);
+    if (!st && cached === 0) return null;
+    return {
+      cached,
+      total: st?.total_count ?? null,
+      complete: st?.complete ?? false,
+      next_offset: st?.next_offset ?? null,
       last_synced_at: st?.last_synced_at ?? null,
     };
   }
@@ -1558,6 +1923,30 @@ export class LocalCacheStore implements CacheStore {
   }
   async findVisitedVenues(username: string, q: VenueQuery): Promise<VisitedVenue[]> {
     return this.core.findVisitedVenues(username, q);
+  }
+  async getBreweryBeerList(breweryId: number): Promise<BreweryBeerList | undefined> {
+    return this.core.getBreweryBeerList(breweryId);
+  }
+  async saveBreweryBeerPage(page: BreweryBeerPage): Promise<void> {
+    this.core.saveBreweryBeerPage(page);
+  }
+  async getCachedResponse(key: string): Promise<CachedResponse | undefined> {
+    return this.core.getCachedResponse(key);
+  }
+  async putCachedResponse(key: string, kind: string, data: unknown, fetchedAt: string): Promise<void> {
+    this.core.putCachedResponse(key, kind, data, fetchedAt);
+  }
+  async upsertWishlist(username: string, rows: WishlistRow[], passStamp: string): Promise<number> {
+    return this.core.upsertWishlist(username, rows, passStamp);
+  }
+  async pruneWishlist(username: string, passStamp: string): Promise<number> {
+    return this.core.pruneWishlist(username, passStamp);
+  }
+  async wishlistCount(username: string): Promise<number> {
+    return this.core.wishlistCount(username);
+  }
+  async getWishlist(username: string, bids?: number[]): Promise<WishlistRow[]> {
+    return this.core.getWishlist(username, bids);
   }
   async recordApiCalls(rows: ApiCallObservation[]): Promise<void> {
     this.core.recordApiCalls(rows);

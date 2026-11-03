@@ -141,7 +141,7 @@ Non-obvious behaviours that were each fixed the hard way:
   possible false negative. New cache read tools must include it.
 - Usernames are keyed **lowercased**; other stored fields keep their original casing.
 - The cache holds OTHER users' dated venue history: `CheckinCache.open()` creates the dir `0700` and the db `0600` before SQLite opens it (and tightens old loose files). Retention is user-driven — `untappd_cache_forget` (confirm-gated, local-only) is the delete path; there is no TTL.
-- **v4 tables** (added for venue history / favorites; most are filled by later features): `venues`
+- **v4 tables** (added for venue history / favorites): `venues`
   (global), `user_venues`, `list_sync_state` (per user+list offset cursor), `brewery_beer_lists` +
   `brewery_beers` (TTL'd; never store brewery/beer_list's `have_had`, which is the AUTHENTICATED
   account's), `response_cache` (short-TTL raw responses), `wishlist`, `favorites` (manual, local only),
@@ -172,6 +172,23 @@ Non-obvious behaviours that were each fixed the hard way:
   unchanged and stop above the remaining changes. Coverage reads as incomplete until it finishes.
   `findVisitedVenues` matches name loosely (literal substring OR every significant word whole) because
   a brewery_id is not its taproom's venue_id and Untappd keeps "… (duplicate of …)" venues.
+- **Brewery beer lists (`brewery-beers.ts`)** are a per-brewery snapshot with a 7-day TTL clock
+  (`brewery_beer_lists.fetched_at` = when the snapshot STARTED; appended pages don't reset it). A
+  stale list or `refresh: true` restarts it (old rows deleted, so retired beers don't linger).
+  `ranked_count` is the contiguous prefix of Untappd's default popularity order; the default sort is
+  served from that prefix, any other sort only once the WHOLE list is cached (sorting a top-50 subset
+  by name would be a different answer). beer_list's `has_had`/`total_user_count` are the
+  AUTHENTICATED account's — `mapBreweryBeerItem` drops them and the cached tool output never shows them.
+- **`response_cache`** (`response-cache.ts`, 6-hour TTL) serves `untappd_venue_menu` (keyed by venue +
+  every paging param) and `untappd_venue_activity` (the RAW response, keyed by venue + limit + max_id,
+  so either `view` is served from one entry). A thrown fetch is never cached; writes prune rows older
+  than `RESPONSE_CACHE_RETENTION_MS` (48 h) because activity holds other people's check-ins. The
+  brewery/venue tools take the cache as an OPTIONAL provider (`optionalCache`): if it can't open they
+  just call Untappd.
+- **Wishlist mirror (`sync-wishlist.ts`)**: every sync is a full pass from offset 0 (resumable, cursor
+  in list `wishlist`). Rows are stamped with the pass's stamp (list `wishlist_pass`.last_synced_at,
+  strictly later than the previous pass's), and only a FINISHED pass deletes rows with another stamp —
+  a partial pass never removes anything.
 - **Batch, don't loop.** Use `hasHadMany(username, bids)` (two grouped queries per 500-bid chunk)
   for any list; `hasHad` per bid costs ~4 queries each. `tests/cache-batch.test.ts` pins the two
   to identical verdicts — change both or neither. Upsert "net new" counts look up only the batch's

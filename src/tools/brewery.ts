@@ -3,8 +3,16 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import { minifiedResult, resolveView, toolAnnotations, viewParam, viewResult } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 import { UNTAPPD_VIEWS, compactBreweryBeers, upstreamCompact } from '../compact.js';
+import type { CacheStore } from '../cache/store.js';
+import { BREWERY_BEERS_TTL_MS, getBreweryBeers } from '../cache/brewery-beers.js';
+import { optionalCache } from './cache-optional.js';
 
-export function registerBreweryTools(server: McpServer, client: UntappdClient): void {
+export function registerBreweryTools(
+  server: McpServer,
+  client: UntappdClient,
+  cacheProvider?: () => CacheStore,
+): void {
+  const cacheOrNone = optionalCache(cacheProvider);
   server.registerTool(
     'untappd_search_brewery',
     {
@@ -50,8 +58,13 @@ export function registerBreweryTools(server: McpServer, client: UntappdClient): 
     {
       title: "Get a brewery's beer list",
       description:
-        'Get the beers a brewery makes, by brewery id, with per-beer rating and check-in counts. Supports sorting ' +
-        'and paging. Get an id from untappd_search_brewery. Read-only.',
+        'Get the beers a brewery makes, by brewery id, with per-beer global rating, check-in count, ABV, style and ' +
+        'in_production. Supports sorting and paging. Get an id from untappd_search_brewery. Lists are CACHED locally ' +
+        `for ${BREWERY_BEERS_TTL_MS / 86_400_000} days (source:"cache"|"api", fetched_at, expires_at): a fresh cached list answers ` +
+        'without an API call — the default popularity order from the cached top-of-list, other sorts once the whole ' +
+        'list is cached (sorted locally). refresh:true re-fetches. Untappd\'s per-beer have_had on this endpoint ' +
+        'describes the AUTHENTICATED account, never the user you are asking about, so it is not cached or returned — ' +
+        'use untappd_cache_has_had_many for any user. view:"full" always calls Untappd and returns its raw page. Read-only.',
       annotations: toolAnnotations({ title: "Get a brewery's beer list", readOnly: true, idempotent: true, openWorld: true }),
       inputSchema: z.object({
         brewery_id: z.number().int().positive().describe('Untappd brewery id'),
@@ -61,8 +74,9 @@ export function registerBreweryTools(server: McpServer, client: UntappdClient): 
           .enum(['name', 'style', 'abv', 'rating', 'count'])
           .optional()
           .describe('Sort order (default by popularity)'),
+        refresh: z.boolean().optional().describe('Re-fetch from Untappd even if a fresh cached list exists (default false)'),
         view: viewParam(UNTAPPD_VIEWS, {
-          note: 'compact keeps each beer\'s identity, rating and counts and drops the description, label URLs and the copy of this brewery repeated on every row; "full" returns Untappd\'s whole page.',
+          note: 'compact keeps each beer\'s identity, rating and counts and drops the description, label URLs and the copy of this brewery repeated on every row; "full" returns Untappd\'s whole page (always fetched live).',
         }),
       }),
     },
@@ -71,10 +85,37 @@ export function registerBreweryTools(server: McpServer, client: UntappdClient): 
     // honour an upstream `compact`, and sending an unverified parameter to see
     // what happens is not a rung. The projection is entirely ours and is
     // grounded on a live capture — see `compactBreweryBeer`.
-    async ({ brewery_id, limit, offset, sort, view }) => {
+    async ({ brewery_id, limit, offset, sort, refresh, view }) => {
       const v = resolveView(view, UNTAPPD_VIEWS);
-      const data = await client.get(`/brewery/beer_list/${brewery_id}`, { limit, offset, sort });
-      return viewResult(v, v === 'compact' ? compactBreweryBeers(data) : data);
+      const cache = cacheOrNone();
+      if (!cache) {
+        const data = await client.get(`/brewery/beer_list/${brewery_id}`, { limit, offset, sort });
+        return viewResult(v, v === 'compact' ? compactBreweryBeers(data) : data);
+      }
+      // view:"full" wants Untappd's raw page, so it always fetches (and seeds the cache).
+      const r = await getBreweryBeers(client, cache, brewery_id, { limit, offset, sort, refresh: refresh || v === 'full' });
+      if (v === 'full') return viewResult(v, r.raw);
+      return viewResult(v, {
+        brewery_id: r.brewery_id,
+        brewery_name: r.brewery_name,
+        total_count: r.total_count,
+        source: r.source,
+        fetched_at: r.fetched_at,
+        expires_at: r.expires_at,
+        beers: {
+          count: r.beers.length,
+          items: r.beers.map((b) => ({
+            bid: b.bid,
+            name: b.beer_name,
+            style: b.style,
+            abv: b.abv,
+            rating: b.rating_score,
+            rating_count: b.rating_count,
+            checkin_count: b.checkin_count,
+            in_production: b.in_production,
+          })),
+        },
+      });
     },
   );
 }

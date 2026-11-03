@@ -178,9 +178,9 @@ describe('cache schema migration', () => {
       expect(cols('list_sync_state')).toEqual(
         expect.arrayContaining(['username', 'list', 'next_offset', 'total_count', 'complete', 'last_synced_at']),
       );
-      expect(cols('brewery_beer_lists')).toEqual(expect.arrayContaining(['brewery_id', 'fetched_at']));
+      expect(cols('brewery_beer_lists')).toEqual(expect.arrayContaining(['brewery_id', 'ranked_count', 'fetched_at']));
       expect(cols('brewery_beers')).toEqual(
-        expect.arrayContaining(['brewery_id', 'bid', 'beer_name', 'style', 'abv', 'rating_score', 'checkin_count', 'in_production']),
+        expect.arrayContaining(['brewery_id', 'bid', 'beer_name', 'style', 'abv', 'rating_score', 'checkin_count', 'in_production', 'popularity_rank']),
       );
       expect(cols('response_cache')).toEqual(expect.arrayContaining(['key', 'kind', 'data', 'fetched_at']));
       expect(cols('wishlist')).toEqual(expect.arrayContaining(['username', 'bid', 'beer_name', 'brewery_id', 'added_at', 'synced_at']));

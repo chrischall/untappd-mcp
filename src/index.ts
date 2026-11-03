@@ -53,8 +53,8 @@ await runMcp({
     '[untappd-mcp] This project was developed and is maintained by AI (Claude Opus 4.8). Use at your own discretion.',
   tools: [
     (s) => registerBeerTools(s, client, nodeCacheProvider),
-    (s) => registerBreweryTools(s, client),
-    (s) => registerVenueTools(s, client),
+    (s) => registerBreweryTools(s, client, nodeCacheProvider),
+    (s) => registerVenueTools(s, client, nodeCacheProvider),
     (s) => registerUserTools(s, client),
     (s) => registerFeedTools(s, client),
     (s) => registerResolveTools(s, client),

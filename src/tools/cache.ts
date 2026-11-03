@@ -6,6 +6,7 @@ import { beerMetaFrom, DEFAULT_VISIT_RADIUS_M, type BeerMeta, type CacheStore, t
 import { syncCheckins } from '../cache/sync.js';
 import { syncUserBeers } from '../cache/sync-beers.js';
 import { syncUserVenues, VENUES_LIST, VENUES_MAX_PAGES_CAP, VENUES_REFRESH_LIST } from '../cache/sync-venues.js';
+import { syncWishlist, WISHLIST_MAX_PAGES_CAP } from '../cache/sync-wishlist.js';
 import { CONFIRM_FLOW, confirmWrite } from './confirm.js';
 import { clampToQuota } from '../quota.js';
 import { rateLimitStatus } from '../ratelimit.js';
@@ -285,6 +286,38 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
       const user = resolveUser(username, client.loginName);
       const quota = clampToQuota(client, max_pages ?? 10, 1);
       const summary = await syncUserVenues(client, cacheProvider(), user, quota.budget);
+      return minifiedResult({ ...summary, ...quotaFields(quota) });
+    },
+  );
+
+  server.registerTool(
+    'untappd_sync_wishlist',
+    {
+      title: "Sync a user's wishlist into the cache",
+      description:
+        "Mirror a user's Untappd wishlist (user/wishlist) into the local cache, so pick tools can boost wishlisted " +
+        'beers without an API call. Each sync is a full pass from the top (~25 beers per call; wishlists are small), ' +
+        'adding new beers and — once the pass finishes — dropping ones no longer wishlisted (a partial pass never ' +
+        'deletes). Resumable: saves progress every page; run again until another_run_needed is false. Stops BEFORE ' +
+        'the ~100 calls/hour rate limit (or cleanly on a 429) with stopped_for_rate_limit and rate_limit.resume_at. ' +
+        'Only reads Untappd — never changes the wishlist (that is untappd_wishlist_add / _remove). Omit username for ' +
+        'your own account; another user\'s wishlist needs a public account or friendship.',
+      annotations: toolAnnotations({ title: "Sync a user's wishlist into the cache", readOnly: false, idempotent: false, openWorld: true, destructive: false }),
+      inputSchema: z.object({
+        username: UsernameArg,
+        max_pages: z
+          .number()
+          .int()
+          .min(1)
+          .max(WISHLIST_MAX_PAGES_CAP)
+          .optional()
+          .describe(`Pages (~25 beers each) to fetch this run (default 10, max ${WISHLIST_MAX_PAGES_CAP}).`),
+      }),
+    },
+    async ({ username, max_pages }) => {
+      const user = resolveUser(username, client.loginName);
+      const quota = clampToQuota(client, max_pages ?? 10, 1);
+      const summary = await syncWishlist(client, cacheProvider(), user, quota.budget);
       return minifiedResult({ ...summary, ...quotaFields(quota) });
     },
   );

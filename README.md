@@ -90,7 +90,14 @@ Writes (each asks you to confirm first — see [Confirmations](#confirmations)):
 
 Check-in cache: `untappd_sync_checkins`, `untappd_sync_user_beers`,
 `untappd_cache_has_had`, `untappd_cache_has_had_many`, `untappd_cache_not_had`,
-`untappd_cache_query`, `untappd_top_not_had`, `untappd_cache_status`, `untappd_cache_forget`.
+`untappd_cache_query`, `untappd_top_not_had`, `untappd_cache_status`, `untappd_cache_forget`,
+`untappd_sync_wishlist` (mirrors a user's wishlist locally so picks can boost wishlisted beers).
+
+Cached reads (to stretch the ~100 calls/hour limit): `untappd_brewery_beers` keeps each brewery's
+list for 7 days, and `untappd_venue_menu` / `untappd_venue_activity` keep results for 6 hours; each
+reports where the answer came from and takes `refresh: true` to re-fetch. Untappd's `have_had` on a
+brewery's beer list describes the **signed-in** account, never the user you're asking about, so it
+isn't cached or returned — use `untappd_cache_has_had_many` for any user.
 
 Menu picks: `untappd_menu_pick` (tap-list lines in, ranked not-had beers out),
 `untappd_venue_pick` (same, from a venue's Untappd menu).
