@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.5.1](https://github.com/chrischall/untappd-mcp/compare/v2.5.0...v2.5.1) (2026-11-03)
+
+
+### Bug Fixes
+
+* stable untappd_brewery_beers shape with a username, and finish brewery-likes syncs without a total ([#254](https://github.com/chrischall/untappd-mcp/issues/254)) ([5ede705](https://github.com/chrischall/untappd-mcp/commit/5ede70523969a2d18b4b2bae4c3414fb7f0ce3e6))
+
 ## [2.5.0](https://github.com/chrischall/untappd-mcp/compare/v2.4.0...v2.5.0) (2026-11-03)
 
 
