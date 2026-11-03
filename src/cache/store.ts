@@ -280,6 +280,15 @@ export interface CacheStore {
   wishlistCount(username: string): Promise<number>;
   /** The user's cached wishlist; restricted to `bids` when given. */
   getWishlist(username: string, bids?: number[]): Promise<WishlistRow[]>;
+  /** Upsert liked-brewery rows stamped with this sync pass; returns how many were NEW. */
+  upsertBreweryLikes(username: string, rows: BreweryLikeRow[], passStamp: string): Promise<number>;
+  /** Delete liked-brewery rows not seen in the pass stamped `passStamp`; returns how many. */
+  pruneBreweryLikes(username: string, passStamp: string): Promise<number>;
+  breweryLikesCount(username: string): Promise<number>;
+  /** The user's cached Untappd brewery likes, newest like first; restricted to `breweryIds` when given. */
+  getBreweryLikes(username: string, breweryIds?: number[]): Promise<BreweryLikeRow[]>;
+  /** The user's brewery-likes mirror coverage; null if never synced. */
+  breweryLikesCoverage(username: string): Promise<BreweryLikesCoverage | null>;
   /**
    * The user's cached venues' first/recent check-ins with no `venue_drinks` row
    * yet (a 404 tombstone counts as a row), most-visited venues first, a check-in
@@ -405,6 +414,24 @@ export interface WishlistRow {
   added_at: string | null;
 }
 
+/**
+ * One brewery a user "likes" on Untappd (`brewery_likes`, from user/brewerylikes —
+ * the app's "following"). Unlike brewery/info's follow_status, this list is the
+ * NAMED user's, so it is safe to report for anyone.
+ */
+export interface BreweryLikeRow {
+  brewery_id: number;
+  brewery_name: string | null;
+  brewery_type: string | null;
+  country: string | null;
+  city: string | null;
+  state: string | null;
+  lat: number | null;
+  lng: number | null;
+  /** When the user liked it (the item's created_at). */
+  liked_at: string | null;
+}
+
 /** What a user drank on one visit to a venue (`venue_drinks`), from checkin/view. */
 export interface VenueDrinkRow {
   venue_id: number;
@@ -440,6 +467,17 @@ export interface WishlistCoverage {
   last_synced_at: string | null;
 }
 
+/** Per-user Untappd brewery-likes mirror coverage (cache_status). */
+export interface BreweryLikesCoverage {
+  cached: number;
+  total: number | null;
+  /** A full pass has finished: the cache mirrors the likes as of last_synced_at. */
+  complete: boolean;
+  percent: number | null;
+  next_offset: number | null;
+  last_synced_at: string | null;
+}
+
 /** Per-user row of {@link CacheStats}. */
 export interface CacheUserStats {
   username: string;
@@ -453,6 +491,8 @@ export interface CacheUserStats {
   venues: VenueCoverage | null;
   /** Wishlist mirror coverage; null when the user's wishlist was never synced. */
   wishlist: WishlistCoverage | null;
+  /** Untappd brewery-likes coverage; null when the user's likes were never synced. */
+  brewery_likes: BreweryLikesCoverage | null;
 }
 
 /** user/venues coverage for one user (cache_status, has_visited freshness). */
@@ -692,6 +732,26 @@ export function mapWishlistItem(item: unknown): WishlistRow | null {
     style: str(b.beer_style),
     abv: num(b.beer_abv),
     added_at: normaliseDate(i.created_at),
+  };
+}
+
+/** Map one user/brewerylikes item; null without a brewery_id. */
+export function mapBreweryLikeItem(item: unknown): BreweryLikeRow | null {
+  const i = asDict(item);
+  const b = asDict(i.brewery);
+  const id = num(b.brewery_id);
+  if (id === null) return null;
+  const loc = asDict(b.location);
+  return {
+    brewery_id: id,
+    brewery_name: str(b.brewery_name),
+    brewery_type: str(b.brewery_type),
+    country: str(b.country_name),
+    city: str(loc.brewery_city),
+    state: str(loc.brewery_state),
+    lat: num(loc.lat),
+    lng: num(loc.lng),
+    liked_at: normaliseDate(i.created_at),
   };
 }
 
@@ -963,6 +1023,27 @@ export const VERSIONED_MIGRATIONS: ReadonlyArray<{ version: number; statements: 
       `CREATE INDEX IF NOT EXISTS idx_api_calls_at ON api_calls(at)`,
     ],
   },
+  {
+    // Untappd brewery likes (user/brewerylikes, the app's "following") — the
+    // "untappd" favorite source. A new table only; nothing existing is altered.
+    version: 5,
+    statements: [
+      `CREATE TABLE IF NOT EXISTS brewery_likes (
+         username     TEXT NOT NULL,
+         brewery_id   INTEGER NOT NULL,
+         brewery_name TEXT,
+         brewery_type TEXT,
+         country      TEXT,
+         city         TEXT,
+         state        TEXT,
+         lat          REAL,
+         lng          REAL,
+         liked_at     TEXT,
+         synced_at    TEXT NOT NULL,
+         PRIMARY KEY (username, brewery_id)
+       )`,
+    ],
+  },
 ];
 
 /** Tables holding one user's data, cleared by {@link CheckinStoreCore.forgetUser}. */
@@ -975,6 +1056,7 @@ export const PER_USER_TABLES = [
   'wishlist',
   'favorites',
   'venue_drinks',
+  'brewery_likes',
 ] as const;
 
 /** How long short-TTL cached responses are kept at all (longer than any TTL that can serve them). */
@@ -1673,8 +1755,9 @@ export class CheckinStoreCore {
          UNION SELECT DISTINCT username FROM distinct_beers
          UNION SELECT DISTINCT username FROM checkins
          UNION SELECT DISTINCT username FROM user_venues
-         UNION SELECT username FROM list_sync_state WHERE list IN ('venues', 'wishlist')
+         UNION SELECT username FROM list_sync_state WHERE list IN ('venues', 'wishlist', 'brewery_likes')
          UNION SELECT DISTINCT username FROM wishlist
+         UNION SELECT DISTINCT username FROM brewery_likes
          ORDER BY username`,
         [],
       )
@@ -1691,6 +1774,7 @@ export class CheckinStoreCore {
         last_synced_at: st?.last_synced_at ?? null,
         venues: this.venueCoverage(username),
         wishlist: this.wishlistCoverage(username),
+        brewery_likes: this.breweryLikesCoverage(username),
       };
     });
     return {
@@ -1928,6 +2012,102 @@ export class CheckinStoreCore {
       cached,
       total: st?.total_count ?? null,
       complete: st?.complete ?? false,
+      next_offset: st?.next_offset ?? null,
+      last_synced_at: st?.last_synced_at ?? null,
+    };
+  }
+
+  upsertBreweryLikes(username: string, rows: BreweryLikeRow[], passStamp: string): number {
+    if (rows.length === 0) return 0;
+    const key = username.toLowerCase();
+    let added = 0;
+    this.db.transaction(() => {
+      const known = new Set<number>();
+      for (const c of chunks(rows.map((r) => r.brewery_id))) {
+        for (const r of this.db.all(
+          `SELECT brewery_id FROM brewery_likes WHERE username = ? AND brewery_id IN (${c.map(() => '?').join(', ')})`,
+          [key, ...c],
+        )) {
+          known.add(Number(r.brewery_id));
+        }
+      }
+      for (const r of rows) {
+        if (!known.has(r.brewery_id)) {
+          added++;
+          known.add(r.brewery_id);
+        }
+        this.db.run(
+          `INSERT INTO brewery_likes (username, brewery_id, brewery_name, brewery_type, country, city, state, lat, lng, liked_at, synced_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(username, brewery_id) DO UPDATE SET
+             brewery_name = excluded.brewery_name, brewery_type = excluded.brewery_type, country = excluded.country,
+             city = excluded.city, state = excluded.state, lat = excluded.lat, lng = excluded.lng,
+             liked_at = excluded.liked_at, synced_at = excluded.synced_at`,
+          [key, r.brewery_id, r.brewery_name, r.brewery_type, r.country, r.city, r.state, r.lat, r.lng, r.liked_at, passStamp],
+        );
+      }
+    });
+    return added;
+  }
+
+  pruneBreweryLikes(username: string, passStamp: string): number {
+    let removed = 0;
+    this.db.transaction(() => {
+      const key = username.toLowerCase();
+      removed = Number(
+        this.db.get('SELECT COUNT(*) AS n FROM brewery_likes WHERE username = ? AND synced_at <> ?', [key, passStamp])?.n ?? 0,
+      );
+      this.db.run('DELETE FROM brewery_likes WHERE username = ? AND synced_at <> ?', [key, passStamp]);
+    });
+    return removed;
+  }
+
+  breweryLikesCount(username: string): number {
+    return Number(this.db.get('SELECT COUNT(*) AS n FROM brewery_likes WHERE username = ?', [username.toLowerCase()])?.n ?? 0);
+  }
+
+  getBreweryLikes(username: string, breweryIds?: number[]): BreweryLikeRow[] {
+    const key = username.toLowerCase();
+    const map = (r: Row): BreweryLikeRow => ({
+      brewery_id: Number(r.brewery_id),
+      brewery_name: str(r.brewery_name),
+      brewery_type: str(r.brewery_type),
+      country: str(r.country),
+      city: str(r.city),
+      state: str(r.state),
+      lat: num(r.lat),
+      lng: num(r.lng),
+      liked_at: str(r.liked_at),
+    });
+    const order = 'ORDER BY liked_at IS NULL, liked_at DESC, brewery_id';
+    if (breweryIds === undefined) {
+      return this.db.all(`SELECT * FROM brewery_likes WHERE username = ? ${order}`, [key]).map(map);
+    }
+    const out: BreweryLikeRow[] = [];
+    for (const c of chunks(breweryIds)) {
+      if (c.length === 0) continue;
+      out.push(
+        ...this.db
+          .all(`SELECT * FROM brewery_likes WHERE username = ? AND brewery_id IN (${c.map(() => '?').join(', ')}) ${order}`, [key, ...c])
+          .map(map),
+      );
+    }
+    return out;
+  }
+
+  /** The user's Untappd brewery-likes coverage, or null if it was never synced. */
+  breweryLikesCoverage(username: string): BreweryLikesCoverage | null {
+    // Literal key: BREWERY_LIKES_LIST in sync-brewery-likes.ts.
+    const st = this.getListState(username, 'brewery_likes');
+    const cached = this.breweryLikesCount(username);
+    if (!st && cached === 0) return null;
+    const total = st?.total_count ?? null;
+    const complete = st?.complete ?? false;
+    return {
+      cached,
+      total,
+      complete,
+      percent: total && total > 0 ? Math.min(100, Math.round((cached / total) * 100)) : complete ? 100 : null,
       next_offset: st?.next_offset ?? null,
       last_synced_at: st?.last_synced_at ?? null,
     };
@@ -2320,6 +2500,21 @@ export class LocalCacheStore implements CacheStore {
   }
   async getWishlist(username: string, bids?: number[]): Promise<WishlistRow[]> {
     return this.core.getWishlist(username, bids);
+  }
+  async upsertBreweryLikes(username: string, rows: BreweryLikeRow[], passStamp: string): Promise<number> {
+    return this.core.upsertBreweryLikes(username, rows, passStamp);
+  }
+  async pruneBreweryLikes(username: string, passStamp: string): Promise<number> {
+    return this.core.pruneBreweryLikes(username, passStamp);
+  }
+  async breweryLikesCount(username: string): Promise<number> {
+    return this.core.breweryLikesCount(username);
+  }
+  async getBreweryLikes(username: string, breweryIds?: number[]): Promise<BreweryLikeRow[]> {
+    return this.core.getBreweryLikes(username, breweryIds);
+  }
+  async breweryLikesCoverage(username: string): Promise<BreweryLikesCoverage | null> {
+    return this.core.breweryLikesCoverage(username);
   }
   async venueDrinkCandidates(
     username: string,

@@ -7,6 +7,7 @@ import { syncCheckins } from '../cache/sync.js';
 import { syncUserBeers } from '../cache/sync-beers.js';
 import { syncUserVenues, VENUES_LIST, VENUES_MAX_PAGES_CAP, VENUES_REFRESH_LIST } from '../cache/sync-venues.js';
 import { syncWishlist, WISHLIST_MAX_PAGES_CAP } from '../cache/sync-wishlist.js';
+import { syncBreweryLikes, BREWERY_LIKES_MAX_PAGES_CAP } from '../cache/sync-brewery-likes.js';
 import { syncVenueDrinks, VENUE_DRINKS_DEFAULT_CALLS, VENUE_DRINKS_MAX_CALLS_CAP } from '../cache/venue-drinks.js';
 import {
   DEFAULT_MULTI_USER_MODE,
@@ -211,7 +212,9 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         'disk (db + WAL), journal mode, schema version, the number of cached menu-line resolutions and beer-metadata ' +
         'rows, cached venues, and for every cached user: cached vs total distinct beers, cached check-ins, ' +
         'coverage_complete, the resume offset of an unfinished user/beers backfill, last_synced_at, and venue-history ' +
-        'coverage (venues: cached vs total, complete, percent, next_offset; null if never synced). Also reports rate_limit: API calls ' +
+        'coverage (venues: cached vs total, complete, percent, next_offset; null if never synced), wishlist and ' +
+        'Untappd brewery-likes mirror coverage (wishlist / brewery_likes: cached vs total, complete; null if never ' +
+        'synced). Also reports rate_limit: API calls ' +
         'made in the last hour (this process plus any other sharing the cache file), the ~100/hour limit, the ' +
         'estimated calls left, the raw X-Ratelimit-* headers (the v4 API sends Remaining: 0 on every success, so it ' +
         'is ignored until it reports a live value) and any 429 wait. Use it to confirm the cache persisted across ' +
@@ -375,6 +378,47 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
       const user = resolveUser(username, client.loginName);
       const quota = clampToQuota(client, max_pages ?? 10, 1);
       const summary = await syncWishlist(client, cacheProvider(), user, quota.budget);
+      return minifiedResult({ ...summary, ...quotaFields(quota) });
+    },
+  );
+
+  server.registerTool(
+    'untappd_sync_brewery_likes',
+    {
+      title: "Sync a user's liked (followed) breweries into the cache",
+      description:
+        "Mirror the breweries a user \"likes\" on Untappd (user/brewerylikes — the app calls them \"followings\"; " +
+        "works for other users' public/friend accounts) into the local cache. Liked breweries then count as favorites " +
+        'with source "untappd" — in untappd_favorites_list, the `favorite` field on has_had / brewery_beers / ' +
+        'venue_menu / top_not_had / trip_check results, and the prefer_favorites boost. Each sync is a full pass from ' +
+        'the top (~50 breweries per call), adding new likes and — once the pass finishes — dropping unliked ones (a ' +
+        'partial pass never deletes). Resumable: saves progress every page; run again until another_run_needed is ' +
+        'false (reports cached/total and percent). Stops BEFORE the ~100 calls/hour rate limit (or cleanly on a 429) ' +
+        'with stopped_for_rate_limit and rate_limit.resume_at. Only reads Untappd. Untappd has NO followed/favorite ' +
+        'VENUE list, so venue favorites stay derived + manual. (brewery/info\'s follow_status is the signed-in ' +
+        "account's, never another user's — this list is the way to see theirs.) Omit username for your own account.",
+      annotations: toolAnnotations({
+        title: "Sync a user's liked (followed) breweries into the cache",
+        readOnly: false,
+        idempotent: false,
+        openWorld: true,
+        destructive: false,
+      }),
+      inputSchema: z.object({
+        username: UsernameArg,
+        max_pages: z
+          .number()
+          .int()
+          .min(1)
+          .max(BREWERY_LIKES_MAX_PAGES_CAP)
+          .optional()
+          .describe(`Pages (~50 breweries each) to fetch this run (default 10, max ${BREWERY_LIKES_MAX_PAGES_CAP}).`),
+      }),
+    },
+    async ({ username, max_pages }) => {
+      const user = resolveUser(username, client.loginName);
+      const quota = clampToQuota(client, max_pages ?? 10, 1);
+      const summary = await syncBreweryLikes(client, cacheProvider(), user, quota.budget);
       return minifiedResult({ ...summary, ...quotaFields(quota) });
     },
   );
@@ -726,7 +770,8 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         'for your own account. For a GROUP pass usernames: mode "none_had" (default) ranks only beers new to everyone, ' +
         '"any_not_had" ranks beers at least one of them still needs (each ranked beer lists not_had_by / had_by). ' +
         `prefer_favorites (default true) lifts wishlisted beers (+${WISHLIST_BOOST}) and beers from a favorite brewery ` +
-        `(+${FAVORITE_BREWERY_BOOST}) — derived or manual, any user's in a group; the wishlist needs untappd_sync_wishlist — ` +
+        `(+${FAVORITE_BREWERY_BOOST}) — liked on Untappd, derived or manual, any user's in a group; the wishlist needs ` +
+        'untappd_sync_wishlist and Untappd likes untappd_sync_brewery_likes — ' +
         'and says so per beer (score, boosted_by, wishlisted, brewery_favorite/favorite).',
       annotations: toolAnnotations({ title: 'Top-rated beers a user has NOT had, from a candidate list', readOnly: false, idempotent: false, openWorld: true, destructive: false }),
       inputSchema: z.object({

@@ -25,6 +25,7 @@ const CACHE_TOOLS = [
   'untappd_sync_user_beers',
   'untappd_sync_user_venues',
   'untappd_sync_wishlist',
+  'untappd_sync_brewery_likes',
   'untappd_sync_venue_drinks',
   'untappd_cache_has_visited',
   'untappd_cache_has_had',
@@ -74,10 +75,10 @@ describe('healthcheck build diagnostics', () => {
     expect(out.server_version).toBe(VERSION);
 
     const tools = out.tools as string[];
-    // The full toolset (incl. the 16 cache, favorites and trip tools) is registered — this is the
-    // 57-tool set the server must expose.
-    expect(tools.length).toBe(57);
-    expect(out.tool_count).toBe(57);
+    // The full toolset (incl. the 17 cache, favorites and trip tools) is registered — this is the
+    // 58-tool set the server must expose.
+    expect(tools.length).toBe(58);
+    expect(out.tool_count).toBe(58);
     for (const name of CACHE_TOOLS) expect(tools).toContain(name);
 
     // The hash is the FNV-1a of the sorted names — stable and self-consistent.

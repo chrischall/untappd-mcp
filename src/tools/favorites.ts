@@ -80,14 +80,16 @@ export function registerFavoriteTools(server: McpServer, client: UntappdClient, 
       description:
         "List a user's favorites from the cache only — NO API call. Each item appears ONCE with every source that " +
         'names it (sources: "derived" = qualifies from their cached history, "manual" = added with ' +
-        'untappd_favorite_add, "untappd" = reserved: Untappd has no followed-venue list, and syncing its brewery ' +
-        '"likes" is pending the owner\'s decision, so today every favorite comes from derived + manual) and a ' +
-        'reason ("12 check-ins since 2015", "avg 4.1 across 9 beers", "manual: <note>"). Derived rules, each ' +
+        'untappd_favorite_add, "untappd" = a brewery the user likes/follows on Untappd, mirrored by ' +
+        'untappd_sync_brewery_likes — breweries only: Untappd has no followed/favorite venue list) and a reason ' +
+        '("liked on Untappd (since 2021-03)", "12 check-ins since 2015", "avg 4.1 across 9 beers", "manual: <note>"). ' +
+        'Derived rules, each ' +
         `overridable via thresholds: venue = ≥${D.venue_min_checkins} check-ins OR visits spanning ≥${D.venue_min_months} distinct ` +
         `months (ranked by check-ins); brewery = ≥${D.brewery_min_beers} beers had AND avg rating ≥${D.brewery_min_avg_rating}, OR ` +
         `≥${D.brewery_min_beers_any_rating} beers (ranked by count blended with rating); beer = rated ≥${D.beer_min_rating} OR had ` +
         `≥${D.beer_min_times_had} times. Derived favorites are only as complete as the syncs behind them ` +
-        '(untappd_sync_user_venues, untappd_sync_user_beers). Filter by kind and source. Omit username for your own account.',
+        '(untappd_sync_user_venues, untappd_sync_user_beers); "untappd" ones as the last untappd_sync_brewery_likes ' +
+        '(freshness.brewery_likes). Filter by kind and source. Omit username for your own account.',
       annotations: toolAnnotations({ title: "List a user's favorite beers, breweries and venues", readOnly: true, idempotent: true, openWorld: false }),
       inputSchema: z.object({
         username: UsernameArg,
@@ -101,6 +103,7 @@ export function registerFavoriteTools(server: McpServer, client: UntappdClient, 
       const user = resolveUser(username, client.loginName);
       const cache = cacheProvider();
       const all = await listFavorites(cache, user, { kind, source, thresholds: thresholds as Partial<FavoriteThresholds> | undefined });
+      const likes = await cache.breweryLikesCoverage(user);
       const max = limit ?? 50;
       const counts: Record<string, number> = {};
       const favorites = all.filter((f) => {
@@ -115,8 +118,13 @@ export function registerFavoriteTools(server: McpServer, client: UntappdClient, 
         freshness: {
           beers: await freshness(cache, user),
           venues: await venueFreshness(cache, user),
-          ...(source === 'untappd' || source === undefined
-            ? { untappd_source: 'Untappd followed/liked lists are not synced, so no favorite carries the "untappd" source yet.' }
+          brewery_likes: likes,
+          ...((source === 'untappd' || source === undefined) && (kind === undefined || kind === 'brewery')
+            ? {
+                untappd_source: likes?.complete
+                  ? 'Untappd brewery likes are mirrored; "untappd" covers breweries only (Untappd has no favorite venue list).'
+                  : 'Untappd brewery likes are not (fully) synced — run untappd_sync_brewery_likes; until then "untappd" favorites may be missing.',
+              }
             : {}),
         },
       });

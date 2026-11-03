@@ -102,6 +102,19 @@ describe('untappd_trip_check', () => {
     expect(r.freshness.venues.coverage_complete).toBe(true);
   });
 
+  it('flags and boosts a brewery the user LIKED on Untappd (source "untappd"), even with no derived history', async () => {
+    const OTHER = 30;
+    await seedList([row(31, 4.0), row(32, 3.8)], new Date().toISOString(), OTHER, 'Liked Only Brewing');
+    await cache.upsertBreweryLikes(U, [
+      { brewery_id: OTHER, brewery_name: 'Liked Only Brewing', brewery_type: null, country: null, city: 'Tampa', state: 'FL', lat: null, lng: null, liked_at: '2022-05-06T00:00:00.000Z' },
+    ], '2026-11-03T00:00:00.000Z');
+    const r = await call({ username: U, places: [{ brewery_id: OTHER, name: 'Liked Only Brewing' }] });
+    expect(get).not.toHaveBeenCalled();
+    const p = r.places[0];
+    expect(p.brewery.favorite).toEqual({ is_favorite: true, sources: ['untappd'], reason: 'liked on Untappd (since 2022-05)' });
+    expect(p.top_not_had[0]).toMatchObject({ bid: 31, boosted_by: ['favorite_brewery'] });
+  });
+
   it('prefer_favorites:false ranks on global rating alone; style filters; top_n caps; out-of-production on request', async () => {
     const plain = await call({ username: U, places: [{ brewery_id: BREWERY }], prefer_favorites: false });
     expect(plain.places[0].top_not_had.map((b: any) => b.bid)).toEqual([6, 7, 9]);

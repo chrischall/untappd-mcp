@@ -145,7 +145,7 @@ Non-obvious behaviours that were each fixed the hard way:
   (global), `user_venues`, `list_sync_state` (per user+list offset cursor), `brewery_beer_lists` +
   `brewery_beers` (TTL'd; never store brewery/beer_list's `have_had`, which is the AUTHENTICATED
   account's), `response_cache` (short-TTL raw responses), `wishlist`, `favorites` (manual, local only),
-  `venue_drinks`, `api_calls`. Per-user tables are listed in `PER_USER_TABLES`, which drives
+  `venue_drinks`, `api_calls`; v5 adds `brewery_likes`. Per-user tables are listed in `PER_USER_TABLES`, which drives
   `forgetUser` — add any new per-user table there.
 - **Schema is versioned** (`PRAGMA user_version`, `SCHEMA_VERSION` in `store.ts`). A change goes in
   `VERSIONED_MIGRATIONS` with the next number and must be ADDITIVE: never drop/rewrite rows, since
@@ -203,7 +203,13 @@ Non-obvious behaviours that were each fixed the hard way:
   built by `favoriteLookup` — reuse it (trip_check too). Annotations are applied AFTER the response
   cache (venue_menu), never stored in it. The venue months rule only knows first/recent visit, so it
   also needs total_count ≥ the month threshold (2 visits can't cover 3 distinct months). The
-  `untappd` source is reserved: no follow/like sync exists (6a, report-first).
+  `untappd` source is the synced `brewery_likes` (breweries only — Untappd has no venue follow).
+- **Brewery likes (`sync-brewery-likes.ts`, schema v5 `brewery_likes`)**: `user/brewerylikes/{user}`
+  (the app's "followings"; works for non-self, total = user/info `stats.total_followings`). Honours
+  limit=50; advance by the returned `pagination.offset`, which is ABSENT on an empty list. Same
+  full-pass/stamp/prune-only-when-finished scheme as the wishlist (lists `brewery_likes` +
+  `brewery_likes_pass`). `brewery/info`'s `claimed_status.follow_status` is the AUTHENTICATED
+  account's — never report it for another user (same rule as beer_list's `have_had`).
 - **Trip check (`src/tools/trip.ts`)**: `untappd_trip_check` answers visits/has-had from the cache only;
   its ONLY API calls are `brewery/beer_list` (via `getBreweryBeers`, so they land in the 7-day list
   cache) for a missing/stale list, under `api_budget` + `checkRateBudget`. A brewery stop with no

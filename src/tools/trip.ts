@@ -84,7 +84,8 @@ export function registerTripTools(server: McpServer, client: UntappdClient, cach
         `${BREWERY_BEERS_TTL_MS / 86_400_000}-day TTL, at most api_budget (default ${TRIP_DEFAULT_API_BUDGET}; 0 = strictly cache-only, ` +
         'a stale list is then used and flagged) under the ~100 calls/hour guard — a missing list sets another_run_needed. ' +
         'Beer lists are global facts: Untappd\'s have_had on that endpoint is the AUTHENTICATED account\'s and is never ' +
-        'used. Favorites (derived from the cached history, or added with untappd_favorite_add) are flagged on matched ' +
+        'used. Favorites (breweries liked on Untappd via untappd_sync_brewery_likes, derived from the cached history, or ' +
+        'added with untappd_favorite_add) are flagged on matched ' +
         `venues, the brewery and beers; prefer_favorites (default true) lifts wishlisted beers (+${WISHLIST_BOOST}) and a ` +
         `favorite brewery's beers (+${FAVORITE_BREWERY_BOOST}); and a stop within near_favorite_radius_m (default ` +
         `${NEAR_FAVORITE_RADIUS_M} m) of a favorite venue gets near_favorites + a "Near a favorite" hint. For a GROUP pass ` +

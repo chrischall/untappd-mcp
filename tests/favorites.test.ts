@@ -278,3 +278,54 @@ describe('merged favorites (manual + derived)', () => {
     });
   });
 });
+
+describe('Untappd brewery likes as the "untappd" favorite source', () => {
+  let cache: CheckinCache;
+  const like = (id: number, name: string, likedAt: string | null = '2021-03-04T00:00:00.000Z') => ({
+    brewery_id: id, brewery_name: name, brewery_type: 'Micro Brewery', country: 'United States', city: 'Tampa', state: 'FL',
+    lat: 27.96, lng: -82.42, liked_at: likedAt,
+  });
+  beforeEach(async () => {
+    cache = CheckinCache.open(':memory:');
+    // Brewery 1: derived (5 beers, avg 4) AND liked AND manual. Brewery 2: liked only. Brewery 3: derived only.
+    await cache.upsertDistinctBeers(U, [...breweryBeers(1, 100, [4, 4, 4, 4, 4]), ...breweryBeers(3, 200, [4, 4, 4, 4, 4])]);
+    await cache.addFavorite(U, 'brewery', 1, 'home team', '2026-01-01T00:00:00.000Z');
+    await cache.upsertBreweryLikes(U, [like(1, 'Brewery 1'), like(2, 'Liked Only Co.', '2022-05-06T00:00:00.000Z')], '2026-11-03T00:00:00.000Z');
+  });
+
+  it('a liked brewery is a favorite with source "untappd", merged once with derived and manual (no duplicate sources)', async () => {
+    const r = await listFavorites(cache, U, { kind: 'brewery' });
+    expect(r.map((f) => f.id)).toEqual([1, 3, 2]);
+    expect(r[0]).toMatchObject({
+      id: 1,
+      sources: ['untappd', 'derived', 'manual'],
+      reason: 'liked on Untappd (since 2021-03); avg 4 across 5 beers; manual: home team',
+    });
+    expect(r[2]).toMatchObject({ id: 2, name: 'Liked Only Co.', sources: ['untappd'], reason: 'liked on Untappd (since 2022-05)', liked_at: '2022-05-06T00:00:00.000Z' });
+    // Re-syncing the same like twice never duplicates the source.
+    await cache.upsertBreweryLikes(U, [like(1, 'Brewery 1')], '2026-11-04T00:00:00.000Z');
+    expect((await listFavorites(cache, U, { kind: 'brewery' }))[0].sources).toEqual(['untappd', 'derived', 'manual']);
+  });
+
+  it('filters by source "untappd", and beers/venues never carry it', async () => {
+    expect((await listFavorites(cache, U, { source: 'untappd' })).map((f) => `${f.kind}:${f.id}`)).toEqual(['brewery:1', 'brewery:2']);
+    expect((await listFavorites(cache, U, { source: 'manual' })).map((f) => `${f.kind}:${f.id}`)).toEqual(['brewery:1']);
+    expect(await listFavorites(cache, U, { kind: 'venue', source: 'untappd' })).toEqual([]);
+  });
+
+  it('favoriteLookup carries the untappd source for liked breweries, alone or merged', async () => {
+    const idx = await favoriteLookup(cache, [U], { brewery: [1, 2, 3, 4] });
+    expect(idx.get('brewery', 1)).toEqual({
+      is_favorite: true,
+      sources: ['untappd', 'derived', 'manual'],
+      reason: 'liked on Untappd (since 2021-03); avg 4 across 5 beers; manual: home team',
+    });
+    expect(idx.get('brewery', 2)).toEqual({ is_favorite: true, sources: ['untappd'], reason: 'liked on Untappd (since 2022-05)' });
+    expect(idx.get('brewery', 3).sources).toEqual(['derived']);
+    expect(idx.get('brewery', 4).is_favorite).toBe(false);
+    // A group names who liked it; another user's like counts for the group.
+    await cache.upsertBreweryLikes('bob', [like(4, 'Bob Co.', null)], '2026-11-03T00:00:00.000Z');
+    const g = await favoriteLookup(cache, [U, 'bob'], { brewery: [4] });
+    expect(g.get('brewery', 4)).toEqual({ is_favorite: true, sources: ['untappd'], reason: 'bob: liked on Untappd' });
+  });
+});

@@ -60,7 +60,7 @@ function registeredAnnotations(): Record<string, Ann | undefined> {
 
 describe('tool annotations', () => {
   it('covers the full served surface (guards against a registrar being dropped here)', () => {
-    expect(Object.keys(registeredAnnotations())).toHaveLength(57);
+    expect(Object.keys(registeredAnnotations())).toHaveLength(58);
   });
 
   it('sets an explicit boolean readOnlyHint and openWorldHint on every tool', () => {

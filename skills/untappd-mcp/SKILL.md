@@ -221,9 +221,11 @@ Query tools (has-had ones consult BOTH sources — a hit in either = had):
   had ≥3 times. has_had / has_had_many / has_visited / brewery_beers / venue_menu /
   top_not_had results carry `favorite` {is_favorite, sources, reason};
   `untappd_top_not_had` boosts wishlisted (+0.5) and favorite-brewery (+0.25)
-  beers unless `prefer_favorites: false`. Favorites come from derived + manual
-  only: Untappd has no followed-venue list, and a brewery-likes sync is pending
-  the owner's decision (the `untappd` source is reserved).
+  beers unless `prefer_favorites: false`. `untappd_sync_brewery_likes` mirrors
+  the breweries a user likes/follows on Untappd (resumable, rate-guarded); they
+  carry the source `untappd` (merged with derived/manual) and count for the boost.
+  Untappd has no followed-venue list, so venue favorites are derived + manual.
+  `brewery_info`'s `follow_status` is the signed-in account's, never another user's.
 - `untappd_trip_check` — a whole trip in one call: per stop (`venue_id`, `name`
   + `city`/`state`, `lat`/`lng`, and/or `brewery_id`) → visited with dates,
   beers had from that brewery, and the top N (default 4) not-had beers by global
@@ -232,7 +234,7 @@ Query tools (has-had ones consult BOTH sources — a hit in either = had):
   venues/breweries, boosts wishlist/favorite-brewery beers (`prefer_favorites`),
   and hints when a favorite venue is within `near_favorite_radius_m` (2 km).
   Sync first: `untappd_sync_user_venues`, `untappd_sync_user_beers`,
-  `untappd_sync_wishlist`.
+  `untappd_sync_wishlist`, `untappd_sync_brewery_likes`.
 
 **Retention.** The cache keeps what you sync until you remove it — including
 friends' dated check-ins, comments and venues. `untappd_cache_forget` (confirmation-gated)

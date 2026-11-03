@@ -41,7 +41,7 @@ describe('forgetUser', () => {
     const removed = await cache.forgetUser('ALICE');
     expect(removed).toEqual({
       checkins: 3, distinct_beers: 3, sync_state: 1,
-      user_venues: 0, list_sync_state: 0, wishlist: 0, favorites: 0, venue_drinks: 0,
+      user_venues: 0, list_sync_state: 0, wishlist: 0, favorites: 0, venue_drinks: 0, brewery_likes: 0,
     });
     expect(await cache.cachedCount('alice')).toBe(0);
     expect(await cache.distinctBeersCount('alice')).toBe(0);

@@ -84,6 +84,22 @@ describe('favorite tools', () => {
     expect(write).not.toHaveBeenCalled();
   });
 
+  it('favorites_list includes Untappd-liked breweries (source "untappd") and reports brewery_likes freshness', async () => {
+    const before = parse(await harness.callTool('untappd_favorites_list', { username: U, kind: 'brewery' }));
+    expect(before.freshness.brewery_likes).toBeNull();
+    expect(before.freshness.untappd_source).toMatch(/untappd_sync_brewery_likes/);
+    await cache.upsertBreweryLikes(U, [
+      { brewery_id: 1, brewery_name: 'Brew One', brewery_type: null, country: null, city: null, state: null, lat: null, lng: null, liked_at: '2021-03-04T00:00:00.000Z' },
+    ], '2026-11-03T00:00:00.000Z');
+    await cache.setListState(U, 'brewery_likes', { complete: true, total_count: 1, next_offset: null, last_synced_at: '2026-11-03T00:00:00.000Z' });
+    const r = parse(await harness.callTool('untappd_favorites_list', { username: U, source: 'untappd' }));
+    expect(r.favorites).toEqual([
+      expect.objectContaining({ kind: 'brewery', id: 1, sources: ['untappd', 'derived'], reason: 'liked on Untappd (since 2021-03); avg 4 across 5 beers' }),
+    ]);
+    expect(r.freshness.brewery_likes).toMatchObject({ cached: 1, total: 1, complete: true });
+    expect(get).not.toHaveBeenCalled();
+  });
+
   it('cache_has_had carries a favorite field', async () => {
     const yes = parse(await harness.callTool('untappd_cache_has_had', { username: U, bid: 1 }));
     expect(yes.favorite).toEqual({ is_favorite: true, sources: ['derived'], reason: 'rated 4.5' });
@@ -183,6 +199,19 @@ describe('favorite tools', () => {
       expect(r.ranked.map((b: any) => b.bid)).toEqual([20, 21, 22]);
       expect(r.ranked[0].boosted_by).toBeUndefined();
       expect(r.summary.prefer_favorites).toBe(false);
+    });
+
+    it('a brewery LIKED on Untappd (synced brewery_likes) boosts its beers, with source "untappd"', async () => {
+      await cache.upsertBreweryLikes(U, [
+        { brewery_id: 99, brewery_name: 'Liked Co.', brewery_type: null, country: null, city: null, state: null, lat: null, lng: null, liked_at: '2021-03-04T00:00:00.000Z' },
+      ], '2026-11-03T00:00:00.000Z');
+      const r = parse(await harness.callTool('untappd_top_not_had', { username: U, bids: [20, 21], top_n: 2 }));
+      expect(r.ranked[0]).toMatchObject({
+        bid: 20,
+        boosted_by: ['favorite_brewery'],
+        brewery_favorite: { is_favorite: true, sources: ['untappd'], reason: 'liked on Untappd (since 2021-03)' },
+      });
+      expect(get).not.toHaveBeenCalled();
     });
 
     it('a boost never beats a much better beer', async () => {

@@ -8,10 +8,11 @@
 //    reason it qualified.
 //  - `manual`: the local `favorites` table (untappd_favorite_add / _remove).
 //    Never written to Untappd.
-//  - `untappd`: Untappd's own followed/liked lists. Reserved: no sync for them
-//    exists yet (see the 6a report — brewery likes need the owner's go-ahead,
-//    and venues have no such list), so nothing carries this source today.
-import type { CacheStore, FavoriteKind, VisitedVenue } from './store.js';
+//  - `untappd`: the breweries the user "likes" on Untappd (user/brewerylikes,
+//    mirrored by untappd_sync_brewery_likes into `brewery_likes`). Breweries
+//    only: Untappd has no followed/favorite venue (or beer) list. brewery/info's
+//    follow_status is the AUTHENTICATED account's and is never used here.
+import type { BreweryLikeRow, CacheStore, FavoriteKind, VisitedVenue } from './store.js';
 
 export type FavoriteSource = 'untappd' | 'derived' | 'manual';
 export const FAVORITE_SOURCES = ['untappd', 'derived', 'manual'] as const;
@@ -71,6 +72,8 @@ export interface FavoriteEntry extends FavoriteInfo {
   kind: FavoriteKind;
   id: number;
   name: string | null;
+  /** Untappd-liked breweries only: when the user liked it. */
+  liked_at?: string | null;
   /** Manual favorites only. */
   note?: string | null;
   created_at?: string;
@@ -186,6 +189,13 @@ export async function deriveFavorites(
 }
 
 const manualReason = (note: string | null) => (note ? `manual: ${note}` : 'added manually');
+const likedReason = (l: BreweryLikeRow) => (l.liked_at ? `liked on Untappd (since ${ym(l.liked_at)})` : 'liked on Untappd');
+
+/** The user's Untappd brewery likes (the only kind Untappd has a list for). */
+async function likesFor(cache: CacheStore, username: string, kind: FavoriteKind, ids?: number[]): Promise<BreweryLikeRow[]> {
+  if (kind !== 'brewery') return [];
+  return cache.getBreweryLikes(username, ids);
+}
 
 function orderSources(s: Iterable<FavoriteSource>): FavoriteSource[] {
   const set = new Set(s);
@@ -195,26 +205,35 @@ function orderSources(s: Iterable<FavoriteSource>): FavoriteSource[] {
 /**
  * Every favorite of one user (optionally one kind / one source), each listed
  * once with merged sources: derived ones in rank order, then manual-only ones
- * newest first.
+ * newest first, then Untappd-liked-only ones, most recently liked first.
  */
 export async function listFavorites(
   cache: CacheStore,
   username: string,
   opts: { kind?: FavoriteKind; source?: FavoriteSource; thresholds?: Partial<FavoriteThresholds> } = {},
 ): Promise<FavoriteEntry[]> {
-  if (opts.source === 'untappd') return []; // no Untappd follow/like sync exists yet
   const kinds: FavoriteKind[] = opts.kind ? [opts.kind] : ['venue', 'brewery', 'beer'];
   const out: FavoriteEntry[] = [];
   for (const kind of kinds) {
     const manual = await cache.getManualFavorites(username, { kind });
     const manualById = new Map(manual.map((m) => [m.id, m]));
-    const derived = opts.source === 'manual' && manual.length === 0 ? [] : await deriveFavorites(cache, username, kind, opts.thresholds);
+    const liked = await likesFor(cache, username, kind);
+    const likedById = new Map(liked.map((l) => [l.brewery_id, l]));
+    // Filtering to a source this kind has nothing in: no need to derive (it only adds merged sources).
+    const skipDerived = (opts.source === 'manual' && manual.length === 0) || (opts.source === 'untappd' && liked.length === 0);
+    const derived = skipDerived ? [] : await deriveFavorites(cache, username, kind, opts.thresholds);
     const derivedById = new Map(derived.map((d) => [d.id, d]));
     const entry = (id: number): FavoriteEntry => {
       const d = derivedById.get(id);
       const m = manualById.get(id);
+      const l = likedById.get(id);
       const sources: FavoriteSource[] = [];
       const reasons: string[] = [];
+      // Reasons follow FAVORITE_SOURCES order: untappd, derived, manual.
+      if (l) {
+        sources.push('untappd');
+        reasons.push(likedReason(l));
+      }
       if (d) {
         sources.push('derived');
         reasons.push(d.reason);
@@ -226,15 +245,21 @@ export async function listFavorites(
       return {
         kind,
         id,
-        name: d?.name ?? m?.name ?? null,
+        name: d?.name ?? m?.name ?? l?.brewery_name ?? null,
         is_favorite: true,
         sources: orderSources(sources),
         reason: reasons.join('; '),
+        ...(l ? { liked_at: l.liked_at } : {}),
         ...(m ? { note: m.note, created_at: m.created_at } : {}),
         ...(d ? { score: d.score, metrics: d.metrics } : {}),
       };
     };
-    const ids = [...derived.map((d) => d.id), ...manual.filter((m) => !derivedById.has(m.id)).map((m) => m.id)];
+    const seen = new Set<number>();
+    const ids = [...derived.map((d) => d.id), ...manual.map((m) => m.id), ...liked.map((l) => l.brewery_id)].filter((id) => {
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
     for (const id of ids) {
       const e = entry(id);
       if (opts.source && !e.sources.includes(opts.source)) continue;
@@ -277,8 +302,11 @@ export async function favoriteLookup(
       const derived = await deriveFavorites(cache, user, kind, t, list);
       const manual = await cache.getManualFavorites(user, { kind, ids: list });
       const manualIds = new Map(manual.map((m) => [m.id, m]));
-      // Per user: derived reason then manual reason, for each id.
+      const liked = new Map((await likesFor(cache, user, kind, list)).map((l) => [l.brewery_id, l]));
+      // Per user, for each id: untappd, derived, then manual reason.
       for (const id of list) {
+        const l = liked.get(id);
+        if (l) add(kind, id, 'untappd', likedReason(l), user);
         const d = derived.find((x) => x.id === id);
         if (d) add(kind, id, 'derived', d.reason, user);
         const m = manualIds.get(id);

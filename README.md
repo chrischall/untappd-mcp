@@ -92,6 +92,7 @@ Check-in cache: `untappd_sync_checkins`, `untappd_sync_user_beers`,
 `untappd_cache_has_had`, `untappd_cache_has_had_many`, `untappd_cache_not_had`,
 `untappd_cache_query`, `untappd_top_not_had`, `untappd_cache_status`, `untappd_cache_forget`,
 `untappd_sync_wishlist` (mirrors a user's wishlist locally so picks can boost wishlisted beers),
+`untappd_sync_brewery_likes` (mirrors the breweries a user likes/follows on Untappd, as "untappd" favorites),
 `untappd_sync_user_venues` + `untappd_cache_has_visited` (a user's full venue history — "has this person
 been here?" — which pages fully for any public/friend account, unlike their check-ins).
 
@@ -104,7 +105,8 @@ optional `style` filter (out-of-production beers skipped unless asked). Visits a
 from the cache only; the one API call it may make is `brewery/beer_list` for a brewery whose list isn't
 cached or is past its 7-day TTL — at most `api_budget` (default 5; `0` = strictly cache-only, using a
 stale list flagged `stale`), under the rate-limit guard. Favorite venues and breweries are flagged,
-`prefer_favorites` (default true) boosts wishlisted and favorite-brewery beers, and a stop within
+`prefer_favorites` (default true) boosts wishlisted and favorite-brewery beers (liked on Untappd, derived or
+manual), and a stop within
 `near_favorite_radius_m` (default 2 km) of a favorite venue gets `near_favorites` and a "Near a
 favorite: …" hint.
 
@@ -128,12 +130,19 @@ and `untappd_top_not_had` carry a `favorite` field `{is_favorite, sources, reaso
 `untappd_top_not_had` ranks wishlisted beers and beers from favorite breweries higher by default
 (`prefer_favorites: false` turns that off); `untappd_trip_check` carries the same flags and boost.
 
-Where favorites come from today: **derived + manual only**. Untappd has no followed or favorite
-*venue* list at all (no web or API route; `venue/info` has no per-user flag). For *breweries*,
-Untappd's "likes" (the app's "following") do have a route that works for other users, but syncing it
-is **pending the owner's decision** — so the `untappd` source is reserved and nothing carries it yet.
-`brewery/info`'s `follow_status` describes the signed-in account, like `have_had` below, so it is
-never used for anyone else.
+**Untappd** favorites (breweries only): `untappd_sync_brewery_likes` mirrors the breweries a user
+"likes" on Untappd (`user/brewerylikes` — the app calls them "followings"; works for another user's
+public/friend account, ~50 per call). Like the wishlist sync it's a full pass from the top, resumable
+(cursor saved every page, `another_run_needed`, `percent`), stops before the rate limit with
+`stopped_for_rate_limit` + resume info, and only drops unliked breweries once a pass finishes. Liked
+breweries then carry the source `untappd` everywhere favorites appear — merged with `derived` and
+`manual`, each source listed once — and count for the `prefer_favorites` boost and trip_check's flags.
+`untappd_cache_status` reports each user's `brewery_likes` coverage, and `untappd_cache_forget` removes them.
+
+Untappd has **no followed or favorite *venue* list** at all (no web or API route; `venue/info` has no
+per-user flag), so venue favorites are derived + manual only. `brewery/info`'s
+`claimed_status.follow_status` describes the **signed-in** account, like `have_had` below, so it is
+never used for anyone else — the synced likes list is how to see another user's.
 
 Cached reads (to stretch the ~100 calls/hour limit): `untappd_brewery_beers` keeps each brewery's
 list for 7 days, and `untappd_venue_menu` / `untappd_venue_activity` keep results for 6 hours; each
@@ -325,8 +334,8 @@ telling you to add them as a friend first.
 user's dated check-ins, comments and venues — stay until you remove them. The
 file is created owner-only (directory `0700`, database `0600`, and older
 installs are tightened on open). `untappd_cache_forget` deletes one user's
-cached check-ins, distinct-beers list, venue history, wishlist copy, local
-favorites, venue drinks and sync state after a confirmation
+cached check-ins, distinct-beers list, venue history, wishlist copy, liked
+breweries, local favorites, venue drinks and sync state after a confirmation
 (preview shows the username and row counts); it touches only the local cache,
 never Untappd, and a later sync can re-fetch. Deleting the file removes
 everything.

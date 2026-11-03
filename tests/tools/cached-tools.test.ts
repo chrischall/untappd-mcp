@@ -159,4 +159,24 @@ describe('cache-backed read tools (brewery_beers 7-day, venue_menu / venue_activ
     const u = st.users.find((x: { username: string }) => x.username === 'mer');
     expect(u.wishlist).toMatchObject({ cached: 1, total: 1, complete: true });
   });
+
+  it('untappd_sync_brewery_likes mirrors the liked breweries into the cache, and cache_status reports it', async () => {
+    get.mockImplementation((async (path: string, q: Record<string, unknown> = {}) => {
+      if (path === '/user/brewerylikes/mer') {
+        expect(q).toMatchObject({ limit: 50, offset: 0 });
+        return {
+          total_count: 1,
+          count: 1,
+          items: [{ created_at: 'Sat, 05 Jul 2025 18:23:11 +0000', brewery: { brewery_id: 5, brewery_name: 'B', location: { brewery_city: 'Tampa' } } }],
+          pagination: { offset: 1 },
+        };
+      }
+      return {};
+    }) as never);
+    const s = parse(await harness.callTool('untappd_sync_brewery_likes', { username: 'mer' }));
+    expect(s).toMatchObject({ username: 'mer', cached: 1, total: 1, complete: true, another_run_needed: false, percent: 100 });
+    const st = parse(await harness.callTool('untappd_cache_status', {}));
+    const u = st.users.find((x: { username: string }) => x.username === 'mer');
+    expect(u.brewery_likes).toMatchObject({ cached: 1, total: 1, complete: true });
+  });
 });

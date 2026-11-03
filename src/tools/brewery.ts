@@ -40,7 +40,9 @@ export function registerBreweryTools(
       title: 'Get Untappd brewery detail',
       description:
         'Get full detail for a brewery by its Untappd brewery id: description, location, type, rating, total ' +
-        'check-ins, and popular beers. Get an id from untappd_search_brewery. Read-only.',
+        'check-ins, and popular beers. Get an id from untappd_search_brewery. Read-only. Its ' +
+        'claimed_status.follow_status is whether the SIGNED-IN account follows/likes the brewery — never another ' +
+        "user's; for theirs, run untappd_sync_brewery_likes and read untappd_favorites_list (source \"untappd\").",
       annotations: toolAnnotations({ title: 'Get Untappd brewery detail', readOnly: true, idempotent: true, openWorld: true }),
       inputSchema: z.object({
         brewery_id: z.number().int().positive().describe('Untappd brewery id'),

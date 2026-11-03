@@ -296,6 +296,10 @@
       "description": "Mirror a user's wishlist into the cache so picks can boost wishlisted beers (resumable; read-only on Untappd)"
     },
     {
+      "name": "untappd_sync_brewery_likes",
+      "description": "Mirror the breweries a user likes/follows on Untappd into the cache, as \"untappd\" favorites (resumable; read-only on Untappd)"
+    },
+    {
       "name": "untappd_cache_has_visited",
       "description": "Has a user been to these places? Batch match by venue id, name + city/state, or lat/lng radius, from the cache (no API call)"
     },
