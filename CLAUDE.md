@@ -161,6 +161,14 @@ Non-obvious behaviours that were each fixed the hard way:
 - **Incremental `user/beers` refresh stops at the first cached beer whose `last_had` AND `had_count`
   are unchanged** — not merely "already cached": a re-had beer moves to the top, and a new beer can
   sit below it.
+- **Venue history (`sync-venues.ts`)**: `user/venues` pages a NON-self user's full history but serves
+  at most **25 per page even when asked for 50** — advance by the returned `pagination.offset` (else
+  offset + items), and never treat a 25-item page as the short final page (end = empty page, or offset
+  reaching `total_count`). Cursor/total live in `list_sync_state` (list `venues`), persisted every page;
+  a resumed backfill re-reads `VENUES_RESUME_OVERLAP`. Once complete, a re-run pages sort=date from 0 and
+  stops at the first page where EVERY venue's `recent_visit` and `total_count` are unchanged.
+  `findVisitedVenues` matches name loosely (literal substring OR every significant word whole) because
+  a brewery_id is not its taproom's venue_id and Untappd keeps "… (duplicate of …)" venues.
 - **Batch, don't loop.** Use `hasHadMany(username, bids)` (two grouped queries per 500-bid chunk)
   for any list; `hasHad` per bid costs ~4 queries each. `tests/cache-batch.test.ts` pins the two
   to identical verdicts — change both or neither. Upsert "net new" counts look up only the batch's

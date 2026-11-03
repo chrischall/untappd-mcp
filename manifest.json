@@ -288,6 +288,14 @@
       "description": "Sync a user's complete distinct-beers list into the cache (cheapest full has-had coverage; resumable)"
     },
     {
+      "name": "untappd_sync_user_venues",
+      "description": "Sync a user's complete venue history into the cache (first/recent visit, visit count; resumable, incremental refresh)"
+    },
+    {
+      "name": "untappd_cache_has_visited",
+      "description": "Has a user been to these places? Batch match by venue id, name + city/state, or lat/lng radius, from the cache (no API call)"
+    },
+    {
       "name": "untappd_cache_has_had",
       "description": "Check if a user has had a beer, from the cache — both sources (no API call)"
     },

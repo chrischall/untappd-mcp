@@ -2,9 +2,10 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { RateLimitError, confirmTokenParam, createHelpfulError, minifiedResult, toolAnnotations } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
-import { beerMetaFrom, type BeerMeta, type CacheStore, type SyncState } from '../cache/store.js';
+import { beerMetaFrom, DEFAULT_VISIT_RADIUS_M, type BeerMeta, type CacheStore, type SyncState, type VenueQuery } from '../cache/store.js';
 import { syncCheckins } from '../cache/sync.js';
 import { syncUserBeers } from '../cache/sync-beers.js';
+import { syncUserVenues, VENUES_LIST, VENUES_MAX_PAGES_CAP } from '../cache/sync-venues.js';
 import { CONFIRM_FLOW, confirmWrite } from './confirm.js';
 import { clampToQuota } from '../quota.js';
 import { rateLimitStatus } from '../ratelimit.js';
@@ -101,6 +102,34 @@ export async function freshness(cache: CacheStore, username: string): Promise<Re
 }
 
 /**
+ * Freshness block for venue-history reads (untappd_cache_has_visited): how much
+ * of the user's user/venues list is cached, so a "not visited" can be flagged
+ * as a possible false negative.
+ */
+export async function venueFreshness(cache: CacheStore, username: string): Promise<Record<string, unknown>> {
+  const state = await cache.getListState(username, VENUES_LIST);
+  const cached = await cache.userVenuesCount(username);
+  const complete = state?.complete ?? false;
+  const total = state?.total_count ?? null;
+  const percent = pct(cached, total, complete);
+  let caveat: string | undefined;
+  if (!state?.last_synced_at && cached === 0) {
+    caveat =
+      "This user's venue history has never been synced — the cache is EMPTY. Run untappd_sync_user_venues first; results here are not authoritative.";
+  } else if (!complete) {
+    caveat = `Venue history incomplete (${percent !== null ? `~${percent}%` : 'unknown'} cached). A "not visited" may be a false negative — run untappd_sync_user_venues until another_run_needed is false.`;
+  }
+  return {
+    last_synced_at: state?.last_synced_at ?? null,
+    coverage_complete: complete,
+    cached_venues: cached,
+    total_venues: total,
+    percent,
+    ...(caveat ? { caveat } : {}),
+  };
+}
+
+/**
  * Register the check-in cache tools. `cacheProvider` supplies the backing store
  * (a `node:sqlite` file here) and is required so this module imports no
  * platform-specific code.
@@ -113,8 +142,9 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
       description:
         'Diagnostics for the LOCAL check-in cache — NO API call. Returns the resolved cache file path, its size on ' +
         'disk (db + WAL), journal mode, schema version, the number of cached menu-line resolutions and beer-metadata ' +
-        'rows, and for every cached user: cached vs total distinct beers, cached check-ins, coverage_complete, the ' +
-        'resume offset of an unfinished user/beers backfill, and last_synced_at. Also reports rate_limit: API calls ' +
+        'rows, cached venues, and for every cached user: cached vs total distinct beers, cached check-ins, ' +
+        'coverage_complete, the resume offset of an unfinished user/beers backfill, last_synced_at, and venue-history ' +
+        'coverage (venues: cached vs total, complete, percent, next_offset; null if never synced). Also reports rate_limit: API calls ' +
         'made in the last hour (this process plus any other sharing the cache file), the ~100/hour limit, the ' +
         'estimated calls left, the raw X-Ratelimit-* headers (the v4 API sends Remaining: 0 on every success, so it ' +
         'is ignored until it reports a live value) and any 429 wait. Use it to confirm the cache persisted across ' +
@@ -133,6 +163,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         schema_version: stats.schema_version,
         resolution_cache_entries: stats.resolution_cache_entries,
         beer_meta_entries: stats.beer_meta_entries,
+        venue_entries: stats.venue_entries,
         users: stats.users,
         rate_limit: await rateLimitStatus(client, cache),
       });
@@ -212,6 +243,136 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
       const quota = clampToQuota(client, max_pages ?? 10, 1);
       const summary = await syncUserBeers(client, cacheProvider(), user, quota.budget);
       return minifiedResult({ ...summary, ...quotaFields(quota) });
+    },
+  );
+
+  server.registerTool(
+    'untappd_sync_user_venues',
+    {
+      title: "Sync a user's complete venue history into the cache",
+      description:
+        "Fetch a user's COMPLETE venue history (every venue they've checked in at, with first/most-recent visit dates " +
+        'and visit count) into the cache from user/venues. Unlike user/checkins — which only returns the ~50 most ' +
+        'recent check-ins for anyone but yourself — user/venues pages any public/friend account\'s whole history, so ' +
+        'this is how to answer "has this person been here?" (via untappd_cache_has_visited). Untappd serves 25 venues ' +
+        'per page, so a 2,700-venue history is ~110 calls: resumable — fetches max_pages per call, saves progress ' +
+        'after every page; run again until another_run_needed is false. Once complete, a re-run is a cheap refresh ' +
+        'from the top that stops at the first page with no changed visits. Stops BEFORE the ~100 calls/hour rate ' +
+        'limit (or cleanly on a 429) with stopped_for_rate_limit and rate_limit.resume_at. Omit username for your own account.',
+      annotations: toolAnnotations({ title: "Sync a user's complete venue history into the cache", readOnly: false, idempotent: false, openWorld: true, destructive: false }),
+      inputSchema: z.object({
+        username: UsernameArg,
+        max_pages: z
+          .number()
+          .int()
+          .min(1)
+          .max(VENUES_MAX_PAGES_CAP)
+          .optional()
+          .describe('Pages (25 venues each) to fetch this run (default 10, max 50). Keep modest to respect the ~100 calls/hour rate limit.'),
+      }),
+    },
+    async ({ username, max_pages }) => {
+      const user = resolveUser(username, client.loginName);
+      const quota = clampToQuota(client, max_pages ?? 10, 1);
+      const summary = await syncUserVenues(client, cacheProvider(), user, quota.budget);
+      return minifiedResult({ ...summary, ...quotaFields(quota) });
+    },
+  );
+
+  const VenueQueryArg = z.object({
+    label: z.string().max(200).optional().describe('Your own name for this query, echoed back (e.g. "Coppertail, Tampa")'),
+    venue_ids: z.array(z.number().int().positive()).max(100).optional().describe('Exact Untappd venue ids'),
+    name: z
+      .string()
+      .min(1)
+      .max(200)
+      .optional()
+      .describe(
+        'Venue name: matches a case-insensitive substring, or every significant word ("Green Bench Brewing" finds ' +
+          '"Green Bench Brewing Co." and its "(duplicate of …)" copies)',
+      ),
+    city: z.string().min(1).max(100).optional().describe('Narrow a name/geo match to venues whose city contains this'),
+    state: z.string().min(1).max(100).optional().describe('Narrow a name/geo match to venues whose state contains this (e.g. "FL")'),
+    lat: z.number().min(-90).max(90).optional().describe('Latitude of a point; needs lng'),
+    lng: z.number().min(-180).max(180).optional().describe('Longitude of a point; needs lat'),
+    radius_m: z
+      .number()
+      .positive()
+      .max(50_000)
+      .optional()
+      .describe(`Radius around lat/lng in metres (default ${DEFAULT_VISIT_RADIUS_M})`),
+  });
+
+  server.registerTool(
+    'untappd_cache_has_visited',
+    {
+      title: 'Check if a user has been to a venue (from the cache)',
+      description:
+        'Answer "has this user been here?" for one or many places in ONE call, from the cached venue history only — ' +
+        'NO API call. Each query matches by exact venue_ids, by name (case-insensitive substring or all significant ' +
+        'words, optionally narrowed by city/state), and/or by lat/lng within radius_m (default 150 m); venue_ids are ' +
+        'unioned with the name/geo match, and name + lat/lng together must both hold. Name/location matching matters ' +
+        'because a brewery_id is NOT its taproom\'s venue_id, a brewery can have several venues, and Untappd keeps ' +
+        '"… (duplicate of …)" venues — so expect, and check, several matches. Returns per query: visited, the matched ' +
+        'venues (first_visit, recent_visit, total_count, is_duplicate, distance_m), and total_visits; plus a freshness ' +
+        'block (last_synced_at, coverage_complete, caveat). Run untappd_sync_user_venues first.',
+      annotations: toolAnnotations({ title: 'Check if a user has been to a venue (from the cache)', readOnly: true, idempotent: true, openWorld: false }),
+      inputSchema: z.object({
+        username: UsernameArg,
+        queries: z.array(VenueQueryArg).min(1).max(50).describe('Places to check (1–50); each needs venue_ids, name, or lat+lng'),
+        max_matches: z.number().int().min(1).max(50).optional().describe('Most matched venues listed per query (default 10)'),
+      }),
+    },
+    async ({ username, queries, max_matches }) => {
+      queries.forEach((q, i) => {
+        const hasGeo = q.lat !== undefined || q.lng !== undefined;
+        if (hasGeo && (q.lat === undefined || q.lng === undefined)) {
+          throw createHelpfulError(`Query ${i + 1}: lat and lng must be given together.`, { hint: 'Pass both, or match by name / venue_ids instead.' });
+        }
+        if (!q.venue_ids?.length && q.name === undefined && !hasGeo) {
+          throw createHelpfulError(`Query ${i + 1} has nothing to match on.`, {
+            hint: 'Give venue_ids, a name (optionally with city/state), or lat + lng (optionally radius_m).',
+          });
+        }
+      });
+      const user = resolveUser(username, client.loginName);
+      const cache = cacheProvider();
+      const limit = max_matches ?? 10;
+      const results = [];
+      let visitedCount = 0;
+      for (const { label, ...q } of queries) {
+        const matches = await cache.findVisitedVenues(user, q as VenueQuery);
+        if (matches.length > 0) visitedCount++;
+        results.push({
+          ...(label !== undefined ? { label } : {}),
+          query: q,
+          visited: matches.length > 0,
+          match_count: matches.length,
+          total_visits: matches.reduce((n, m) => n + (m.total_count ?? 0), 0),
+          matches: matches.slice(0, limit).map((m) => ({
+            venue_id: m.venue_id,
+            name: m.name,
+            category: m.category,
+            city: m.city,
+            state: m.state,
+            country: m.country,
+            ...(m.is_duplicate ? { is_duplicate: true } : {}),
+            ...(m.distance_m !== undefined ? { distance_m: m.distance_m } : {}),
+            first_visit: m.first_visit,
+            recent_visit: m.recent_visit,
+            total_count: m.total_count,
+            first_checkin_id: m.first_checkin_id,
+            recent_checkin_id: m.recent_checkin_id,
+          })),
+        });
+      }
+      return minifiedResult({
+        username: user,
+        checked: queries.length,
+        visited_count: visitedCount,
+        results,
+        freshness: await venueFreshness(cache, user),
+      });
     },
   );
 

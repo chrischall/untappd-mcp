@@ -117,6 +117,73 @@ export interface SyncState {
   served_backfill_last: boolean;
 }
 
+/** Global venue facts (the `venues` table), from user/venues items. Shared across users. */
+export interface VenueRow {
+  venue_id: number;
+  name: string | null;
+  category: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  country: string | null;
+  lat: number | null;
+  lng: number | null;
+  /** 1/0, or null when Untappd didn't say. */
+  is_verified: number | null;
+}
+
+/** One user's visit summary at one venue (the `user_venues` table). */
+export interface UserVenueRow {
+  venue_id: number;
+  first_visit: string | null;
+  first_checkin_id: number | null;
+  recent_visit: string | null;
+  recent_checkin_id: number | null;
+  total_count: number | null;
+}
+
+/** A mapped user/venues item: the shared venue facts plus this user's visits there. */
+export interface UserVenueItem {
+  venue: VenueRow;
+  visit: UserVenueRow;
+}
+
+/** Per-user, per-list offset cursor (the `list_sync_state` table). */
+export interface ListSyncState {
+  username: string;
+  list: string;
+  next_offset: number | null;
+  total_count: number | null;
+  complete: boolean;
+  last_synced_at: string | null;
+}
+
+/**
+ * One has-visited lookup. `venue_ids` matches exactly and is UNIONED with the
+ * name/geo match; `name` (+ optional `city`/`state`) and `lat`/`lng`
+ * (+ `radius_m`, default 150) are ANDed when both are given.
+ */
+export interface VenueQuery {
+  venue_ids?: number[];
+  name?: string;
+  city?: string;
+  state?: string;
+  lat?: number;
+  lng?: number;
+  radius_m?: number;
+}
+
+/** A cached venue the user has visited, as {@link CacheStore.findVisitedVenues} returns it. */
+export interface VisitedVenue extends VenueRow, UserVenueRow {
+  /** True for Untappd's "… (duplicate of …)" venues. */
+  is_duplicate: boolean;
+  /** Metres from the query point, when the query had lat/lng. */
+  distance_m?: number;
+}
+
+/** Default radius for a lat/lng has-visited query. */
+export const DEFAULT_VISIT_RADIUS_M = 150;
+
 /** The per-bid verdict {@link CacheStore.hasHadMany} returns (no per-check-in matches). */
 export type HasHadVerdict = Omit<HasHadResult, 'matches'>;
 
@@ -179,6 +246,21 @@ export interface CacheStore {
   getResolutions(keys: string[]): Promise<ItemResolution[]>;
   /** Upsert menu-line resolutions (dedupe on key). */
   upsertResolutions(rows: ItemResolution[]): Promise<void>;
+  /**
+   * Upsert user/venues items: the shared `venues` facts and this user's
+   * `user_venues` rows, in one transaction. Returns how many visit rows were NEW
+   * and how many existing ones CHANGED (recent_visit or total_count).
+   */
+  upsertUserVenues(username: string, items: UserVenueItem[]): Promise<{ added: number; updated: number }>;
+  /** Cached visit rows for the given venue ids (only those present). */
+  getUserVenueVisits(username: string, venueIds: number[]): Promise<UserVenueRow[]>;
+  /** How many venues the user has in `user_venues`. */
+  userVenuesCount(username: string): Promise<number>;
+  getListState(username: string, list: string): Promise<ListSyncState | undefined>;
+  /** Insert-or-merge a list cursor; only keys present in `patch` are written. */
+  setListState(username: string, list: string, patch: Partial<Omit<ListSyncState, 'username' | 'list'>>): Promise<void>;
+  /** Cached venues the user has visited that match `q`, most-visited first. */
+  findVisitedVenues(username: string, q: VenueQuery): Promise<VisitedVenue[]>;
   /** Schema version, per-user coverage and table sizes. */
   stats(): Promise<CacheStats>;
   /** Append API call observations to the shared log (see src/ratelimit.ts). Optional for non-file backends. */
@@ -222,6 +304,18 @@ export interface CacheUserStats {
   coverage_complete: boolean;
   beers_offset: number | null;
   last_synced_at: string | null;
+  /** user/venues coverage; null when the user's venue history was never synced. */
+  venues: VenueCoverage | null;
+}
+
+/** user/venues coverage for one user (cache_status, has_visited freshness). */
+export interface VenueCoverage {
+  cached_venues: number;
+  total_venues: number | null;
+  complete: boolean;
+  percent: number | null;
+  next_offset: number | null;
+  last_synced_at: string | null;
 }
 
 /** Whole-cache diagnostics for untappd_cache_status. */
@@ -230,6 +324,8 @@ export interface CacheStats {
   users: CacheUserStats[];
   resolution_cache_entries: number;
   beer_meta_entries: number;
+  /** Rows in the shared `venues` table. */
+  venue_entries: number;
 }
 
 /** Rows removed by {@link CacheStore.forgetUser}, per table. */
@@ -253,6 +349,11 @@ function asDict(v: unknown): Dict {
 }
 function num(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+/** A number, or a numeric string (coordinates sometimes arrive as strings). */
+function numLoose(v: unknown): number | null {
+  if (typeof v === 'string' && v.trim() !== '') return num(Number(v));
+  return num(v);
 }
 function str(v: unknown): string | null {
   return typeof v === 'string' && v.length > 0 ? v : null;
@@ -311,6 +412,42 @@ export function mapBeerRow(username: string, item: unknown): DistinctBeerRow | n
     had_count: num(c.count),
     first_had: normaliseDate(c.first_created_at ?? c.first_had),
     last_had: normaliseDate(c.recent_created_at ?? c.first_created_at),
+  };
+}
+
+/**
+ * Normalise a raw `/user/venues` item to the shared venue facts plus the user's
+ * visit summary. Dates become ISO-8601 UTC (sortable, comparable across syncs).
+ * Returns null without a venue id (Untappd sends `venue: []` for none).
+ */
+export function mapUserVenueItem(_username: string, item: unknown): UserVenueItem | null {
+  const c = asDict(item);
+  const v = asDict(c.venue);
+  const venue_id = num(v.venue_id);
+  if (venue_id === null) return null;
+  const loc = asDict(v.location);
+  const verified = v.is_verified;
+  return {
+    venue: {
+      venue_id,
+      name: str(v.venue_name),
+      category: str(v.primary_category),
+      address: str(loc.venue_address),
+      city: str(loc.venue_city),
+      state: str(loc.venue_state),
+      country: str(loc.venue_country),
+      lat: numLoose(loc.lat),
+      lng: numLoose(loc.lng),
+      is_verified: typeof verified === 'boolean' || typeof verified === 'number' ? (verified ? 1 : 0) : null,
+    },
+    visit: {
+      venue_id,
+      first_visit: normaliseDate(c.first_visit),
+      first_checkin_id: num(c.first_checkin_id),
+      recent_visit: normaliseDate(c.recent_visit),
+      recent_checkin_id: num(c.recent_checkin_id),
+      total_count: num(c.total_count),
+    },
   };
 }
 
@@ -739,6 +876,180 @@ export class CheckinStoreCore {
     return Number(row?.n ?? 0);
   }
 
+  /**
+   * Upsert user/venues items in one transaction: the shared venue facts (the
+   * latest copy wins) and this user's visit rows. "added"/"updated" are taken
+   * against the rows already cached for just this batch's venue ids.
+   */
+  upsertUserVenues(username: string, items: UserVenueItem[], now = new Date().toISOString()): { added: number; updated: number } {
+    if (items.length === 0) return { added: 0, updated: 0 };
+    const key = username.toLowerCase();
+    const venueSql = `
+      INSERT INTO venues (venue_id, name, category, address, city, state, country, lat, lng, is_verified, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(venue_id) DO UPDATE SET
+        name=excluded.name, category=excluded.category, address=excluded.address, city=excluded.city,
+        state=excluded.state, country=excluded.country, lat=excluded.lat, lng=excluded.lng,
+        is_verified=excluded.is_verified, updated_at=excluded.updated_at`;
+    const visitSql = `
+      INSERT INTO user_venues
+        (username, venue_id, first_visit, first_checkin_id, recent_visit, recent_checkin_id, total_count, synced_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(username, venue_id) DO UPDATE SET
+        first_visit=excluded.first_visit, first_checkin_id=excluded.first_checkin_id,
+        recent_visit=excluded.recent_visit, recent_checkin_id=excluded.recent_checkin_id,
+        total_count=excluded.total_count, synced_at=excluded.synced_at`;
+    let added = 0;
+    let updated = 0;
+    this.db.transaction(() => {
+      const prior = new Map(this.getUserVenueVisits(key, items.map((i) => i.visit.venue_id)).map((r) => [r.venue_id, r]));
+      const seen = new Set<number>();
+      for (const { venue: v, visit: u } of items) {
+        this.db.run(venueSql, [v.venue_id, v.name, v.category, v.address, v.city, v.state, v.country, v.lat, v.lng, v.is_verified, now]);
+        this.db.run(visitSql, [key, u.venue_id, u.first_visit, u.first_checkin_id, u.recent_visit, u.recent_checkin_id, u.total_count, now]);
+        if (seen.has(u.venue_id)) continue;
+        seen.add(u.venue_id);
+        const p = prior.get(u.venue_id);
+        if (!p) added++;
+        else if (p.recent_visit !== u.recent_visit || p.total_count !== u.total_count) updated++;
+      }
+    });
+    return { added, updated };
+  }
+
+  getUserVenueVisits(username: string, venueIds: number[]): UserVenueRow[] {
+    const out: UserVenueRow[] = [];
+    for (const ids of chunks([...new Set(venueIds)])) {
+      if (ids.length === 0) continue;
+      const rows = this.db.all(
+        `SELECT venue_id, first_visit, first_checkin_id, recent_visit, recent_checkin_id, total_count
+         FROM user_venues WHERE username = ? AND venue_id IN (${ids.map(() => '?').join(', ')})`,
+        [username.toLowerCase(), ...ids],
+      );
+      for (const r of rows) out.push(visitFrom(r));
+    }
+    return out;
+  }
+
+  userVenuesCount(username: string): number {
+    return Number(this.db.get('SELECT COUNT(*) AS n FROM user_venues WHERE username = ?', [username.toLowerCase()])?.n ?? 0);
+  }
+
+  getListState(username: string, list: string): ListSyncState | undefined {
+    const r = this.db.get('SELECT * FROM list_sync_state WHERE username = ? AND list = ?', [username.toLowerCase(), list]);
+    if (!r) return undefined;
+    return {
+      username: String(r.username),
+      list: String(r.list),
+      next_offset: num(r.next_offset),
+      total_count: num(r.total_count),
+      complete: Number(r.complete) === 1,
+      last_synced_at: str(r.last_synced_at),
+    };
+  }
+
+  /** Read-merge-write in one write transaction (see {@link setState}). */
+  setListState(username: string, list: string, patch: Partial<Omit<ListSyncState, 'username' | 'list'>>): void {
+    const key = username.toLowerCase();
+    this.db.transaction(() => {
+      const cur = this.getListState(key, list);
+      const pick = <K extends keyof typeof patch>(k: K, fallback: ListSyncState[K]): ListSyncState[K] =>
+        k in patch ? (patch[k] as ListSyncState[K]) : (cur?.[k] ?? fallback);
+      this.db.run(
+        `INSERT INTO list_sync_state (username, list, next_offset, total_count, complete, last_synced_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(username, list) DO UPDATE SET
+           next_offset=excluded.next_offset, total_count=excluded.total_count,
+           complete=excluded.complete, last_synced_at=excluded.last_synced_at`,
+        [
+          key,
+          list,
+          pick('next_offset', null),
+          pick('total_count', null),
+          pick('complete', false) ? 1 : 0,
+          pick('last_synced_at', null),
+        ],
+      );
+    });
+  }
+
+  /**
+   * Cached venues the user has visited that match `q` (see {@link VenueQuery}),
+   * most-visited first. Name matching is deliberately loose — a brewery's
+   * taproom is its own venue (a brewery_id is not a venue_id), and Untappd keeps
+   * "… (duplicate of …)" copies — so a venue matches when the name is a literal
+   * case-insensitive substring of it, OR when every significant word of the name
+   * (ignoring "co", "company", "inc", "llc", "the") is a whole word of it.
+   */
+  findVisitedVenues(username: string, q: VenueQuery): VisitedVenue[] {
+    const key = username.toLowerCase();
+    const select = `SELECT v.venue_id AS venue_id, v.name, v.category, v.address, v.city, v.state, v.country,
+        v.lat, v.lng, v.is_verified, u.first_visit, u.first_checkin_id, u.recent_visit, u.recent_checkin_id, u.total_count
+      FROM user_venues u JOIN venues v ON v.venue_id = u.venue_id WHERE u.username = ?`;
+    const found = new Map<number, VisitedVenue>();
+
+    if (q.venue_ids && q.venue_ids.length > 0) {
+      for (const ids of chunks([...new Set(q.venue_ids)])) {
+        const rows = this.db.all(`${select} AND u.venue_id IN (${ids.map(() => '?').join(', ')})`, [key, ...ids]);
+        for (const r of rows) found.set(Number(r.venue_id), visitedFrom(r));
+      }
+    }
+
+    const hasName = q.name !== undefined && q.name.trim() !== '';
+    const hasGeo = q.lat !== undefined && q.lng !== undefined;
+    if (hasName || hasGeo) {
+      const where: string[] = [];
+      const params: SqlParam[] = [key];
+      let tokens: string[] = [];
+      if (hasName) {
+        const name = q.name!.trim();
+        tokens = significantTokens(name);
+        // Prefilter: the literal substring, or the longest significant word.
+        const longest = tokens.slice().sort((a, b) => b.length - a.length)[0];
+        if (longest) {
+          where.push(`(v.name ${LIKE_MATCH} OR v.name ${LIKE_MATCH})`);
+          params.push(`%${escapeLike(name)}%`, `%${escapeLike(longest)}%`);
+        } else {
+          where.push(`v.name ${LIKE_MATCH}`);
+          params.push(`%${escapeLike(name)}%`);
+        }
+      }
+      if (q.city !== undefined && q.city.trim() !== '') {
+        where.push(`v.city ${LIKE_MATCH}`);
+        params.push(`%${escapeLike(q.city.trim())}%`);
+      }
+      if (q.state !== undefined && q.state.trim() !== '') {
+        where.push(`v.state ${LIKE_MATCH}`);
+        params.push(`%${escapeLike(q.state.trim())}%`);
+      }
+      const radius = q.radius_m ?? DEFAULT_VISIT_RADIUS_M;
+      if (hasGeo) {
+        // Bounding-box prefilter; the exact great-circle check runs below.
+        const dLat = radius / 111_320;
+        const dLng = radius / (111_320 * Math.max(0.01, Math.cos((q.lat! * Math.PI) / 180)));
+        where.push('v.lat BETWEEN ? AND ? AND v.lng BETWEEN ? AND ?');
+        params.push(q.lat! - dLat, q.lat! + dLat, q.lng! - dLng, q.lng! + dLng);
+      }
+      const rows = this.db.all(`${select}${where.length ? ` AND ${where.join(' AND ')}` : ''}`, params);
+      for (const r of rows) {
+        const v = visitedFrom(r);
+        if (hasName && !nameMatches(q.name!.trim(), tokens, v.name)) continue;
+        if (hasGeo) {
+          if (v.lat === null || v.lng === null) continue;
+          const d = haversineM(q.lat!, q.lng!, v.lat, v.lng);
+          if (d > radius) continue;
+          v.distance_m = Math.round(d);
+        }
+        const prior = found.get(v.venue_id);
+        found.set(v.venue_id, prior && v.distance_m === undefined ? prior : v);
+      }
+    }
+
+    return [...found.values()].sort(
+      (a, b) => (b.total_count ?? 0) - (a.total_count ?? 0) || (b.recent_visit ?? '').localeCompare(a.recent_visit ?? '') || a.venue_id - b.venue_id,
+    );
+  }
+
   /** Distinct bids appearing in the checkins table. */
   checkinsBeerCount(username: string): number {
     const row = this.db.get(
@@ -1086,6 +1397,8 @@ export class CheckinStoreCore {
         `SELECT username FROM sync_state
          UNION SELECT DISTINCT username FROM distinct_beers
          UNION SELECT DISTINCT username FROM checkins
+         UNION SELECT DISTINCT username FROM user_venues
+         UNION SELECT username FROM list_sync_state WHERE list = 'venues'
          ORDER BY username`,
         [],
       )
@@ -1100,6 +1413,7 @@ export class CheckinStoreCore {
         coverage_complete: (st?.beers_complete ?? false) || (st?.backfill_complete ?? false),
         beers_offset: st?.beers_offset ?? null,
         last_synced_at: st?.last_synced_at ?? null,
+        venues: this.venueCoverage(username),
       };
     });
     return {
@@ -1107,6 +1421,24 @@ export class CheckinStoreCore {
       users,
       resolution_cache_entries: n('SELECT COUNT(*) AS n FROM item_resolutions'),
       beer_meta_entries: n('SELECT COUNT(*) AS n FROM beer_meta'),
+      venue_entries: n('SELECT COUNT(*) AS n FROM venues'),
+    };
+  }
+
+  /** The user's user/venues coverage, or null if their venue history was never synced. */
+  venueCoverage(username: string): VenueCoverage | null {
+    const st = this.getListState(username, 'venues');
+    const cached = this.userVenuesCount(username);
+    if (!st && cached === 0) return null;
+    const total = st?.total_count ?? null;
+    const complete = st?.complete ?? false;
+    return {
+      cached_venues: cached,
+      total_venues: total,
+      complete,
+      percent: total && total > 0 ? Math.min(100, Math.round((cached / total) * 100)) : complete ? 100 : null,
+      next_offset: st?.next_offset ?? null,
+      last_synced_at: st?.last_synced_at ?? null,
     };
   }
 
@@ -1202,6 +1534,24 @@ export class LocalCacheStore implements CacheStore {
   async stats(): Promise<CacheStats> {
     return this.core.stats();
   }
+  async upsertUserVenues(username: string, items: UserVenueItem[]): Promise<{ added: number; updated: number }> {
+    return this.core.upsertUserVenues(username, items);
+  }
+  async getUserVenueVisits(username: string, venueIds: number[]): Promise<UserVenueRow[]> {
+    return this.core.getUserVenueVisits(username, venueIds);
+  }
+  async userVenuesCount(username: string): Promise<number> {
+    return this.core.userVenuesCount(username);
+  }
+  async getListState(username: string, list: string): Promise<ListSyncState | undefined> {
+    return this.core.getListState(username, list);
+  }
+  async setListState(username: string, list: string, patch: Partial<Omit<ListSyncState, 'username' | 'list'>>): Promise<void> {
+    this.core.setListState(username, list, patch);
+  }
+  async findVisitedVenues(username: string, q: VenueQuery): Promise<VisitedVenue[]> {
+    return this.core.findVisitedVenues(username, q);
+  }
   async recordApiCalls(rows: ApiCallObservation[]): Promise<void> {
     this.core.recordApiCalls(rows);
   }
@@ -1227,4 +1577,63 @@ const LIKE_MATCH = "LIKE ? COLLATE NOCASE ESCAPE '\\'";
 // name matches itself instead of acting as a wildcard (pair with LIKE_MATCH).
 function escapeLike(s: string): string {
   return s.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+function visitFrom(r: Row): UserVenueRow {
+  return {
+    venue_id: Number(r.venue_id),
+    first_visit: str(r.first_visit),
+    first_checkin_id: num(r.first_checkin_id),
+    recent_visit: str(r.recent_visit),
+    recent_checkin_id: num(r.recent_checkin_id),
+    total_count: num(r.total_count),
+  };
+}
+
+function visitedFrom(r: Row): VisitedVenue {
+  const name = str(r.name);
+  return {
+    name,
+    category: str(r.category),
+    address: str(r.address),
+    city: str(r.city),
+    state: str(r.state),
+    country: str(r.country),
+    lat: num(r.lat),
+    lng: num(r.lng),
+    is_verified: num(r.is_verified),
+    ...visitFrom(r),
+    is_duplicate: name !== null && /\(duplicate of\b/i.test(name),
+  };
+}
+
+// Words that don't distinguish one venue name from another ("Green Bench
+// Brewing Co." vs "Green Bench Brewing Company").
+const NAME_STOP_WORDS = new Set(['co', 'company', 'inc', 'llc', 'ltd', 'the', 'and']);
+
+/** Lowercased alphanumeric words of a name, minus {@link NAME_STOP_WORDS}. */
+function significantTokens(name: string): string[] {
+  return wordsOf(name).filter((w) => !NAME_STOP_WORDS.has(w));
+}
+function wordsOf(s: string): string[] {
+  return s.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 0);
+}
+
+/** See {@link CheckinStoreCore.findVisitedVenues}: literal substring, or every significant word whole. */
+function nameMatches(query: string, tokens: string[], venueName: string | null): boolean {
+  if (venueName === null) return false;
+  if (venueName.toLowerCase().includes(query.toLowerCase())) return true;
+  if (tokens.length === 0) return false;
+  const words = new Set(wordsOf(venueName));
+  return tokens.every((t) => words.has(t));
+}
+
+/** Great-circle distance in metres. */
+function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6_371_008.8;
+  const rad = Math.PI / 180;
+  const dLat = (lat2 - lat1) * rad;
+  const dLng = (lng2 - lng1) * rad;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
 }
