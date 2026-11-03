@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.5.2](https://github.com/chrischall/untappd-mcp/compare/v2.5.1...v2.5.2) (2026-11-03)
+
+
+### Bug Fixes
+
+* **cache:** two hosts opening a new cache at once no longer fail with "database is locked" ([#257](https://github.com/chrischall/untappd-mcp/issues/257)) ([17c7ffe](https://github.com/chrischall/untappd-mcp/commit/17c7ffe783906b84ed90d372022086332f59e75e)), closes [#256](https://github.com/chrischall/untappd-mcp/issues/256)
+
 ## [2.5.1](https://github.com/chrischall/untappd-mcp/compare/v2.5.0...v2.5.1) (2026-11-03)
 
 
