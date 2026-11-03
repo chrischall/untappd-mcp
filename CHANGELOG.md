@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.5.0](https://github.com/chrischall/untappd-mcp/compare/v2.4.0...v2.5.0) (2026-11-03)
+
+
+### Features
+
+* venue history, has-visited, favorites and trip check for the Untappd cache ([#252](https://github.com/chrischall/untappd-mcp/issues/252)) ([8a64a83](https://github.com/chrischall/untappd-mcp/commit/8a64a832737d707f8a40eeb43272b695e99e7a91))
+
+
+### Bug Fixes
+
+* **deps:** bump the production-dependencies group with 3 updates ([#250](https://github.com/chrischall/untappd-mcp/issues/250)) ([c5de675](https://github.com/chrischall/untappd-mcp/commit/c5de675ed0eb4b0a21e781093fc95e71140d3311))
+
 ## [2.4.0](https://github.com/chrischall/untappd-mcp/compare/v2.3.2...v2.4.0) (2026-10-23)
 
 
