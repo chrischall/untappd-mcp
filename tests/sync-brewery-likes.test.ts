@@ -170,4 +170,23 @@ describe('syncBreweryLikes', () => {
     expect(await cache.breweryLikesCount('mer')).toBe(0);
     expect((await cache.stats()).users.find((x) => x.username === 'mer')).toBeUndefined();
   });
+
+  // A page without total_count can't say where the list ends, and a short page is
+  // not proof of the end (user/venues serves 25 when asked for 50). Only an empty
+  // page ends a pass whose total is unknown.
+  it('without a total_count, a short page does not end the pass; only an empty page does', async () => {
+    const ids = range(1, 60);
+    const calls: Array<Record<string, unknown>> = [];
+    const client = {
+      async get(_path: string, q: Record<string, unknown> = {}) {
+        calls.push(q);
+        const offset = Number(q.offset ?? 0);
+        const page = ids.slice(offset, offset + 25); // 25 per page, fewer than the 50 asked for
+        return { count: page.length, items: page.map(likeItem), ...(page.length ? { pagination: { offset: offset + page.length } } : {}) };
+      },
+    } as unknown as UntappdClient;
+    const s = await syncBreweryLikes(client, cache, 'mer', 10);
+    expect(s).toMatchObject({ cached: 60, total: null, complete: true, another_run_needed: false, likes_added: 60 });
+    expect(calls.map((q) => q.offset)).toEqual([0, 25, 50, 60]);
+  });
 });

@@ -113,8 +113,9 @@ export async function syncBreweryLikes(
     // pagination.offset is ABSENT on an empty list (live, 6a) — fall back to offset + items.
     const next = offsetOf(data?.pagination?.offset);
     const advanced = next !== null && next > offset ? next : offset + items.length;
-    complete =
-      items.length === 0 || (total !== null ? advanced >= total : items.length < BREWERY_LIKES_PAGE_REQUEST);
+    // Without a total, a short page is not proof of the end (a route may serve fewer
+    // than it was asked for), so only an empty page ends the pass.
+    complete = items.length === 0 || (total !== null && advanced >= total);
     offset = advanced;
 
     if (complete) removed = await cache.pruneBreweryLikes(rawUsername, passStamp);
