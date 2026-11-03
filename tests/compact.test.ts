@@ -6,9 +6,9 @@ import {
   compactBeerSearch,
   compactWishlistBeer,
   compactUserBeer,
-  compactBreweryBeer,
-  compactBreweryBeers,
+  compactBreweryBeerList,
 } from '../src/compact.js';
+import { mapBreweryBeerItem } from '../src/cache/store.js';
 
 describe('compact projections', () => {
   it('slims a check-in to the useful fields', () => {
@@ -125,9 +125,27 @@ const BEER_LIST = {
   ],
 };
 
+// Both paths of untappd_brewery_beers (live and cached) map items through
+// mapBreweryBeerItem and then compactBreweryBeerList, so test them together.
+function compactPage(resp: typeof BEER_LIST): Record<string, any> {
+  const rows = resp.beers.items.map((it, i) => mapBreweryBeerItem(1142, it, 'x', i)!);
+  return compactBreweryBeerList(
+    {
+      brewery_id: 1142,
+      brewery_name: resp.beers.items[0].brewery.brewery_name,
+      total_count: resp.total_count,
+      source: 'api',
+      fetched_at: null,
+      expires_at: null,
+      beers: rows,
+    },
+    { offset: 0, limit: 25 },
+  );
+}
+
 describe('brewery beer-list projection', () => {
-  it('reads the count and has-had fields this endpoint actually uses', () => {
-    const c = compactBreweryBeer(BEER_LIST.beers.items[0]);
+  it('reads the count fields this endpoint actually uses, and never the authenticated has-had', () => {
+    const c = compactPage(BEER_LIST).beers.items[0];
     expect(c).toEqual({
       bid: 6284,
       name: 'Pale Ale',
@@ -138,22 +156,22 @@ describe('brewery beer-list projection', () => {
       rating: 3.62,
       rating_count: 550296,
       checkin_count: 1303919,
-      have_had: true,
-      your_count: 2,
+      in_production: true,
     });
+    // has_had / total_user_count are the AUTHENTICATED account's, not the asked-about user's.
+    expect(JSON.stringify(compactPage(BEER_LIST))).not.toMatch(/have_had|has_had|your_count|total_user_count/);
   });
 
   // The regression this projector exists to avoid. If someone later "simplifies"
-  // it to `compactBeerResult`, these two go undefined and the page still looks
-  // plausible — a beer with no check-ins that you have never had.
-  it('would lose both counts under the search projector', () => {
+  // it to `compactBeerResult`, the count goes undefined and the page still looks
+  // plausible — a beer with no check-ins.
+  it('would lose the check-in count under the search projector', () => {
     const wrong = compactBeerResult(BEER_LIST.beers.items[0]);
     expect(wrong.checkin_count).toBeUndefined();
-    expect(wrong.have_had).toBeUndefined();
   });
 
   it('drops the per-item brewery block, the label URLs and the description', () => {
-    const out = JSON.stringify(compactBreweryBeers(BEER_LIST));
+    const out = JSON.stringify(compactPage(BEER_LIST));
     expect(out).not.toContain('beer_label');
     expect(out).not.toContain('brewery_label');
     expect(out).not.toContain('beer_description');
@@ -166,17 +184,10 @@ describe('brewery beer-list projection', () => {
   // enum on the tool's own input schema — the caller cannot learn anything from
   // them they were not already told.
   it('drops sorting_options but keeps the paging counts', () => {
-    const out = compactBreweryBeers(BEER_LIST) as Record<string, unknown>;
+    const out = compactPage(BEER_LIST);
     expect(out.sorting_options).toBeUndefined();
     expect(out.total_count).toBe(723);
-    expect((out.beers as Record<string, unknown>).count).toBe(1);
-  });
-
-  it('returns the raw response when beers.items is missing', () => {
-    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
-    const raw = { beers: {} };
-    expect(compactBreweryBeers(raw)).toBe(raw);
-    expect(err).toHaveBeenCalled();
-    err.mockRestore();
+    expect(out.beers.count).toBe(1);
+    expect(out.pagination).toEqual({ offset: 0, limit: 25, next_offset: 1 });
   });
 });

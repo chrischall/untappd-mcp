@@ -101,7 +101,7 @@ queries back any engine: `node:sqlite` is the one that ships (`db.ts`).
 `store.ts` imports nothing platform-specific — keep it that way, so a different
 deployment can back the same schema with a different driver.
 
-Three tables and two independent sources:
+Core tables and two independent has-had sources:
 
 - `checkins` ← `user/checkins` — detailed (venue/date/comment), truncated for
   non-self accounts.
@@ -141,6 +141,13 @@ Non-obvious behaviours that were each fixed the hard way:
   possible false negative. New cache read tools must include it.
 - Usernames are keyed **lowercased**; other stored fields keep their original casing.
 - The cache holds OTHER users' dated venue history: `CheckinCache.open()` creates the dir `0700` and the db `0600` before SQLite opens it (and tightens old loose files). Retention is user-driven — `untappd_cache_forget` (confirm-gated, local-only) is the delete path; there is no TTL.
+- **v4 tables** (added for venue history / favorites): `venues`
+  (global), `user_venues`, `list_sync_state` (per user+list offset cursor), `brewery_beer_lists` +
+  `brewery_beers` (TTL'd; never store brewery/beer_list's `have_had`, which is the AUTHENTICATED
+  account's), `response_cache` (short-TTL raw responses), `wishlist`, `favorites` (manual, local only),
+  `venue_drinks`, `api_calls`; v5 adds `brewery_likes`; v6 adds `brewery_beers.ibu` (so `untappd_brewery_beers`' ONE
+  compact shape — `compactBreweryBeerList` — is identical with and without the cache). Per-user tables are listed in `PER_USER_TABLES`, which drives
+  `forgetUser` — add any new per-user table there.
 - **Schema is versioned** (`PRAGMA user_version`, `SCHEMA_VERSION` in `store.ts`). A change goes in
   `VERSIONED_MIGRATIONS` with the next number and must be ADDITIVE: never drop/rewrite rows, since
   refilling a cache costs hours of rate-limited calls. A file newer than the build is used as-is.
@@ -155,6 +162,61 @@ Non-obvious behaviours that were each fixed the hard way:
 - **Incremental `user/beers` refresh stops at the first cached beer whose `last_had` AND `had_count`
   are unchanged** — not merely "already cached": a re-had beer moves to the top, and a new beer can
   sit below it.
+- **Venue history (`sync-venues.ts`)**: `user/venues` pages a NON-self user's full history but serves
+  at most **25 per page even when asked for 50** — advance by the returned `pagination.offset` (else
+  offset + items), and never treat a 25-item page as the short final page (end = empty page, or offset
+  reaching `total_count`). Cursor/total live in `list_sync_state` (list `venues`), persisted every page;
+  a resumed backfill re-reads `VENUES_RESUME_OVERLAP`. Once complete, a re-run pages sort=date from 0 and
+  stops at the first page where EVERY venue's `recent_visit` and `total_count` are unchanged. A refresh
+  cut short before that page (max_pages, rate guard, 429) keeps its own cursor in list `venues_refresh`
+  and the next run RESUMES it — restarting at 0 would hit the already-upserted pages, read them as
+  unchanged and stop above the remaining changes. Coverage reads as incomplete until it finishes.
+  `findVisitedVenues` matches name loosely (literal substring OR every significant word whole) because
+  a brewery_id is not its taproom's venue_id and Untappd keeps "… (duplicate of …)" venues.
+- **Brewery beer lists (`brewery-beers.ts`)** are a per-brewery snapshot with a 7-day TTL clock
+  (`brewery_beer_lists.fetched_at` = when the snapshot STARTED; appended pages don't reset it). A
+  stale list or `refresh: true` restarts it (old rows deleted, so retired beers don't linger).
+  `ranked_count` is the contiguous prefix of Untappd's default popularity order; the default sort is
+  served from that prefix, any other sort only once the WHOLE list is cached (sorting a top-50 subset
+  by name would be a different answer). beer_list's `has_had`/`total_user_count` are the
+  AUTHENTICATED account's — `mapBreweryBeerItem` drops them and the cached tool output never shows them.
+- **`response_cache`** (`response-cache.ts`, 6-hour TTL) serves `untappd_venue_menu` (keyed by venue +
+  every paging param) and `untappd_venue_activity` (the RAW response, keyed by venue + limit + max_id,
+  so either `view` is served from one entry). A thrown fetch is never cached; writes prune rows older
+  than `RESPONSE_CACHE_RETENTION_MS` (48 h) because activity holds other people's check-ins. The
+  brewery/venue tools take the cache as an OPTIONAL provider (`optionalCache`): if it can't open they
+  just call Untappd.
+- **Wishlist mirror (`sync-wishlist.ts`)**: every sync is a full pass from offset 0 (resumable, cursor
+  in list `wishlist`). Rows are stamped with the pass's stamp (list `wishlist_pass`.last_synced_at,
+  strictly later than the previous pass's), and only a FINISHED pass deletes rows with another stamp —
+  a partial pass never removes anything.
+- **Group has-had (`multi-user.ts`)**: `cache_has_had_many` / `top_not_had` take `usernames[]` +
+  `mode` (`none_had` = nobody had it, `any_not_had` = someone hasn't). One `hasHadMany` per user;
+  the single-user path keeps its old output shape. Passing `username` AND `usernames` is rejected.
+- **Venue drinks (`venue-drinks.ts`, opt-in)**: `checkin/view` of each `user_venues` row's first/recent
+  check-in, one call each under `max_calls` + the rate guard. Only beer/brewery/date are stored (never
+  comments). A 404 is stored as a tombstone (bid AND beer_name null) so it is never re-asked;
+  other errors stay pending. `getVenueDrinks` hides tombstones.
+- **Favorites (`favorites.ts`)**: derived favorites are COMPUTED on read from the cache (thresholds in
+  `DEFAULT_FAVORITE_THRESHOLDS`, each overridable), never stored, so they track the latest sync; manual
+  ones live in the `favorites` table (local only). `listFavorites` / `favoriteLookup` merge per
+  (kind, id) so an item appears ONCE with ordered, de-duplicated `sources`. Every `favorite` field is
+  built by `favoriteLookup` — reuse it (trip_check too). Annotations are applied AFTER the response
+  cache (venue_menu), never stored in it. The venue months rule only knows first/recent visit, so it
+  also needs total_count ≥ the month threshold (2 visits can't cover 3 distinct months). The
+  `untappd` source is the synced `brewery_likes` (breweries only — Untappd has no venue follow).
+- **Brewery likes (`sync-brewery-likes.ts`, schema v5 `brewery_likes`)**: `user/brewerylikes/{user}`
+  (the app's "followings"; works for non-self, total = user/info `stats.total_followings`). Honours
+  limit=50; advance by the returned `pagination.offset`, which is ABSENT on an empty list. Same
+  full-pass/stamp/prune-only-when-finished scheme as the wishlist (lists `brewery_likes` +
+  `brewery_likes_pass`). `brewery/info`'s `claimed_status.follow_status` is the AUTHENTICATED
+  account's — never report it for another user (same rule as beer_list's `have_had`).
+- **Trip check (`src/tools/trip.ts`)**: `untappd_trip_check` answers visits/has-had from the cache only;
+  its ONLY API calls are `brewery/beer_list` (via `getBreweryBeers`, so they land in the 7-day list
+  cache) for a missing/stale list, under `api_budget` + `checkRateBudget`. A brewery stop with no
+  venue_id/name/lat is visit-matched by the brewery's name (cached list, else the user's distinct beers).
+  The near-a-favorite hint needs coordinates from the global `venues` table (`getVenues`), so a manual
+  favorite venue nobody has synced is never hinted.
 - **Batch, don't loop.** Use `hasHadMany(username, bids)` (two grouped queries per 500-bid chunk)
   for any list; `hasHad` per bid costs ~4 queries each. `tests/cache-batch.test.ts` pins the two
   to identical verdicts — change both or neither. Upsert "net new" counts look up only the batch's
@@ -180,11 +242,28 @@ The sync gets what's left after reserving ~3 calls per uncached line, never less
 - Ratings for not-had beers: when 2+ come from one brewery, one `brewery/beer_list` call (top 50
   by popularity, with ratings) replaces their `beer/info` calls; beers it misses fall back to
   `beer/info`. The whole list is seeded into `beer_meta`.
-- `UntappdClient.quotaRemaining` is the last `X-Ratelimit-Remaining` seen within the hour, else
-  null. Whether the v4 API sends that header is UNVERIFIED (the public API documents it), so
-  `clampToQuota` (`src/quota.ts`) must keep treating null as "use the requested budget".
+- `UntappdClient.quotaRemaining` is the rate-limit ESTIMATE from `src/ratelimit.ts` (null before
+  this process has made a call in the hour), and `clampToQuota` (`src/quota.ts`) must keep treating
+  null as "use the requested budget". See "Rate limit tracking" below.
 - Search results carry NO rating. Don't seed `beer_meta` from them (that used to overwrite real
   ratings with null under a fresh timestamp); ratings come from `beer/info` or brewery/menu lists.
+
+## Rate limit tracking (`src/ratelimit.ts`)
+
+- **The v4 API sends `X-Ratelimit-Remaining: 0` on EVERY successful response** (live, 2026-11-02;
+  404s carry no header). Taken at face value it clamped every budget to its floor. The estimate is
+  therefore a LOCAL count of calls in the rolling hour against `UNTAPPD_RATE_LIMIT_PER_HOUR` (default
+  100, else `X-Ratelimit-Limit` if ever sent); the Remaining header only counts once some response
+  in the window reported it non-zero, or on a 429. A 429 blocks until its Retry-After / reset, else
+  until the oldest call in the window ages out.
+- Every response is recorded by `UntappdClient` (`rateLimit` tracker + `onApiCall` listeners).
+  `index.ts` persists them into the cache's `api_calls` table (pruned to 2 h) once the cache is open,
+  flushing what came before on open, so other processes sharing the file count them too. The merge is
+  a multiset (max count per identical observation), so a process's own logged calls aren't counted twice.
+- **`checkRateBudget` is the stop-before-429 guard**: syncs call it before EVERY call and stop with
+  `stopped_for_rate_limit` + `rate_limit.resume_at` when the next call would leave fewer than
+  `DEFAULT_RESERVE` (2). A `RateLimitError` mid-run is caught the same way — never thrown mid-batch.
+  New paging syncs must use it; test fakes without a `rateLimit` tracker are treated as unconstrained.
 
 ## Environment (stdio)
 
@@ -201,6 +280,7 @@ UNTAPPD_TIMEZONE       optional  IANA zone check-ins are stamped with when the c
 UNTAPPD_PHOTO_DIR      optional  Allow-list dir(s) for untappd_checkin photo_path (default ~/Downloads/untappd-mcp — confined by default; bytes are always sniffed as JPEG/PNG, 15 MB cap)
 UNTAPPD_CACHE_DB       optional  Cache SQLite path (default ~/.untappd-mcp/checkins.db, owner-only 0600). LOCAL ONLY
 UNTAPPD_CACHE_DIR      optional  Cache directory instead of ~/.untappd-mcp (file is checkins.db); CACHE_DB wins
+UNTAPPD_RATE_LIMIT_PER_HOUR optional  Hourly limit the sync guard enforces (default 100)
 ```
 
 The app-mimicking constants in `client.ts` (`appVersion`, device fields,

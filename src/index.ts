@@ -14,6 +14,8 @@ import { registerWishlistTools } from './tools/wishlist.js';
 import { registerCheckinTools } from './tools/checkin.js';
 import { registerUtilityTools } from './tools/utilities.js';
 import { registerCacheTools } from './tools/cache.js';
+import { registerFavoriteTools } from './tools/favorites.js';
+import { registerTripTools } from './tools/trip.js';
 import { registerMenuTools } from './tools/menu.js';
 import { logRegisteredTools } from './tools/diagnostics.js';
 import { CheckinCache, defaultCachePath, describeCachePath } from './cache/db.js';
@@ -31,7 +33,20 @@ const client = new UntappdClient();
 const cachePath = defaultCachePath();
 console.error(describeCachePath(cachePath));
 let nodeCache: CacheStore | undefined;
-const nodeCacheProvider = (): CacheStore => (nodeCache ??= CheckinCache.open(cachePath));
+const nodeCacheProvider = (): CacheStore => {
+  if (!nodeCache) {
+    nodeCache = CheckinCache.open(cachePath);
+    // Hand the shared call log what this process already spent before the cache opened.
+    void nodeCache.recordApiCalls?.(client.rateLimit.observations()).catch(() => {});
+  }
+  return nodeCache;
+};
+// Persist every API response's rate-limit observation into the shared cache file
+// (once it is open), so a second process — or the next one — counts this hour's
+// calls too (src/ratelimit.ts). Recording never fails an API call.
+client.onApiCall((o) => {
+  void nodeCache?.recordApiCalls?.([o]).catch(() => {});
+});
 
 await runMcp({
   name: 'untappd-mcp',
@@ -40,8 +55,8 @@ await runMcp({
     '[untappd-mcp] This project was developed and is maintained by AI (Claude Opus 4.8). Use at your own discretion.',
   tools: [
     (s) => registerBeerTools(s, client, nodeCacheProvider),
-    (s) => registerBreweryTools(s, client),
-    (s) => registerVenueTools(s, client),
+    (s) => registerBreweryTools(s, client, nodeCacheProvider),
+    (s) => registerVenueTools(s, client, nodeCacheProvider),
     (s) => registerUserTools(s, client),
     (s) => registerFeedTools(s, client),
     (s) => registerResolveTools(s, client),
@@ -53,6 +68,8 @@ await runMcp({
     // The cache is backed by a local `node:sqlite` file here; the provider is
     // injectable, so another deployment can back the same tools differently.
     (s) => registerCacheTools(s, client, nodeCacheProvider),
+    (s) => registerFavoriteTools(s, client, nodeCacheProvider),
+    (s) => registerTripTools(s, client, nodeCacheProvider),
     (s) => registerMenuTools(s, client, nodeCacheProvider),
     // Keep last: logs the full registered toolset (count + names) at startup.
     (s) => logRegisteredTools(s, 'stdio'),

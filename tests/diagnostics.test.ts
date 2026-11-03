@@ -15,18 +15,29 @@ import { registerWishlistTools } from '../src/tools/wishlist.js';
 import { registerCheckinTools } from '../src/tools/checkin.js';
 import { registerUtilityTools } from '../src/tools/utilities.js';
 import { registerCacheTools } from '../src/tools/cache.js';
+import { registerFavoriteTools } from '../src/tools/favorites.js';
+import { registerTripTools } from '../src/tools/trip.js';
 import { registerMenuTools } from '../src/tools/menu.js';
 import { createTestHarness } from './helpers.js';
 
 const CACHE_TOOLS = [
   'untappd_sync_checkins',
   'untappd_sync_user_beers',
+  'untappd_sync_user_venues',
+  'untappd_sync_wishlist',
+  'untappd_sync_brewery_likes',
+  'untappd_sync_venue_drinks',
+  'untappd_cache_has_visited',
   'untappd_cache_has_had',
   'untappd_cache_has_had_many',
   'untappd_cache_not_had',
   'untappd_cache_query',
   'untappd_top_not_had',
   'untappd_cache_forget',
+  'untappd_favorite_add',
+  'untappd_favorite_remove',
+  'untappd_favorites_list',
+  'untappd_trip_check',
 ];
 
 describe('healthcheck build diagnostics', () => {
@@ -55,6 +66,8 @@ describe('healthcheck build diagnostics', () => {
       registerCheckinTools(server, client);
       registerUtilityTools(server, client);
       registerCacheTools(server, client, () => cache);
+      registerFavoriteTools(server, client, () => cache);
+      registerTripTools(server, client, () => cache);
       registerMenuTools(server, client, () => cache);
     });
 
@@ -62,10 +75,10 @@ describe('healthcheck build diagnostics', () => {
     expect(out.server_version).toBe(VERSION);
 
     const tools = out.tools as string[];
-    // The full toolset (incl. the 8 cache tools) is registered — this is the
-    // 46-tool set the server must expose.
-    expect(tools.length).toBe(49);
-    expect(out.tool_count).toBe(49);
+    // The full toolset (incl. the 17 cache, favorites and trip tools) is registered — this is the
+    // 58-tool set the server must expose.
+    expect(tools.length).toBe(58);
+    expect(out.tool_count).toBe(58);
     for (const name of CACHE_TOOLS) expect(tools).toContain(name);
 
     // The hash is the FNV-1a of the sorted names — stable and self-consistent.

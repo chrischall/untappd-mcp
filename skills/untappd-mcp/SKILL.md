@@ -205,6 +205,36 @@ Query tools (has-had ones consult BOTH sources — a hit in either = had):
   capped at `api_budget` per run (partial/another_run_needed when exceeded).
 - `untappd_cache_query` — filter cached check-ins by brewery, style, `min_rating`,
   venue, and date range.
+- **Groups:** `untappd_cache_has_had_many` and `untappd_top_not_had` take
+  `usernames` (instead of `username`) plus `mode`: `none_had` (default — new to
+  everyone) or `any_not_had` (at least one of them still needs it). Each beer
+  lists `had_by` / `not_had_by`; freshness is reported per user.
+- `untappd_sync_venue_drinks` — opt-in, costs one call per check-in: fetches the
+  beer from each cached venue's first/recent visit (`checkin/view`), budgeted by
+  `max_calls`; `untappd_cache_has_visited` then shows them as `drinks`. Partial
+  by design (two check-ins per venue at most).
+- **Favorites** (local, no API): `untappd_favorites_list` (filter `kind`
+  beer|brewery|venue, `source` derived|manual|untappd, override `thresholds`),
+  `untappd_favorite_add` / `untappd_favorite_remove` (manual, with a note —
+  never written to Untappd). Derived defaults: venue ≥5 check-ins or ≥3 distinct
+  months; brewery ≥5 beers with avg ≥3.75, or ≥15 beers; beer rated ≥4.25 or
+  had ≥3 times. has_had / has_had_many / has_visited / brewery_beers / venue_menu /
+  top_not_had results carry `favorite` {is_favorite, sources, reason};
+  `untappd_top_not_had` boosts wishlisted (+0.5) and favorite-brewery (+0.25)
+  beers unless `prefer_favorites: false`. `untappd_sync_brewery_likes` mirrors
+  the breweries a user likes/follows on Untappd (resumable, rate-guarded); they
+  carry the source `untappd` (merged with derived/manual) and count for the boost.
+  Untappd has no followed-venue list, so venue favorites are derived + manual.
+  `brewery_info`'s `follow_status` is the signed-in account's, never another user's.
+- `untappd_trip_check` — a whole trip in one call: per stop (`venue_id`, `name`
+  + `city`/`state`, `lat`/`lng`, and/or `brewery_id`) → visited with dates,
+  beers had from that brewery, and the top N (default 4) not-had beers by global
+  rating (`style` filter). Cache only, except `brewery/beer_list` for a missing or
+  >7-day-old list (`api_budget`, default 5; 0 = cache only). Flags favorite
+  venues/breweries, boosts wishlist/favorite-brewery beers (`prefer_favorites`),
+  and hints when a favorite venue is within `near_favorite_radius_m` (2 km).
+  Sync first: `untappd_sync_user_venues`, `untappd_sync_user_beers`,
+  `untappd_sync_wishlist`, `untappd_sync_brewery_likes`.
 
 **Retention.** The cache keeps what you sync until you remove it — including
 friends' dated check-ins, comments and venues. `untappd_cache_forget` (confirmation-gated)

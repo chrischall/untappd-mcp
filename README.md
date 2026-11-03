@@ -39,6 +39,7 @@ it goes stale.
 | `UNTAPPD_PHOTO_DIR` | no | The directory `untappd_checkin`'s `photo_path` must be inside (several allowed, separated by `:`). Defaults to `~/Downloads/untappd-mcp` — put a photo there to attach it. Any other file is refused, so a prompt-injected shout or comment can't publish an arbitrary image from your disk. |
 | `UNTAPPD_CACHE_DB` | no | Path to the local check-in cache SQLite file (default `~/.untappd-mcp/checkins.db`). A relative path or leading `~` resolves against your **home** directory, never the working directory, so every host (Claude Desktop, Claude Code, …) finds the same file; the resolved path is logged to stderr at startup. The db file is always made owner-only (`0600`), and so are any directories the server creates plus the default `~/.untappd-mcp`; a directory you point this into that already exists keeps its permissions. Local/stdio only. |
 | `UNTAPPD_CACHE_DIR` | no | Directory for the cache instead of `~/.untappd-mcp` (the file is `checkins.db` inside it). `UNTAPPD_CACHE_DB` wins if both are set. |
+| `UNTAPPD_RATE_LIMIT_PER_HOUR` | no | The hourly call limit the syncs' stop-before-429 guard enforces (default `100`, Untappd's documented per-token limit). Only change it if Untappd gives your token a different limit. |
 
 Copy `.env.example` to `.env` and fill it in for local use.
 
@@ -89,7 +90,65 @@ Writes (each asks you to confirm first — see [Confirmations](#confirmations)):
 
 Check-in cache: `untappd_sync_checkins`, `untappd_sync_user_beers`,
 `untappd_cache_has_had`, `untappd_cache_has_had_many`, `untappd_cache_not_had`,
-`untappd_cache_query`, `untappd_top_not_had`, `untappd_cache_status`, `untappd_cache_forget`.
+`untappd_cache_query`, `untappd_top_not_had`, `untappd_cache_status`, `untappd_cache_forget`,
+`untappd_sync_wishlist` (mirrors a user's wishlist locally so picks can boost wishlisted beers),
+`untappd_sync_brewery_likes` (mirrors the breweries a user likes/follows on Untappd, as "untappd" favorites),
+`untappd_sync_user_venues` + `untappd_cache_has_visited` (a user's full venue history — "has this person
+been here?" — which pages fully for any public/friend account, unlike their check-ins).
+
+Trip planning: `untappd_trip_check` takes a user (or `usernames` + `mode`) and up to 25 stops — each a
+`venue_id`, a `name` (+ `city`/`state`), a `lat`/`lng`, and/or a `brewery_id` — and returns per stop:
+whether they've been there (first/recent visit, total visits, the matched venues incl. Untappd's
+"(duplicate of …)" copies; a brewery stop is matched by the brewery's name), how many of the brewery's
+beers they've had, and the top N (default 4) **not-had** beers by Untappd global rating, with an
+optional `style` filter (out-of-production beers skipped unless asked). Visits and has-had are answered
+from the cache only; the one API call it may make is `brewery/beer_list` for a brewery whose list isn't
+cached or is past its 7-day TTL — at most `api_budget` (default 5; `0` = strictly cache-only, using a
+stale list flagged `stale`), under the rate-limit guard. Favorite venues and breweries are flagged,
+`prefer_favorites` (default true) boosts wishlisted and favorite-brewery beers (liked on Untappd, derived or
+manual), and a stop within
+`near_favorite_radius_m` (default 2 km) of a favorite venue gets `near_favorites` and a "Near a
+favorite: …" hint.
+
+Group checks: `untappd_cache_has_had_many` and `untappd_top_not_had` accept `usernames` (up to 10)
+with `mode: "none_had"` (default — beers new to everyone) or `"any_not_had"` (beers at least one of
+them still needs); each beer says who has and hasn't had it.
+
+What they drank at a venue (opt-in, costs calls): `untappd_sync_venue_drinks` fetches the beer from
+each cached venue's first and most-recent visit check-in (`checkin/view`, budgeted by `max_calls`,
+stops before the rate limit). It's a partial picture — two check-ins per venue at most — shown in
+`untappd_cache_has_visited` as `drinks`.
+
+Favorites (cache only, never written to Untappd): `untappd_favorites_list` lists a user's favorite
+beers, breweries and venues, each once with its `sources` and a `reason`. **Derived** favorites come
+from the synced history — venues with ≥5 check-ins or visits spanning ≥3 distinct months; breweries
+with ≥5 beers had and an average rating ≥3.75, or ≥15 beers; beers rated ≥4.25 or had ≥3 times —
+and every threshold can be overridden per call. **Manual** favorites are added and removed with
+`untappd_favorite_add` / `untappd_favorite_remove` (local table, optional note). Results from
+`untappd_cache_has_had`, `untappd_cache_has_had_many`, `untappd_cache_has_visited`, `untappd_brewery_beers`, `untappd_venue_menu`
+and `untappd_top_not_had` carry a `favorite` field `{is_favorite, sources, reason}`, and
+`untappd_top_not_had` ranks wishlisted beers and beers from favorite breweries higher by default
+(`prefer_favorites: false` turns that off); `untappd_trip_check` carries the same flags and boost.
+
+**Untappd** favorites (breweries only): `untappd_sync_brewery_likes` mirrors the breweries a user
+"likes" on Untappd (`user/brewerylikes` — the app calls them "followings"; works for another user's
+public/friend account, ~50 per call). Like the wishlist sync it's a full pass from the top, resumable
+(cursor saved every page, `another_run_needed`, `percent`), stops before the rate limit with
+`stopped_for_rate_limit` + resume info, and only drops unliked breweries once a pass finishes. Liked
+breweries then carry the source `untappd` everywhere favorites appear — merged with `derived` and
+`manual`, each source listed once — and count for the `prefer_favorites` boost and trip_check's flags.
+`untappd_cache_status` reports each user's `brewery_likes` coverage, and `untappd_cache_forget` removes them.
+
+Untappd has **no followed or favorite *venue* list** at all (no web or API route; `venue/info` has no
+per-user flag), so venue favorites are derived + manual only. `brewery/info`'s
+`claimed_status.follow_status` describes the **signed-in** account, like `have_had` below, so it is
+never used for anyone else — the synced likes list is how to see another user's.
+
+Cached reads (to stretch the ~100 calls/hour limit): `untappd_brewery_beers` keeps each brewery's
+list for 7 days, and `untappd_venue_menu` / `untappd_venue_activity` keep results for 6 hours; each
+reports where the answer came from and takes `refresh: true` to re-fetch. Untappd's `have_had` on a
+brewery's beer list describes the **signed-in** account, never the user you're asking about, so it
+isn't cached or returned — use `untappd_cache_has_had_many` for any user.
 
 Menu picks: `untappd_menu_pick` (tap-list lines in, ranked not-had beers out),
 `untappd_venue_pick` (same, from a venue's Untappd menu).
@@ -227,6 +286,18 @@ Both are resumable: they fetch `max_pages` per call (default 10), persist
 progress after every page, and set `another_run_needed: true` until done — just
 call again until it's `false`.
 
+**Rate limit.** Every API response is recorded (time, status and any
+`X-Ratelimit-*` / `Retry-After` headers) and, once the cache is open, logged in
+the cache file so every process sharing it — and the next one — counts the same
+hour. The syncs check that count **before every page** and stop cleanly with
+`stopped_for_rate_limit: true` and `rate_limit.resume_at` when the next call
+would leave fewer than 2 of the ~100 hourly calls; a 429 that slips through also
+stops the run cleanly instead of failing it. Progress is already saved, so
+re-run after `resume_at`. `untappd_cache_status` shows the current picture under
+`rate_limit`. Note: the v4 API sends `X-Ratelimit-Remaining: 0` on every
+successful response, so that header is ignored until it reports a live
+(non-zero) value; the estimate rests on the local call count.
+
 **Query** the cache with no further API calls. The has-had tools consult **both**
 sources (a hit in either counts as had):
 
@@ -263,7 +334,8 @@ telling you to add them as a friend first.
 user's dated check-ins, comments and venues — stay until you remove them. The
 file is created owner-only (directory `0700`, database `0600`, and older
 installs are tightened on open). `untappd_cache_forget` deletes one user's
-cached check-ins, distinct-beers list and sync state after a confirmation
+cached check-ins, distinct-beers list, venue history, wishlist copy, liked
+breweries, local favorites, venue drinks and sync state after a confirmation
 (preview shows the username and row counts); it touches only the local cache,
 never Untappd, and a later sync can re-fetch. Deleting the file removes
 everything.

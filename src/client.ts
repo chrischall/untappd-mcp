@@ -10,6 +10,13 @@ import {
   RateLimitError,
   UnreachableError,
 } from '@chrischall/mcp-utils';
+import {
+  RateLimitTracker,
+  computeRateLimitStatus,
+  configuredHourlyLimit,
+  observeResponse,
+  type ApiCallObservation,
+} from './ratelimit.js';
 
 // Load .env for local (Node) dev; silently skip if dotenv is unavailable (e.g.
 // the mcpb bundle). `loadDotenvSafely` swallows a missing dotenv module and
@@ -24,8 +31,6 @@ if (import.meta.url) {
 const BASE_URL = 'https://api.untappd.com/v4';
 const SERVICE = 'Untappd';
 const REQUEST_TIMEOUT_MS = 30_000;
-// Untappd's limit is per hour, so a remaining-count older than that says nothing.
-const QUOTA_WINDOW_MS = 60 * 60 * 1000;
 
 // Non-secret client constants that mimic the Untappd iPad app (v4.7.13). The
 // API accepts requests carrying these; NONE are user secrets (the secrets are
@@ -214,8 +219,9 @@ export class UntappdClient {
 
   private token: string | null;
   private loginInFlight: Promise<string> | null = null;
-  /** Last `X-Ratelimit-Remaining` seen, and when (see {@link quotaRemaining}). */
-  private lastQuota: { remaining: number; at: number } | null = null;
+  /** Every response this process received within the rolling hour (see src/ratelimit.ts). */
+  readonly rateLimit = new RateLimitTracker();
+  private readonly apiCallListeners: Array<(o: ApiCallObservation) => void> = [];
   private tokenIsSupplied: boolean;
 
   /**
@@ -275,22 +281,36 @@ export class UntappdClient {
   }
 
   /**
-   * Calls left this hour, from the most recent response's
-   * `X-Ratelimit-Remaining` — or null when no response has carried the header
-   * within the hour. Untappd's public API documents the header; whether the
-   * private v4 endpoints send it is unverified, so every consumer must treat
-   * null as "unknown" and fall back to its own budget.
+   * Estimated calls left this hour, or null before this process has made any
+   * call in the window. Rests on a LOCAL count of calls (the v4 API sends
+   * `X-Ratelimit-Remaining: 0` on every success, so the header is only believed
+   * once it has reported a live non-zero value, or on a 429) — see
+   * src/ratelimit.ts. Consumers must still treat null as "unknown".
    */
   get quotaRemaining(): number | null {
-    if (!this.lastQuota || Date.now() - this.lastQuota.at > QUOTA_WINDOW_MS) return null;
-    return this.lastQuota.remaining;
+    const obs = this.rateLimit.observations();
+    if (obs.length === 0) return null;
+    return computeRateLimitStatus(obs, Date.now(), { configuredLimit: configuredHourlyLimit() }).estimated_remaining;
+  }
+
+  /**
+   * Subscribe to every API response (status + rate-limit headers). The stdio
+   * server uses it to persist the call log into the shared cache file, so other
+   * processes (and the next one) know what this hour has already spent.
+   */
+  onApiCall(listener: (o: ApiCallObservation) => void): void {
+    this.apiCallListeners.push(listener);
   }
 
   private noteQuota(res: Response): void {
-    const raw = res.headers.get('x-ratelimit-remaining');
-    const n = raw === null ? NaN : Number(raw);
-    if (raw !== null && raw.trim() !== '' && Number.isFinite(n) && n >= 0) {
-      this.lastQuota = { remaining: Math.floor(n), at: Date.now() };
+    const o = observeResponse(res.status, res.headers);
+    this.rateLimit.record(o);
+    for (const l of this.apiCallListeners) {
+      try {
+        l(o);
+      } catch {
+        /* a listener failure must never fail the API call */
+      }
     }
   }
 

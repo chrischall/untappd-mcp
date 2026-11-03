@@ -80,6 +80,13 @@
           "isSecret": false
         },
         {
+          "name": "UNTAPPD_RATE_LIMIT_PER_HOUR",
+          "description": "Hourly Untappd API call limit the syncs' stop-before-429 guard enforces (default 100, Untappd's documented per-token limit). Only change it if Untappd gives your token a different limit.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
           "name": "UNTAPPD_PHOTO_DIR",
           "description": "The directory untappd_checkin's photo_path must be inside (several allowed, separated by :). Defaults to ~/Downloads/untappd-mcp — put a photo there to attach it. Any other file is refused, so a prompt-injected shout or comment can't publish an arbitrary image from your disk.",
           "isRequired": false,

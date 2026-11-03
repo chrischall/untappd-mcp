@@ -43,6 +43,11 @@ env:
     help: >-
       IANA timezone (e.g. America/New_York) that check-ins are stamped with
       when a call passes no timezone. Defaults to the server's own zone.
+  - name: UNTAPPD_RATE_LIMIT_PER_HOUR
+    required: false
+    help: >-
+      Hourly Untappd API call limit the syncs' stop-before-429 guard enforces
+      (default 100, Untappd's documented per-token limit).
   - name: UNTAPPD_PHOTO_DIR
     required: false
     help: >-

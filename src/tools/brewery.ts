@@ -2,9 +2,18 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { minifiedResult, resolveView, toolAnnotations, viewParam, viewResult } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
-import { UNTAPPD_VIEWS, compactBreweryBeers, upstreamCompact } from '../compact.js';
+import { UNTAPPD_VIEWS, compactBreweryBeerList, upstreamCompact } from '../compact.js';
+import type { CacheStore } from '../cache/store.js';
+import { BREWERY_BEERS_DEFAULT_LIMIT, BREWERY_BEERS_TTL_MS, getBreweryBeers } from '../cache/brewery-beers.js';
+import { optionalCache } from './cache-optional.js';
+import { favoriteLookup } from '../cache/favorites.js';
 
-export function registerBreweryTools(server: McpServer, client: UntappdClient): void {
+export function registerBreweryTools(
+  server: McpServer,
+  client: UntappdClient,
+  cacheProvider?: () => CacheStore,
+): void {
+  const cacheOrNone = optionalCache(cacheProvider);
   server.registerTool(
     'untappd_search_brewery',
     {
@@ -31,7 +40,9 @@ export function registerBreweryTools(server: McpServer, client: UntappdClient): 
       title: 'Get Untappd brewery detail',
       description:
         'Get full detail for a brewery by its Untappd brewery id: description, location, type, rating, total ' +
-        'check-ins, and popular beers. Get an id from untappd_search_brewery. Read-only.',
+        'check-ins, and popular beers. Get an id from untappd_search_brewery. Read-only. Its ' +
+        'claimed_status.follow_status is whether the SIGNED-IN account follows/likes the brewery — never another ' +
+        "user's; for theirs, run untappd_sync_brewery_likes and read untappd_favorites_list (source \"untappd\").",
       annotations: toolAnnotations({ title: 'Get Untappd brewery detail', readOnly: true, idempotent: true, openWorld: true }),
       inputSchema: z.object({
         brewery_id: z.number().int().positive().describe('Untappd brewery id'),
@@ -50,8 +61,17 @@ export function registerBreweryTools(server: McpServer, client: UntappdClient): 
     {
       title: "Get a brewery's beer list",
       description:
-        'Get the beers a brewery makes, by brewery id, with per-beer rating and check-in counts. Supports sorting ' +
-        'and paging. Get an id from untappd_search_brewery. Read-only.',
+        'Get the beers a brewery makes, by brewery id, with per-beer global rating, check-in count, ABV, style and ' +
+        'in_production. Supports sorting and paging. Get an id from untappd_search_brewery. Lists are CACHED locally ' +
+        `for ${BREWERY_BEERS_TTL_MS / 86_400_000} days (source:"cache"|"api", fetched_at, expires_at): a fresh cached list answers ` +
+        'without an API call — the default popularity order from the cached top-of-list, other sorts once the whole ' +
+        'list is cached (sorted locally). refresh:true re-fetches. The compact result has the same keys with or ' +
+        'without the cache (source:"api" and null fetched_at/expires_at when no cache is available), with ' +
+        'pagination {offset, limit, next_offset}. Untappd\'s per-beer has_had / your-count on this endpoint ' +
+        'describe the AUTHENTICATED account, never the user you are asking about, so have_had / your_count are ' +
+        'never cached or returned on either path — use untappd_cache_has_had_many for any user. With the cache, the result carries favorite {is_favorite, sources, ' +
+        'reason} for the brewery and on each favorite beer (derived from username\'s history or added with ' +
+        'untappd_favorite_add; default your account). view:"full" always calls Untappd and returns its raw page. Read-only.',
       annotations: toolAnnotations({ title: "Get a brewery's beer list", readOnly: true, idempotent: true, openWorld: true }),
       inputSchema: z.object({
         brewery_id: z.number().int().positive().describe('Untappd brewery id'),
@@ -61,20 +81,49 @@ export function registerBreweryTools(server: McpServer, client: UntappdClient): 
           .enum(['name', 'style', 'abv', 'rating', 'count'])
           .optional()
           .describe('Sort order (default by popularity)'),
+        refresh: z.boolean().optional().describe('Re-fetch from Untappd even if a fresh cached list exists (default false)'),
+        username: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Whose favorites to mark (cache only; default your configured account)'),
         view: viewParam(UNTAPPD_VIEWS, {
-          note: 'compact keeps each beer\'s identity, rating and counts and drops the description, label URLs and the copy of this brewery repeated on every row; "full" returns Untappd\'s whole page.',
+          note: 'compact keeps each beer\'s identity, rating and counts and drops the description, label URLs and the copy of this brewery repeated on every row; "full" returns Untappd\'s whole page (always fetched live).',
         }),
       }),
     },
     // Unlike its `/brewery/info` sibling above, this rung is NOT forwarded to
     // Untappd: `/brewery/beer_list/` is not one of the endpoints documented to
     // honour an upstream `compact`, and sending an unverified parameter to see
-    // what happens is not a rung. The projection is entirely ours and is
-    // grounded on a live capture — see `compactBreweryBeer`.
-    async ({ brewery_id, limit, offset, sort, view }) => {
+    // what happens is not a rung. The projection is entirely ours — see
+    // `compactBreweryBeerList`, the ONE shape both the cached and no-cache
+    // paths return.
+    async ({ brewery_id, limit, offset, sort, refresh, username, view }) => {
       const v = resolveView(view, UNTAPPD_VIEWS);
-      const data = await client.get(`/brewery/beer_list/${brewery_id}`, { limit, offset, sort });
-      return viewResult(v, v === 'compact' ? compactBreweryBeers(data) : data);
+      const cache = cacheOrNone();
+      // view:"full" wants Untappd's raw page, so it always fetches (and seeds the cache).
+      // Without a cache this is a plain fetch mapped through the same rows.
+      const r = await getBreweryBeers(client, cache, brewery_id, { limit, offset, sort, refresh: refresh || v === 'full' });
+      if (v === 'full') return viewResult(v, r.raw);
+      // Drift-safe like every compact rung: a fetched page without beers.items is
+      // returned raw (with a stderr note) rather than as an empty projection.
+      if (r.source === 'api' && !Array.isArray((r.raw as { beers?: { items?: unknown } } | undefined)?.beers?.items)) {
+        process.stderr.write('[untappd-mcp] compact: expected beers.items array; returning raw response\n');
+        return viewResult(v, r.raw);
+      }
+      // Favorites are applied on read (never cached): the brewery itself, and any favorite beer.
+      const user = username ?? client.loginName;
+      const favs = cache && user ? await favoriteLookup(cache, [user], { brewery: [brewery_id], beer: r.beers.map((b) => b.bid) }) : null;
+      return viewResult(
+        v,
+        compactBreweryBeerList(
+          r,
+          { offset: offset ?? 0, limit: limit ?? BREWERY_BEERS_DEFAULT_LIMIT },
+          favs
+            ? { brewery: favs.get('brewery', brewery_id), beer: (bid) => (favs.isFavorite('beer', bid) ? favs.get('beer', bid) : undefined) }
+            : undefined,
+        ),
+      );
     },
   );
 }

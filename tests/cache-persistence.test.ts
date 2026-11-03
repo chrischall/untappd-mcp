@@ -150,7 +150,7 @@ describe('cache persistence across processes (built server)', () => {
       expect(status).toMatchObject({
         cache_path: expectedPath,
         journal_mode: 'wal',
-        schema_version: 3,
+        schema_version: 6,
         users: [{ username: 'mer', cached_distinct_beers: 120, total_distinct_beers: 120, coverage_complete: true }],
       });
       expect(status.file_size_bytes).toBeGreaterThan(0);
@@ -173,11 +173,24 @@ describe('cache persistence across processes (built server)', () => {
         cwd: home,
         env: { HOME: home, UNTAPPD_CACHE_DIR: cacheDir, MOCK_USERS: users, MOCK_LOG: logA, MOCK_FAIL_AFTER: '3' },
       });
-      await expect(a.call('untappd_sync_user_beers', { username: 'mer', max_pages: 50 })).rejects.toThrow(/Rate limited/);
+      // A 429 mid-batch is a clean stop with resume info, not a failed call.
+      const stopped = await a.call('untappd_sync_user_beers', { username: 'mer', max_pages: 50 });
+      expect(stopped).toMatchObject({
+        stopped_for_rate_limit: true,
+        another_run_needed: true,
+        cached_distinct_beers: 150,
+        rate_limit: { reason: expect.stringMatching(/429/) },
+      });
       await a.kill();
 
       const b = startServer({ cwd: home, env: { HOME: home, UNTAPPD_CACHE_DIR: cacheDir, MOCK_USERS: users, MOCK_LOG: logB } });
       const before = await b.call('untappd_cache_status', {});
+      // Process A's 4 calls (3 pages + the 429) were logged in the shared file,
+      // so the fresh process knows about them — and that 429's wait.
+      expect(before.rate_limit).toMatchObject({ calls_last_hour: 4, last_429_at: expect.any(String) });
+      // Wait out that 429's Retry-After (1s) so the guard lets B resume.
+      const until = Date.parse(before.rate_limit.blocked_until ?? before.rate_limit.last_429_at);
+      await new Promise((r) => setTimeout(r, Math.max(0, until - Date.now()) + 50));
       expect(before.users).toEqual([
         expect.objectContaining({ username: 'mer', cached_distinct_beers: 150, beers_offset: 150, coverage_complete: false }),
       ]);
@@ -196,7 +209,9 @@ describe('cache persistence across processes (built server)', () => {
   it('two server processes syncing into one cache at once lose no rows and leave it intact', async () => {
     const home = tmp('untappd-home-');
     const users = JSON.stringify({ alice: 1500, bob: 1500 });
-    const env = { HOME: home, MOCK_USERS: users };
+    // 2 users x 30 pages x 2 processes = 120 calls: over the real 100/hour, so
+    // raise the limit the stop-before-429 guard enforces for this mock run.
+    const env = { HOME: home, MOCK_USERS: users, UNTAPPD_RATE_LIMIT_PER_HOUR: '10000' };
     try {
       const p1 = startServer({ cwd: home, env });
       const p2 = startServer({ cwd: home, env });

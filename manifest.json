@@ -42,6 +42,7 @@
         "UNTAPPD_UTV": "${user_config.untappd_utv}",
         "UNTAPPD_USER_AGENT": "${user_config.untappd_user_agent}",
         "UNTAPPD_TIMEZONE": "${user_config.untappd_timezone}",
+        "UNTAPPD_RATE_LIMIT_PER_HOUR": "${user_config.untappd_rate_limit_per_hour}",
         "UNTAPPD_PHOTO_DIR": "${user_config.untappd_photo_dir}",
         "UNTAPPD_CACHE_DB": "${user_config.untappd_cache_db}",
         "UNTAPPD_CACHE_DIR": "${user_config.untappd_cache_dir}"
@@ -105,6 +106,12 @@
       "type": "string",
       "title": "Check-in Timezone",
       "description": "IANA timezone (e.g. America/New_York) that check-ins are stamped with when the call doesn't pass timezone. Set it when the server runs somewhere other than the drinker's zone (e.g. a hosted connector, usually UTC). Defaults to the server process's zone.",
+      "required": false
+    },
+    "untappd_rate_limit_per_hour": {
+      "type": "string",
+      "title": "Hourly Rate Limit",
+      "description": "Hourly Untappd API call limit the syncs' stop-before-429 guard enforces (default 100, Untappd's documented per-token limit). Only change it if Untappd gives your token a different limit.",
       "required": false
     },
     "untappd_photo_dir": {
@@ -288,12 +295,32 @@
       "description": "Sync a user's complete distinct-beers list into the cache (cheapest full has-had coverage; resumable)"
     },
     {
+      "name": "untappd_sync_user_venues",
+      "description": "Sync a user's complete venue history into the cache (first/recent visit, visit count; resumable, incremental refresh)"
+    },
+    {
+      "name": "untappd_sync_wishlist",
+      "description": "Mirror a user's wishlist into the cache so picks can boost wishlisted beers (resumable; read-only on Untappd)"
+    },
+    {
+      "name": "untappd_sync_brewery_likes",
+      "description": "Mirror the breweries a user likes/follows on Untappd into the cache, as \"untappd\" favorites (resumable; read-only on Untappd)"
+    },
+    {
+      "name": "untappd_cache_has_visited",
+      "description": "Has a user been to these places? Batch match by venue id, name + city/state, or lat/lng radius, from the cache (no API call)"
+    },
+    {
+      "name": "untappd_sync_venue_drinks",
+      "description": "Opt-in: fetch the beer from each cached venue's first/recent visit check-in (partial 'what did they drink there'; budgeted by max_calls)"
+    },
+    {
       "name": "untappd_cache_has_had",
       "description": "Check if a user has had a beer, from the cache — both sources (no API call)"
     },
     {
       "name": "untappd_cache_has_had_many",
-      "description": "Batch had/not-had for many beer ids, from the cache (no API call)"
+      "description": "Batch had/not-had for many beer ids, for one user or a group (none_had / any_not_had), from the cache (no API call)"
     },
     {
       "name": "untappd_cache_not_had",
@@ -305,7 +332,7 @@
     },
     {
       "name": "untappd_top_not_had",
-      "description": "From a list of beer ids, the top N a user has NOT had, ranked by rating, with a style filter"
+      "description": "From a list of beer ids, the top N a user (or a whole group) has NOT had, ranked by rating, with a style filter"
     },
     {
       "name": "untappd_menu_pick",
@@ -322,6 +349,22 @@
     {
       "name": "untappd_cache_forget",
       "description": "Delete one user's cached check-ins, distinct beers and sync state from the local cache (confirmation-gated)"
+    },
+    {
+      "name": "untappd_favorite_add",
+      "description": "Mark a beer, brewery or venue as a favorite, with an optional note (local cache only; never writes to Untappd)"
+    },
+    {
+      "name": "untappd_favorite_remove",
+      "description": "Remove a manual favorite beer, brewery or venue (local cache only)"
+    },
+    {
+      "name": "untappd_favorites_list",
+      "description": "List a user's favorite beers, breweries and venues: derived from their history (tunable thresholds) and manual, each with a reason"
+    },
+    {
+      "name": "untappd_trip_check",
+      "description": "Check trip stops against a user's (or group's) cached history: visited with dates, brewery beers had, top not-had beers, favorites and a near-a-favorite hint"
     }
   ],
   "compatibility": {

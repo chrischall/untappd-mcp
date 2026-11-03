@@ -5,6 +5,7 @@
 //
 //   MOCK_USERS        JSON {"<username>": <distinct beer count>}
 //   MOCK_FAIL_AFTER   optional: answer 429 once this many requests were served
+//   MOCK_RETRY_AFTER  optional: the 429's Retry-After seconds (default 1)
 import { appendFileSync } from 'node:fs';
 
 const users = JSON.parse(process.env.MOCK_USERS ?? '{}');
@@ -30,7 +31,13 @@ const json = (status, body) =>
 globalThis.fetch = async (input) => {
   const url = new URL(typeof input === 'string' ? input : input.url);
   if (process.env.MOCK_LOG) appendFileSync(process.env.MOCK_LOG, `${url.pathname}${url.search}\n`);
-  if (served >= failAfter) return json(429, { meta: { code: 429, error_detail: 'rate limited' } });
+  if (served >= failAfter) {
+    // Retry-After lets the next process's rate guard see when the wait ends.
+    return new Response(JSON.stringify({ meta: { code: 429, error_detail: 'rate limited' } }), {
+      status: 429,
+      headers: { 'content-type': 'application/json', 'retry-after': process.env.MOCK_RETRY_AFTER ?? '1' },
+    });
+  }
   served++;
   const m = url.pathname.match(/^\/v4\/user\/beers\/([^/]+)$/);
   if (m) {
