@@ -145,7 +145,8 @@ Non-obvious behaviours that were each fixed the hard way:
   (global), `user_venues`, `list_sync_state` (per user+list offset cursor), `brewery_beer_lists` +
   `brewery_beers` (TTL'd; never store brewery/beer_list's `have_had`, which is the AUTHENTICATED
   account's), `response_cache` (short-TTL raw responses), `wishlist`, `favorites` (manual, local only),
-  `venue_drinks`, `api_calls`; v5 adds `brewery_likes`. Per-user tables are listed in `PER_USER_TABLES`, which drives
+  `venue_drinks`, `api_calls`; v5 adds `brewery_likes`; v6 adds `brewery_beers.ibu` (so `untappd_brewery_beers`' ONE
+  compact shape — `compactBreweryBeerList` — is identical with and without the cache). Per-user tables are listed in `PER_USER_TABLES`, which drives
   `forgetUser` — add any new per-user table there.
 - **Schema is versioned** (`PRAGMA user_version`, `SCHEMA_VERSION` in `store.ts`). A change goes in
   `VERSIONED_MIGRATIONS` with the next number and must be ADDITIVE: never drop/rewrite rows, since

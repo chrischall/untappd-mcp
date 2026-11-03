@@ -55,6 +55,7 @@ describe('mapBreweryBeerItem', () => {
       beer_name: 'Beer 7',
       style: 'IPA - American',
       abv: 6,
+      ibu: null,
       rating_score: 3.7,
       rating_count: 493,
       checkin_count: 993,

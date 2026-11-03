@@ -26,7 +26,7 @@ const BEER_PAGE = {
   beers: {
     count: 2,
     items: [
-      { has_had: true, total_user_count: 4, total_count: 900, beer: { bid: 1, beer_name: 'Night Swim', beer_style: 'Porter', beer_abv: 6, rating_score: 3.9, rating_count: 800, is_in_production: 1 }, brewery: { brewery_id: 42, brewery_name: 'Coppertail Brewing Co.' } },
+      { has_had: true, total_user_count: 4, total_count: 900, beer: { bid: 1, beer_name: 'Night Swim', beer_style: 'Porter', beer_abv: 6, beer_ibu: 30, rating_score: 3.9, rating_count: 800, is_in_production: 1 }, brewery: { brewery_id: 42, brewery_name: 'Coppertail Brewing Co.' } },
       { has_had: false, total_user_count: 0, total_count: 500, beer: { bid: 2, beer_name: 'Free Dive', beer_style: 'IPA', beer_abv: 6.5, rating_score: 3.7, rating_count: 400, is_in_production: 0 }, brewery: { brewery_id: 42, brewery_name: 'Coppertail Brewing Co.' } },
     ],
   },
@@ -57,13 +57,16 @@ describe('cache-backed read tools (brewery_beers 7-day, venue_menu / venue_activ
     get.mockResolvedValue(BEER_PAGE as never);
     const a = parse(await harness.callTool('untappd_brewery_beers', { brewery_id: 42 }));
     expect(a).toMatchObject({ brewery_id: 42, brewery_name: 'Coppertail Brewing Co.', total_count: 2, source: 'api' });
-    expect(a.beers.items[0]).toEqual({ bid: 1, name: 'Night Swim', style: 'Porter', abv: 6, rating: 3.9, rating_count: 800, checkin_count: 900, in_production: true });
+    expect(a.beers.items[0]).toEqual({ bid: 1, name: 'Night Swim', style: 'Porter', abv: 6, ibu: 30, brewery: 'Coppertail Brewing Co.', rating: 3.9, rating_count: 800, checkin_count: 900, in_production: true });
+    expect(a.pagination).toEqual({ offset: 0, limit: 25, next_offset: null });
     expect(a.beers.items[1].in_production).toBe(false);
 
     at(BREWERY_BEERS_TTL_MS - 1000);
     const b = parse(await harness.callTool('untappd_brewery_beers', { brewery_id: 42 }));
     expect(b.source).toBe('cache');
     expect(b.fetched_at).toBe(T0.toISOString());
+    // ibu survives the round trip through the cache, so a hit matches the fetch.
+    expect(b.beers.items).toEqual(a.beers.items);
     expect(get).toHaveBeenCalledTimes(1);
 
     at(BREWERY_BEERS_TTL_MS + 1000);
@@ -84,6 +87,30 @@ describe('cache-backed read tools (brewery_beers 7-day, venue_menu / venue_activ
     get.mockResolvedValue(BEER_PAGE as never);
     const text = (await harness.callTool('untappd_brewery_beers', { brewery_id: 42 })) as { content: { text: string }[] };
     expect(text.content[0].text).not.toMatch(/have_had|has_had|your_count/);
+  });
+
+  // One compact shape whatever the cache state: a caller must not see different
+  // keys depending on whether the local cache happened to open.
+  it('brewery_beers: the no-cache and cached paths return the same compact shape', async () => {
+    const noCache = await createTestHarness((server) => registerBreweryTools(server, client));
+    try {
+      get.mockResolvedValue(BEER_PAGE as never);
+      const plain = parse(await noCache.callTool('untappd_brewery_beers', { brewery_id: 42 }));
+      const viaApi = parse(await harness.callTool('untappd_brewery_beers', { brewery_id: 42 }));
+      const viaCache = parse(await harness.callTool('untappd_brewery_beers', { brewery_id: 42 }));
+      expect(viaCache.source).toBe('cache');
+      const keys = (o: Record<string, unknown>) => Object.keys(o).sort();
+      for (const other of [viaApi, viaCache]) {
+        expect(keys(other)).toEqual(keys(plain));
+        expect(keys(other.beers)).toEqual(keys(plain.beers));
+        expect(keys(other.pagination)).toEqual(keys(plain.pagination));
+        other.beers.items.forEach((it: Record<string, unknown>, i: number) => expect(keys(it)).toEqual(keys(plain.beers.items[i])));
+        expect(other.beers.items).toEqual(plain.beers.items);
+      }
+      expect(plain).toMatchObject({ source: 'api', fetched_at: null, expires_at: null });
+    } finally {
+      await noCache.close();
+    }
   });
 
   it('brewery_beers: view "full" always goes upstream and returns the raw page, but still seeds the cache', async () => {

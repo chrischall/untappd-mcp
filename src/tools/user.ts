@@ -24,7 +24,9 @@ function resolveUser(username: string | undefined, loginName: string | null): st
 /**
  * user/venues sort values. Untappd silently IGNORES a value it doesn't know
  * (the old 'name' / 'checkin' / 'highest_rated' never sorted anything), so the
- * friendly aliases map onto the real keys; there is no rating sort for venues.
+ * friendly aliases map onto the real keys. There is no rating sort for venues:
+ * 'highest_rated' is kept only so pre-existing callers don't start failing
+ * validation, as a DEPRECATED alias of highest_checkin.
  */
 export const USER_VENUE_SORT_KEYS = {
   date: 'date',
@@ -36,6 +38,8 @@ export const USER_VENUE_SORT_KEYS = {
   lowest_checkin: 'lowest_checkin',
   name: 'venue_name_asc',
   checkin: 'highest_checkin',
+  /** @deprecated Untappd has no venue rating sort; kept for old callers. */
+  highest_rated: 'highest_checkin',
 } as const;
 const USER_VENUE_SORTS = Object.keys(USER_VENUE_SORT_KEYS) as [keyof typeof USER_VENUE_SORT_KEYS, ...Array<keyof typeof USER_VENUE_SORT_KEYS>];
 
@@ -190,7 +194,8 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
           .optional()
           .describe(
             'Sort order (default most recent). Untappd keys: date, recent, date_asc, venue_name_asc, venue_name_desc, ' +
-              'highest_checkin, lowest_checkin. Aliases: name = venue_name_asc, checkin = highest_checkin.',
+              'highest_checkin, lowest_checkin. Aliases: name = venue_name_asc, checkin = highest_checkin. ' +
+              'highest_rated is deprecated (Untappd has no venue rating sort) and is sent as highest_checkin.',
           ),
       }),
     },

@@ -84,37 +84,6 @@ export function compactUserBeer(item: unknown): Dict {
 }
 
 /**
- * Slim one `/brewery/beer_list/` item.
- *
- * This endpoint needs its OWN projector rather than reusing
- * {@link compactBeerResult}, and the reason is easy to miss: the item shape IS
- * `{beer:{…}, brewery:{…}}`-wrapped, so `beerCore` fits perfectly — but the two
- * fields the search projector adds on top of it are named differently here.
- * `/search/beer` says `checkin_count` / `have_had`; `/brewery/beer_list/` says
- * `total_count` / `has_had`. Reusing the search projector would therefore have
- * emitted a page of records carrying two silent `undefined`s — a beer with no
- * check-ins that you have never had — and `projectItems`' drift guard cannot
- * catch that, because the CONTAINER is exactly where it expects it to be.
- * Established against a live capture of brewery 1142, not by inference.
- *
- * Rating rides along because the tool's own description promises "per-beer
- * rating and check-in counts"; a compact rung that dropped them would
- * contradict the thing the caller was told they were getting.
- */
-export function compactBreweryBeer(item: unknown): Dict {
-  const i = asDict(item) ?? {};
-  const beer = asDict(i.beer) ?? {};
-  return {
-    ...beerCore(i),
-    rating: beer.rating_score,
-    rating_count: beer.rating_count,
-    checkin_count: i.total_count,
-    have_had: i.has_had,
-    your_count: i.total_user_count,
-  };
-}
-
-/**
  * Project `<container>.items` in a response with `mapFn`, preserving the rest of
  * the container (pagination etc.). Drift-safe: returns the raw response
  * unchanged (with a stderr warning) when the array isn't where expected.
@@ -136,19 +105,77 @@ export const compactWishlist = (resp: unknown): unknown => projectItems(resp, 'b
 export const compactUserBeers = (resp: unknown): unknown => projectItems(resp, 'beers', compactUserBeer);
 
 /**
- * Project a brewery beer list, and drop `sorting_options` with it.
+ * The ONE compact shape of `untappd_brewery_beers`, whether its rows came from
+ * Untappd just now or from the local cache — so a caller never sees different
+ * keys depending on whether the cache happened to open. Both paths first map
+ * the page through `mapBreweryBeerItem` (store.ts), which is where the
+ * endpoint's own naming is read: `/brewery/beer_list/` says `total_count` (not
+ * `checkin_count`) and `has_had` (not `have_had`), established against a live
+ * capture of brewery 1142.
  *
- * `sorting_options` is 16 `{sort_key, sort_name}` pairs of UI chrome repeated on
- * every page. The tool's `sort` parameter is already a closed enum on its input
- * schema, so the list tells a caller nothing they were not handed with the
- * schema — it is pure duplication of a contract they already hold.
+ * It evolves the old live-only projection as a superset: every item keeps
+ * bid/name/style/abv/ibu/brewery/rating/rating_count/checkin_count and gains
+ * in_production (+ favorite when the cache marks one). Two old item fields are
+ * gone on purpose: `have_had` / `your_count` were the item's `has_had` /
+ * `total_user_count`, which describe the AUTHENTICATED account, never the user
+ * being asked about. The old top-level `total_count` and `beers.count` stay;
+ * Untappd's `sorting_options` (UI chrome duplicating the input enum) stays
+ * dropped; `pagination` is ours, so paging reads the same off either path.
  */
-export function compactBreweryBeers(resp: unknown): unknown {
-  const projected = projectItems(resp, 'beers', compactBreweryBeer);
-  // projectItems returns the SAME object on drift; don't reshape that.
-  if (projected === resp) return resp;
-  const { sorting_options: _dropped, ...rest } = projected as Dict;
-  return rest;
+export function compactBreweryBeerList(
+  r: {
+    brewery_id: number;
+    brewery_name: string | null;
+    total_count: number | null;
+    source: 'cache' | 'api';
+    fetched_at: string | null;
+    expires_at: string | null;
+    beers: ReadonlyArray<{
+      bid: number;
+      beer_name: string | null;
+      style: string | null;
+      abv: number | null;
+      ibu: number | null;
+      rating_score: number | null;
+      rating_count: number | null;
+      checkin_count: number | null;
+      in_production: boolean | null;
+    }>;
+  },
+  page: { offset: number; limit: number },
+  favorites?: { brewery: unknown; beer: (bid: number) => unknown },
+): Dict {
+  const count = r.beers.length;
+  const more = r.total_count !== null ? page.offset + count < r.total_count : count > 0 && count >= page.limit;
+  return {
+    brewery_id: r.brewery_id,
+    brewery_name: r.brewery_name,
+    total_count: r.total_count,
+    source: r.source,
+    fetched_at: r.fetched_at,
+    expires_at: r.expires_at,
+    ...(favorites ? { favorite: favorites.brewery } : {}),
+    pagination: { offset: page.offset, limit: page.limit, next_offset: more ? page.offset + count : null },
+    beers: {
+      count,
+      items: r.beers.map((b) => {
+        const fav = favorites?.beer(b.bid);
+        return {
+          bid: b.bid,
+          name: b.beer_name,
+          style: b.style,
+          abv: b.abv,
+          ibu: b.ibu,
+          brewery: r.brewery_name,
+          rating: b.rating_score,
+          rating_count: b.rating_count,
+          checkin_count: b.checkin_count,
+          in_production: b.in_production,
+          ...(fav !== undefined ? { favorite: fav } : {}),
+        };
+      }),
+    },
+  };
 }
 
 /**

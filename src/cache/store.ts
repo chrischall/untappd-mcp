@@ -367,6 +367,8 @@ export interface BreweryBeerRow {
   beer_name: string | null;
   style: string | null;
   abv: number | null;
+  /** IBU as brewery/beer_list reports it (null when absent, or cached before schema v6). */
+  ibu: number | null;
   rating_score: number | null;
   rating_count: number | null;
   checkin_count: number | null;
@@ -708,6 +710,7 @@ export function mapBreweryBeerItem(
     beer_name: str(b.beer_name),
     style: str(b.beer_style),
     abv: num(b.beer_abv),
+    ibu: num(b.beer_ibu),
     rating_score: num(b.rating_score),
     rating_count: num(b.rating_count),
     checkin_count: num(i.total_count),
@@ -1044,6 +1047,14 @@ export const VERSIONED_MIGRATIONS: ReadonlyArray<{ version: number; statements: 
        )`,
     ],
   },
+  {
+    // brewery/beer_list items carry `beer_ibu`, which the old live-only compact
+    // projection returned; caching it keeps untappd_brewery_beers' compact shape
+    // identical with and without the cache. Additive: rows cached before this
+    // read back ibu null until the list next refreshes (7-day TTL).
+    version: 6,
+    statements: [`ALTER TABLE brewery_beers ADD COLUMN ibu REAL`],
+  },
 ];
 
 /** Tables holding one user's data, cleared by {@link CheckinStoreCore.forgetUser}. */
@@ -1111,7 +1122,15 @@ export class CheckinStoreCore {
       }
       for (const m of VERSIONED_MIGRATIONS) {
         if (m.version <= current) continue;
-        for (const stmt of m.statements) this.db.execScript(stmt);
+        for (const stmt of m.statements) {
+          try {
+            this.db.execScript(stmt);
+          } catch (e) {
+            // An ADD COLUMN step is idempotent: a file whose user_version lags
+            // its real schema (e.g. reset by hand) already has the column.
+            if (!/ADD COLUMN/i.test(stmt) || !/duplicate column/i.test(String((e as Error)?.message))) throw e;
+          }
+        }
       }
       if (current !== SCHEMA_VERSION) this.db.execScript(`PRAGMA user_version = ${SCHEMA_VERSION}`);
       this.version = SCHEMA_VERSION;
@@ -1824,6 +1843,7 @@ export class CheckinStoreCore {
         beer_name: str(r.beer_name),
         style: str(r.style),
         abv: num(r.abv),
+        ibu: num(r.ibu),
         rating_score: num(r.rating_score),
         rating_count: num(r.rating_count),
         checkin_count: num(r.checkin_count),
@@ -1874,11 +1894,11 @@ export class CheckinStoreCore {
       );
       for (const r of page.rows) {
         this.db.run(
-          `INSERT INTO brewery_beers (brewery_id, bid, beer_name, style, abv, rating_score, rating_count,
+          `INSERT INTO brewery_beers (brewery_id, bid, beer_name, style, abv, ibu, rating_score, rating_count,
              checkin_count, in_production, popularity_rank, fetched_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(brewery_id, bid) DO UPDATE SET
-             beer_name = excluded.beer_name, style = excluded.style, abv = excluded.abv,
+             beer_name = excluded.beer_name, style = excluded.style, abv = excluded.abv, ibu = excluded.ibu,
              rating_score = excluded.rating_score, rating_count = excluded.rating_count,
              checkin_count = excluded.checkin_count, in_production = excluded.in_production,
              popularity_rank = COALESCE(excluded.popularity_rank, brewery_beers.popularity_rank),
@@ -1889,6 +1909,7 @@ export class CheckinStoreCore {
             r.beer_name,
             r.style,
             r.abv,
+            r.ibu,
             r.rating_score,
             r.rating_count,
             r.checkin_count,

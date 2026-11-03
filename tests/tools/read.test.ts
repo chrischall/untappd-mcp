@@ -368,10 +368,21 @@ describe('read tools', () => {
     expect(get).toHaveBeenCalledWith('/user/venues/someone', { limit: undefined, offset: undefined, sort: key });
   });
 
-  it('user_venues rejects highest_rated (Untappd has no such venue sort)', async () => {
+  // The pre-#252 enum accepted 'highest_rated', so rejecting it now would break
+  // old callers. Untappd has no rating sort for venues (the value was silently
+  // ignored before), so it stays as a deprecated alias of highest_checkin.
+  it('user_venues still accepts the deprecated highest_rated, as highest_checkin', async () => {
+    get.mockResolvedValueOnce({ venues: {} });
     const r = await harness.callTool('untappd_user_venues', { username: 'someone', sort: 'highest_rated' });
-    expect(r.isError).toBe(true);
-    expect(get).not.toHaveBeenCalled();
+    expect(r.isError).toBeFalsy();
+    expect(get).toHaveBeenCalledWith('/user/venues/someone', { limit: undefined, offset: undefined, sort: 'highest_checkin' });
+  });
+
+  it('user_venues documents highest_rated as a deprecated alias', async () => {
+    const { tools } = await harness.client.listTools();
+    const sort = (tools.find((t) => t.name === 'untappd_user_venues')!.inputSchema as any).properties.sort;
+    expect(sort.enum).toContain('highest_rated');
+    expect(sort.description).toMatch(/highest_rated.*deprecated/i);
   });
 
   it('venue_by_foursquare hits the foursquare_lookup path (url-encoded)', async () => {
@@ -414,14 +425,26 @@ describe('read tools', () => {
       name: 'Pale Ale',
       style: 'Pale Ale - American',
       abv: 5.6,
-      ibu: undefined,
+      ibu: null,
       brewery: 'Sierra Nevada Brewing Co.',
       rating: 3.62,
       rating_count: 550296,
       checkin_count: 1303919,
-      have_had: false,
-      your_count: 0,
+      in_production: null,
     });
+    expect(out).toMatchObject({
+      brewery_id: 1142,
+      brewery_name: 'Sierra Nevada Brewing Co.',
+      total_count: 723,
+      source: 'api',
+      fetched_at: null,
+      expires_at: null,
+      pagination: { offset: 0, limit: 25, next_offset: 1 },
+      beers: { count: 1 },
+    });
+    // has_had / total_user_count describe the AUTHENTICATED account, never the
+    // user being asked about — not emitted on the no-cache path either.
+    expect(text).not.toMatch(/have_had|has_had|your_count|total_user_count/);
     expect(text).not.toContain('beer_label');
     expect(text).not.toContain('sorting_options');
   });

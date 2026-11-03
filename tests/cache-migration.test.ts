@@ -113,8 +113,8 @@ describe('cache schema migration', () => {
     writeLegacyCache(path);
     const cache = CheckinCache.open(path);
     try {
-      expect(SCHEMA_VERSION).toBe(5);
-      expect((await cache.stats()).schema_version).toBe(5);
+      expect(SCHEMA_VERSION).toBe(6);
+      expect((await cache.stats()).schema_version).toBe(6);
       // Old rows survive…
       expect(await cache.cachedCount('mer')).toBe(1);
       expect(await cache.distinctBeersCount('mer')).toBe(1);
@@ -138,7 +138,7 @@ describe('cache schema migration', () => {
       cache.close();
     }
     const raw = new DatabaseSync(path);
-    expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 5 });
+    expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 6 });
     raw.close();
   });
 
@@ -151,7 +151,7 @@ describe('cache schema migration', () => {
     a.close();
     const b = CheckinCache.open(path);
     expect(await b.distinctBeersCount('mer')).toBe(1);
-    expect((await b.stats()).schema_version).toBe(5);
+    expect((await b.stats()).schema_version).toBe(6);
     b.close();
   });
 
@@ -164,7 +164,7 @@ describe('cache schema migration', () => {
     raw.exec('DROP INDEX idx_checkins_user_created; PRAGMA user_version = 2');
     raw.close();
     const cache = CheckinCache.open(path);
-    expect((await cache.stats()).schema_version).toBe(5);
+    expect((await cache.stats()).schema_version).toBe(6);
     expect((await cache.getState('mer'))?.beers_total).toBe(7);
     cache.close();
     const after = new DatabaseSync(path);
@@ -178,7 +178,7 @@ describe('cache schema migration', () => {
     const before = dumpV3Tables(path);
     const cache = CheckinCache.open(path);
     try {
-      expect((await cache.stats()).schema_version).toBe(5);
+      expect((await cache.stats()).schema_version).toBe(6);
       // Existing data reads back exactly as before.
       expect(await cache.cachedCount('mer')).toBe(2);
       expect(await cache.distinctBeersCount('mer')).toBe(2);
@@ -196,7 +196,7 @@ describe('cache schema migration', () => {
 
     const raw = new DatabaseSync(path);
     try {
-      expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 5 });
+      expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 6 });
       const cols = (t: string) => (raw.prepare(`PRAGMA table_info(${t})`).all() as Array<{ name: string }>).map((c) => c.name);
       expect(cols('venues')).toEqual([
         'venue_id', 'name', 'category', 'address', 'city', 'state', 'country', 'lat', 'lng', 'is_verified', 'updated_at',
@@ -232,7 +232,7 @@ describe('cache schema migration', () => {
     const before = dumpTables(path, V4_TABLES);
     const cache = CheckinCache.open(path);
     try {
-      expect((await cache.stats()).schema_version).toBe(5);
+      expect((await cache.stats()).schema_version).toBe(6);
       expect(await cache.userVenuesCount('mer')).toBe(1);
       expect(await cache.wishlistCount('mer')).toBe(1);
       expect(await cache.getListState('mer', 'venues')).toMatchObject({ complete: true, total_count: 1 });
@@ -248,7 +248,7 @@ describe('cache schema migration', () => {
     expect(dumpTables(path, V4_TABLES)).toEqual(before);
     const raw = new DatabaseSync(path);
     try {
-      expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 5 });
+      expect(raw.prepare('PRAGMA user_version').get()).toEqual({ user_version: 6 });
       const cols = (raw.prepare('PRAGMA table_info(brewery_likes)').all() as Array<{ name: string }>).map((c) => c.name);
       expect(cols).toEqual([
         'username', 'brewery_id', 'brewery_name', 'brewery_type', 'country', 'city', 'state', 'lat', 'lng', 'liked_at', 'synced_at',
@@ -287,6 +287,30 @@ describe('cache schema migration', () => {
     const db = (cache as unknown as { db: DatabaseSync }).db;
     expect(db.prepare('SELECT COUNT(*) AS n FROM api_calls').get()).toEqual({ n: 2 });
     cache.close();
+  });
+
+  it('steps a v5 cache to v6: adds brewery_beers.ibu, keeping every cached beer row', async () => {
+    const path = join(tmp(), 'checkins.db');
+    writeV4Cache(path);
+    const db = new DatabaseSync(path);
+    for (const m of VERSIONED_MIGRATIONS) if (m.version === 5) for (const stmt of m.statements) db.exec(stmt);
+    db.exec(`
+      PRAGMA user_version = 5;
+      INSERT INTO brewery_beer_lists (brewery_id, brewery_name, total_count, ranked_count, fetched_at)
+        VALUES (42, 'Coppertail', 1, 1, '2026-11-01T00:00:00.000Z');
+      INSERT INTO brewery_beers (brewery_id, bid, beer_name, style, abv, rating_score, rating_count, checkin_count, in_production, popularity_rank, fetched_at)
+        VALUES (42, 1, 'Night Swim', 'Porter', 6, 3.9, 800, 900, 1, 0, '2026-11-01T00:00:00.000Z');
+    `);
+    db.close();
+    const cache = CheckinCache.open(path);
+    try {
+      expect((await cache.stats()).schema_version).toBe(6);
+      const list = await cache.getBreweryBeerList(42);
+      expect(list?.beers).toHaveLength(1);
+      expect(list?.beers[0]).toMatchObject({ bid: 1, beer_name: 'Night Swim', ibu: null, checkin_count: 900 });
+    } finally {
+      cache.close();
+    }
   });
 
   it('leaves a cache written by a NEWER build untouched instead of downgrading it', async () => {
