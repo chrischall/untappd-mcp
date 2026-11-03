@@ -1,6 +1,7 @@
 import { createHelpfulError, RateLimitError, messageOf } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 import { mapBeerRow, type CacheStore, type DistinctBeerRow } from './store.js';
+import { checkRateBudget, resumeAdvice, stopFrom429, stopFromVerdict, type RateStop } from '../ratelimit.js';
 
 const PAGE_LIMIT = 50; // Untappd's max page size for /user/beers.
 // A resumed backfill re-reads this many already-fetched items: if beers dropped
@@ -24,6 +25,10 @@ export interface SyncBeersSummary {
    */
   stopped_at_bid: number | null;
   another_run_needed: boolean;
+  /** True when this run stopped early to stay under (or after hitting) the hourly rate limit. */
+  stopped_for_rate_limit: boolean;
+  /** Why it stopped and when to resume; present only when stopped_for_rate_limit. */
+  rate_limit?: RateStop;
   last_synced_at: string;
   note: string;
 }
@@ -105,8 +110,23 @@ export async function syncUserBeers(
   const gapNow = async (): Promise<number> =>
     total === null ? 0 : total - (await cache.distinctBeersCount(rawUsername));
 
+  let rateStop: RateStop | undefined;
   for (; pages < maxPages && !complete; ) {
-    const page = pages === 0 ? await firstFetch(offset) : await fetchBeersPage(client, encodedUser, offset);
+    // Stop BEFORE a call that would run into the hourly limit; progress so far
+    // is already persisted (setState after every page), so the next run resumes.
+    const verdict = await checkRateBudget(client, cache);
+    if (!verdict.ok) {
+      rateStop = stopFromVerdict(verdict);
+      break;
+    }
+    let page: BeersPage;
+    try {
+      page = pages === 0 ? await firstFetch(offset) : await fetchBeersPage(client, encodedUser, offset);
+    } catch (e) {
+      if (!(e instanceof RateLimitError)) throw e;
+      rateStop = stopFrom429(e);
+      break;
+    }
     pages++;
     if (page.total !== null) total = page.total;
     // An empty (e.g. first) page still means the list is fully paged.
@@ -185,7 +205,9 @@ export async function syncUserBeers(
 
   const note = complete
     ? 'Full distinct-beers list is cached — has-had coverage is complete for this user. Re-run occasionally to pick up newly-had beers.'
-    : `Distinct-beers sync in progress (${cachedBeers}${total !== null ? `/${total}` : ''}). Run untappd_sync_user_beers again to fetch the next ${maxPages} pages.`;
+    : rateStop
+      ? `Distinct-beers sync paused (${cachedBeers}${total !== null ? `/${total}` : ''}). ${resumeAdvice(rateStop, 'untappd_sync_user_beers')}`
+      : `Distinct-beers sync in progress (${cachedBeers}${total !== null ? `/${total}` : ''}). Run untappd_sync_user_beers again to fetch the next ${maxPages} pages.`;
 
   return {
     username: rawUsername,
@@ -198,6 +220,8 @@ export async function syncUserBeers(
     incremental,
     stopped_at_bid: stoppedAtBid,
     another_run_needed: anotherRunNeeded,
+    stopped_for_rate_limit: rateStop !== undefined,
+    ...(rateStop ? { rate_limit: rateStop } : {}),
     last_synced_at: now(),
     note,
   };

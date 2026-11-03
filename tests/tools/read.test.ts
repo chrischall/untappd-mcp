@@ -345,8 +345,33 @@ describe('read tools', () => {
 
   it('user_venues hits /user/venues with an explicit username', async () => {
     get.mockResolvedValueOnce({ venues: {} });
-    await harness.callTool('untappd_user_venues', { username: 'someone', sort: 'checkin' });
-    expect(get).toHaveBeenCalledWith('/user/venues/someone', { limit: undefined, offset: undefined, sort: 'checkin' });
+    await harness.callTool('untappd_user_venues', { username: 'someone' });
+    expect(get).toHaveBeenCalledWith('/user/venues/someone', { limit: undefined, offset: undefined, sort: undefined });
+  });
+
+  // Untappd silently ignores unknown sort values, so the old enum ('name',
+  // 'checkin', 'highest_rated') never sorted anything. Map the friendly
+  // aliases to the real keys and pass the real keys through.
+  it.each([
+    ['date', 'date'],
+    ['name', 'venue_name_asc'],
+    ['checkin', 'highest_checkin'],
+    ['recent', 'recent'],
+    ['date_asc', 'date_asc'],
+    ['venue_name_asc', 'venue_name_asc'],
+    ['venue_name_desc', 'venue_name_desc'],
+    ['highest_checkin', 'highest_checkin'],
+    ['lowest_checkin', 'lowest_checkin'],
+  ])('user_venues sort %s is sent as Untappd key %s', async (sort, key) => {
+    get.mockResolvedValueOnce({ venues: {} });
+    await harness.callTool('untappd_user_venues', { username: 'someone', sort });
+    expect(get).toHaveBeenCalledWith('/user/venues/someone', { limit: undefined, offset: undefined, sort: key });
+  });
+
+  it('user_venues rejects highest_rated (Untappd has no such venue sort)', async () => {
+    const r = await harness.callTool('untappd_user_venues', { username: 'someone', sort: 'highest_rated' });
+    expect(r.isError).toBe(true);
+    expect(get).not.toHaveBeenCalled();
   });
 
   it('venue_by_foursquare hits the foursquare_lookup path (url-encoded)', async () => {

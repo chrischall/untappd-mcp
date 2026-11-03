@@ -21,6 +21,24 @@ function resolveUser(username: string | undefined, loginName: string | null): st
   return encodeURIComponent(u);
 }
 
+/**
+ * user/venues sort values. Untappd silently IGNORES a value it doesn't know
+ * (the old 'name' / 'checkin' / 'highest_rated' never sorted anything), so the
+ * friendly aliases map onto the real keys; there is no rating sort for venues.
+ */
+export const USER_VENUE_SORT_KEYS = {
+  date: 'date',
+  recent: 'recent',
+  date_asc: 'date_asc',
+  venue_name_asc: 'venue_name_asc',
+  venue_name_desc: 'venue_name_desc',
+  highest_checkin: 'highest_checkin',
+  lowest_checkin: 'lowest_checkin',
+  name: 'venue_name_asc',
+  checkin: 'highest_checkin',
+} as const;
+const USER_VENUE_SORTS = Object.keys(USER_VENUE_SORT_KEYS) as [keyof typeof USER_VENUE_SORT_KEYS, ...Array<keyof typeof USER_VENUE_SORT_KEYS>];
+
 export function registerUserTools(server: McpServer, client: UntappdClient): void {
   server.registerTool(
     'untappd_user_info',
@@ -156,21 +174,30 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
     {
       title: 'Get venues a user has checked in at',
       description:
-        "Get the venues a user has checked in at, most recent first, with per-venue check-in counts. Supports " +
-        'sorting and paging. Omit username for your own account. Read-only.',
+        "Get the venues a user has checked in at, most recent first, with per-venue first/recent visit and " +
+        'check-in counts. Pages fully for any public/friend account (unlike user check-ins, which stop at ~50 for ' +
+        'other users). Untappd returns at most 25 venues per page whatever limit you ask for — advance by the ' +
+        "returned pagination offset. Omit username for your own account. Read-only.",
       annotations: toolAnnotations({ title: 'Get venues a user has checked in at', readOnly: true, idempotent: true, openWorld: true }),
       inputSchema: z.object({
         username: UsernameArg,
-        limit: z.number().int().min(1).max(50).optional().describe('Max venues (1–50, default 25)'),
+        limit: z.number().int().min(1).max(50).optional().describe('Max venues (1–50; Untappd caps a page at 25)'),
         offset: z.number().int().min(0).optional().describe('Result offset for paging (default 0)'),
         sort: z
-          .enum(['date', 'name', 'checkin', 'highest_rated'])
+          .enum(USER_VENUE_SORTS)
           .optional()
-          .describe('Sort order (default most recent)'),
+          .describe(
+            'Sort order (default most recent). Untappd keys: date, recent, date_asc, venue_name_asc, venue_name_desc, ' +
+              'highest_checkin, lowest_checkin. Aliases: name = venue_name_asc, checkin = highest_checkin.',
+          ),
       }),
     },
     async ({ username, limit, offset, sort }) => {
-      const data = await client.get(`/user/venues/${resolveUser(username, client.loginName)}`, { limit, offset, sort });
+      const data = await client.get(`/user/venues/${resolveUser(username, client.loginName)}`, {
+        limit,
+        offset,
+        sort: sort === undefined ? undefined : USER_VENUE_SORT_KEYS[sort],
+      });
       return minifiedResult(data);
     },
   );

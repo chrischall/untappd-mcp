@@ -1,6 +1,7 @@
 import { createHelpfulError, RateLimitError, messageOf } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 import { mapCheckinRow, type CacheStore, type CheckinRow } from './store.js';
+import { checkRateBudget, resumeAdvice, stopFrom429, stopFromVerdict, type RateStop } from '../ratelimit.js';
 
 const PAGE_LIMIT = 50; // Untappd's max page size for /user/checkins.
 // Backfill counts as complete only when the cache holds ~this fraction of the
@@ -29,6 +30,10 @@ export interface SyncSummary {
   /** True when this run reset the sync state (force_backfill or self-heal). */
   forced: boolean;
   another_run_needed: boolean;
+  /** True when this run stopped early to stay under (or after hitting) the hourly rate limit. */
+  stopped_for_rate_limit: boolean;
+  /** Why it stopped and when to resume; present only when stopped_for_rate_limit. */
+  rate_limit?: RateStop;
   last_synced_at: string;
   note: string;
 }
@@ -76,7 +81,9 @@ async function fetchTotalCheckins(client: UntappdClient, encodedUser: string): P
     const info = await client.get<{ user?: { stats?: { total_checkins?: number } } }>(`/user/info/${encodedUser}`);
     const t = info?.user?.stats?.total_checkins;
     return typeof t === 'number' ? t : null;
-  } catch {
+  } catch (e) {
+    // A 429 here means every later call would 429 too — let the caller stop.
+    if (e instanceof RateLimitError) throw e;
     return null;
   }
 }
@@ -133,7 +140,37 @@ export async function syncCheckins(
   const now = () => new Date().toISOString();
 
   const priorState = await cache.getState(rawUsername);
-  const total = await fetchTotalCheckins(client, encodedUser);
+
+  // The stop-before-429 guard, consulted before EVERY call. Once it (or a real
+  // 429) stops the run, nothing else is fetched; progress is persisted per page.
+  let rateStop: RateStop | undefined;
+  const gate = async (): Promise<boolean> => {
+    if (rateStop) return false;
+    const v = await checkRateBudget(client, cache);
+    if (!v.ok) rateStop = stopFromVerdict(v);
+    return v.ok;
+  };
+  /** Fetch a page, or return null (and record why) when rate limited. */
+  const guardedFetch = async (maxId: number | undefined): Promise<Page | null> => {
+    if (!(await gate())) return null;
+    try {
+      return await nextFetch(maxId);
+    } catch (e) {
+      if (!(e instanceof RateLimitError)) throw e;
+      rateStop = stopFrom429(e);
+      return null;
+    }
+  };
+
+  let total: number | null = priorState?.total_checkins ?? null;
+  if (await gate()) {
+    try {
+      total = await fetchTotalCheckins(client, encodedUser);
+    } catch (e) {
+      if (!(e instanceof RateLimitError)) throw e;
+      rateStop = stopFrom429(e);
+    }
+  }
   const cachedAtStart = await cache.cachedCount(rawUsername);
 
   // Self-heal a cache wrongly flagged complete (the historical bug): if state
@@ -235,7 +272,9 @@ export async function syncCheckins(
     let caughtUp = false;
     let phase1Pages = 0;
     for (; phase1Pages < phase1Budget; ) {
-      const page: Page = await nextFetch(maxId);
+      const fetched = await guardedFetch(maxId);
+      if (fetched === null) break; // rate limited: catch-up resumes next run
+      const page: Page = fetched;
       pages++;
       phase1Pages++;
       if (page.items.length === 0) {
@@ -290,7 +329,9 @@ export async function syncCheckins(
     let maxId: number | undefined = oldestMaxId ?? undefined;
     let phase2Pages = 0;
     for (; phase2Pages < phase2Budget; ) {
-      const page: Page = await nextFetch(maxId);
+      const fetched = await guardedFetch(maxId);
+      if (fetched === null) break; // rate limited: backfill resumes from oldest_max_id next run
+      const page: Page = fetched;
       pages++;
       phase2Pages++;
       if (page.items.length === 0) {
@@ -347,9 +388,11 @@ export async function syncCheckins(
   // Re-running user/checkins only helps while there is more of the OWN history to
   // page. A truncated (non-self) history can't advance that way — the caller
   // should switch to untappd_sync_user_beers for has-had coverage.
-  const anotherRunNeeded = catchupInProgress || (!backfillComplete && !checkinsTruncated);
+  const anotherRunNeeded = catchupInProgress || (!backfillComplete && !checkinsTruncated) || rateStop !== undefined;
 
-  const note = checkinsTruncated
+  const note = rateStop
+    ? `Check-in sync paused (${cached}${total !== null ? `/${total}` : ''} cached). ${resumeAdvice(rateStop, 'untappd_sync_checkins')}`
+    : checkinsTruncated
     ? 'Untappd only returns the most recent check-ins for this account (history_truncated), so the full check-in history cannot be paged. Use untappd_sync_user_beers to cache the complete distinct-beers list for has-had coverage.'
     : catchupInProgress
       ? 'More new check-ins remain than fit in this run — run untappd_sync_checkins again to finish catching up.'
@@ -370,6 +413,8 @@ export async function syncCheckins(
     history_truncated: checkinsTruncated,
     forced: doReset,
     another_run_needed: anotherRunNeeded,
+    stopped_for_rate_limit: rateStop !== undefined,
+    ...(rateStop ? { rate_limit: rateStop } : {}),
     last_synced_at: now(),
     note,
   };

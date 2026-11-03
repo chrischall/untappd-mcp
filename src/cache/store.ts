@@ -181,6 +181,20 @@ export interface CacheStore {
   upsertResolutions(rows: ItemResolution[]): Promise<void>;
   /** Schema version, per-user coverage and table sizes. */
   stats(): Promise<CacheStats>;
+  /** Append API call observations to the shared log (see src/ratelimit.ts). Optional for non-file backends. */
+  recordApiCalls?(rows: ApiCallObservation[]): Promise<void>;
+  /** Logged API calls at or after `sinceMs` (epoch ms), oldest first. */
+  recentApiCalls?(sinceMs: number): Promise<ApiCallObservation[]>;
+}
+
+/** Mirrors src/ratelimit.ts's ApiCallObservation (declared here so this module imports nothing). */
+export interface ApiCallObservation {
+  at: number;
+  status: number;
+  remaining: number | null;
+  limit: number | null;
+  reset_at: number | null;
+  retry_after_s: number | null;
 }
 
 /**
@@ -219,11 +233,7 @@ export interface CacheStats {
 }
 
 /** Rows removed by {@link CacheStore.forgetUser}, per table. */
-export interface ForgetResult {
-  checkins: number;
-  distinct_beers: number;
-  sync_state: number;
-}
+export type ForgetResult = Record<(typeof PER_USER_TABLES)[number], number>;
 
 export type SqlParam = string | number | null;
 type Row = Record<string, unknown>;
@@ -445,7 +455,144 @@ export const VERSIONED_MIGRATIONS: ReadonlyArray<{ version: number; statements: 
     version: 3,
     statements: ['CREATE INDEX IF NOT EXISTS idx_checkins_user_created ON checkins(username, created_at)'],
   },
+  {
+    // Venue history, list syncs, TTL caches, favorites and the API call log.
+    // New tables only — nothing existing is altered.
+    version: 4,
+    statements: [
+      // Global venue facts from user/venues (and venue/info), shared across users.
+      `CREATE TABLE IF NOT EXISTS venues (
+         venue_id    INTEGER PRIMARY KEY,
+         name        TEXT,
+         category    TEXT,
+         address     TEXT,
+         city        TEXT,
+         state       TEXT,
+         country     TEXT,
+         lat         REAL,
+         lng         REAL,
+         is_verified INTEGER,
+         updated_at  TEXT
+       )`,
+      `CREATE INDEX IF NOT EXISTS idx_venues_city ON venues(city COLLATE NOCASE)`,
+      `CREATE INDEX IF NOT EXISTS idx_venues_lat_lng ON venues(lat, lng)`,
+      // One row per (user, venue) from user/venues: the user's visit summary there.
+      `CREATE TABLE IF NOT EXISTS user_venues (
+         username          TEXT NOT NULL,
+         venue_id          INTEGER NOT NULL,
+         first_visit       TEXT,
+         first_checkin_id  INTEGER,
+         recent_visit      TEXT,
+         recent_checkin_id INTEGER,
+         total_count       INTEGER,
+         synced_at         TEXT,
+         PRIMARY KEY (username, venue_id)
+       )`,
+      `CREATE INDEX IF NOT EXISTS idx_user_venues_recent ON user_venues(username, recent_visit)`,
+      // Resumable cursor + reported total for offset-paged per-user lists
+      // (list = 'venues' | 'wishlist' | …). Kept out of sync_state so each list
+      // owns its own bookkeeping.
+      `CREATE TABLE IF NOT EXISTS list_sync_state (
+         username       TEXT NOT NULL,
+         list           TEXT NOT NULL,
+         next_offset    INTEGER,
+         total_count    INTEGER,
+         complete       INTEGER NOT NULL DEFAULT 0,
+         last_synced_at TEXT,
+         PRIMARY KEY (username, list)
+       )`,
+      // brewery/beer_list results, per brewery, with a TTL on the list as a whole.
+      // The response's have_had reflects the AUTHENTICATED account, so it is not stored.
+      `CREATE TABLE IF NOT EXISTS brewery_beer_lists (
+         brewery_id   INTEGER PRIMARY KEY,
+         brewery_name TEXT,
+         total_count  INTEGER,
+         fetched_at   TEXT NOT NULL
+       )`,
+      `CREATE TABLE IF NOT EXISTS brewery_beers (
+         brewery_id    INTEGER NOT NULL,
+         bid           INTEGER NOT NULL,
+         beer_name     TEXT,
+         style         TEXT,
+         abv           REAL,
+         rating_score  REAL,
+         rating_count  INTEGER,
+         checkin_count INTEGER,
+         in_production INTEGER,
+         fetched_at    TEXT NOT NULL,
+         PRIMARY KEY (brewery_id, bid)
+       )`,
+      // Short-TTL raw response cache (venue menus / activity), keyed e.g. 'venue_menu:123'.
+      `CREATE TABLE IF NOT EXISTS response_cache (
+         key        TEXT PRIMARY KEY,
+         kind       TEXT NOT NULL,
+         data       TEXT NOT NULL,
+         fetched_at TEXT NOT NULL
+       )`,
+      `CREATE TABLE IF NOT EXISTS wishlist (
+         username     TEXT NOT NULL,
+         bid          INTEGER NOT NULL,
+         beer_name    TEXT,
+         brewery_id   INTEGER,
+         brewery_name TEXT,
+         style        TEXT,
+         abv          REAL,
+         added_at     TEXT,
+         synced_at    TEXT NOT NULL,
+         PRIMARY KEY (username, bid)
+       )`,
+      // Manual favorites — local only, never written to Untappd.
+      `CREATE TABLE IF NOT EXISTS favorites (
+         username   TEXT NOT NULL,
+         kind       TEXT NOT NULL CHECK (kind IN ('beer', 'brewery', 'venue')),
+         id         INTEGER NOT NULL,
+         note       TEXT,
+         created_at TEXT NOT NULL,
+         PRIMARY KEY (username, kind, id)
+       )`,
+      // What a user drank at a venue, from checkin/view of the user_venues first/recent check-ins.
+      `CREATE TABLE IF NOT EXISTS venue_drinks (
+         username     TEXT NOT NULL,
+         venue_id     INTEGER NOT NULL,
+         checkin_id   INTEGER NOT NULL,
+         bid          INTEGER,
+         beer_name    TEXT,
+         brewery_id   INTEGER,
+         brewery_name TEXT,
+         created_at   TEXT,
+         fetched_at   TEXT NOT NULL,
+         PRIMARY KEY (username, checkin_id)
+       )`,
+      `CREATE INDEX IF NOT EXISTS idx_venue_drinks_user_venue ON venue_drinks(username, venue_id)`,
+      // Every API response's time/status/rate-limit headers (src/ratelimit.ts),
+      // shared by all processes using this file. Pruned to ~2 hours.
+      `CREATE TABLE IF NOT EXISTS api_calls (
+         at            INTEGER NOT NULL,
+         status        INTEGER NOT NULL,
+         remaining     INTEGER,
+         limit_hdr     INTEGER,
+         reset_at      INTEGER,
+         retry_after_s INTEGER
+       )`,
+      `CREATE INDEX IF NOT EXISTS idx_api_calls_at ON api_calls(at)`,
+    ],
+  },
 ];
+
+/** Tables holding one user's data, cleared by {@link CheckinStoreCore.forgetUser}. */
+export const PER_USER_TABLES = [
+  'checkins',
+  'distinct_beers',
+  'sync_state',
+  'user_venues',
+  'list_sync_state',
+  'wishlist',
+  'favorites',
+  'venue_drinks',
+] as const;
+
+/** How long the persisted API call log is kept (it only needs the rolling hour). */
+const API_CALL_LOG_RETENTION_MS = 2 * 60 * 60 * 1000;
 
 /** The schema version this code writes. */
 export const SCHEMA_VERSION = VERSIONED_MIGRATIONS.reduce((v, m) => Math.max(v, m.version), 1);
@@ -856,22 +1003,49 @@ export class CheckinStoreCore {
     ) as unknown as CheckinRow[];
   }
 
-  /** Delete one user's cached rows (case-insensitive) in a single transaction. */
+  /**
+   * Delete one user's cached rows (case-insensitive) from every per-user table
+   * in a single transaction. Shared tables (beer_meta, venues, brewery lists,
+   * response cache, the API call log) hold no personal history and are kept.
+   */
   forgetUser(username: string): ForgetResult {
     const key = username.toLowerCase();
-    const count = (table: string) =>
-      Number(this.db.get(`SELECT COUNT(*) AS n FROM ${table} WHERE username = ?`, [key])?.n ?? 0);
-    const removed: ForgetResult = {
-      checkins: count('checkins'),
-      distinct_beers: count('distinct_beers'),
-      sync_state: count('sync_state'),
-    };
+    const removed = {} as ForgetResult;
     this.db.transaction(() => {
-      this.db.run('DELETE FROM checkins WHERE username = ?', [key]);
-      this.db.run('DELETE FROM distinct_beers WHERE username = ?', [key]);
-      this.db.run('DELETE FROM sync_state WHERE username = ?', [key]);
+      for (const table of PER_USER_TABLES) {
+        removed[table] = Number(this.db.get(`SELECT COUNT(*) AS n FROM ${table} WHERE username = ?`, [key])?.n ?? 0);
+        this.db.run(`DELETE FROM ${table} WHERE username = ?`, [key]);
+      }
     });
     return removed;
+  }
+
+  /** Append API call observations to the shared log, pruning entries past retention. */
+  recordApiCalls(rows: ApiCallObservation[]): void {
+    if (rows.length === 0) return;
+    this.db.transaction(() => {
+      for (const r of rows) {
+        this.db.run(
+          'INSERT INTO api_calls (at, status, remaining, limit_hdr, reset_at, retry_after_s) VALUES (?, ?, ?, ?, ?, ?)',
+          [r.at, r.status, r.remaining, r.limit, r.reset_at, r.retry_after_s],
+        );
+      }
+      this.db.run('DELETE FROM api_calls WHERE at < ?', [Date.now() - API_CALL_LOG_RETENTION_MS]);
+    });
+  }
+
+  /** Logged API calls at or after `sinceMs`, oldest first. */
+  recentApiCalls(sinceMs: number): ApiCallObservation[] {
+    return this.db
+      .all('SELECT * FROM api_calls WHERE at >= ? ORDER BY at, rowid', [sinceMs])
+      .map((r) => ({
+        at: Number(r.at),
+        status: Number(r.status),
+        remaining: num(r.remaining),
+        limit: num(r.limit_hdr),
+        reset_at: num(r.reset_at),
+        retry_after_s: num(r.retry_after_s),
+      }));
   }
 
   getDistinctBeers(username: string, bids: number[]): DistinctBeerRow[] {
@@ -1027,6 +1201,12 @@ export class LocalCacheStore implements CacheStore {
   }
   async stats(): Promise<CacheStats> {
     return this.core.stats();
+  }
+  async recordApiCalls(rows: ApiCallObservation[]): Promise<void> {
+    this.core.recordApiCalls(rows);
+  }
+  async recentApiCalls(sinceMs: number): Promise<ApiCallObservation[]> {
+    return this.core.recentApiCalls(sinceMs);
   }
 }
 

@@ -131,7 +131,11 @@ export async function ensureFresh(
   const prior = await cache.getState(username);
   const mode = prior?.beers_complete ? 'incremental' : 'backfill';
   let calls = 0;
-  const counting = { get: (p: string, q?: Record<string, unknown>) => (calls++, client.get(p, q as never)) } as unknown as UntappdClient;
+  const counting = {
+    get: (p: string, q?: Record<string, unknown>) => (calls++, client.get(p, q as never)),
+    // Hand the sync's rate guard the real tracker (absent on test fakes).
+    rateLimit: (client as Partial<Pick<UntappdClient, 'rateLimit'>>).rateLimit,
+  } as unknown as UntappdClient;
   const extra: Partial<SyncReport> = {};
   if (maxCalls < 1) {
     extra.skipped = 'no API budget left for a sync this run';
@@ -139,6 +143,7 @@ export async function ensureFresh(
     try {
       const s = await syncUserBeers(counting, cache, username, maxCalls);
       if (s.incremental) extra.stopped_at_bid = s.stopped_at_bid;
+      if (s.stopped_for_rate_limit) extra.rate_limited = true;
     } catch (e) {
       if (e instanceof RateLimitError) extra.rate_limited = true;
       else extra.error = messageOf(e);

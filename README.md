@@ -39,6 +39,7 @@ it goes stale.
 | `UNTAPPD_PHOTO_DIR` | no | The directory `untappd_checkin`'s `photo_path` must be inside (several allowed, separated by `:`). Defaults to `~/Downloads/untappd-mcp` — put a photo there to attach it. Any other file is refused, so a prompt-injected shout or comment can't publish an arbitrary image from your disk. |
 | `UNTAPPD_CACHE_DB` | no | Path to the local check-in cache SQLite file (default `~/.untappd-mcp/checkins.db`). A relative path or leading `~` resolves against your **home** directory, never the working directory, so every host (Claude Desktop, Claude Code, …) finds the same file; the resolved path is logged to stderr at startup. The db file is always made owner-only (`0600`), and so are any directories the server creates plus the default `~/.untappd-mcp`; a directory you point this into that already exists keeps its permissions. Local/stdio only. |
 | `UNTAPPD_CACHE_DIR` | no | Directory for the cache instead of `~/.untappd-mcp` (the file is `checkins.db` inside it). `UNTAPPD_CACHE_DB` wins if both are set. |
+| `UNTAPPD_RATE_LIMIT_PER_HOUR` | no | The hourly call limit the syncs' stop-before-429 guard enforces (default `100`, Untappd's documented per-token limit). Only change it if Untappd gives your token a different limit. |
 
 Copy `.env.example` to `.env` and fill it in for local use.
 
@@ -227,6 +228,18 @@ Both are resumable: they fetch `max_pages` per call (default 10), persist
 progress after every page, and set `another_run_needed: true` until done — just
 call again until it's `false`.
 
+**Rate limit.** Every API response is recorded (time, status and any
+`X-Ratelimit-*` / `Retry-After` headers) and, once the cache is open, logged in
+the cache file so every process sharing it — and the next one — counts the same
+hour. The syncs check that count **before every page** and stop cleanly with
+`stopped_for_rate_limit: true` and `rate_limit.resume_at` when the next call
+would leave fewer than 2 of the ~100 hourly calls; a 429 that slips through also
+stops the run cleanly instead of failing it. Progress is already saved, so
+re-run after `resume_at`. `untappd_cache_status` shows the current picture under
+`rate_limit`. Note: the v4 API sends `X-Ratelimit-Remaining: 0` on every
+successful response, so that header is ignored until it reports a live
+(non-zero) value; the estimate rests on the local call count.
+
 **Query** the cache with no further API calls. The has-had tools consult **both**
 sources (a hit in either counts as had):
 
@@ -263,7 +276,8 @@ telling you to add them as a friend first.
 user's dated check-ins, comments and venues — stay until you remove them. The
 file is created owner-only (directory `0700`, database `0600`, and older
 installs are tightened on open). `untappd_cache_forget` deletes one user's
-cached check-ins, distinct-beers list and sync state after a confirmation
+cached check-ins, distinct-beers list, venue history, wishlist copy, local
+favorites, venue drinks and sync state after a confirmation
 (preview shows the username and row counts); it touches only the local cache,
 never Untappd, and a later sync can re-fetch. Deleting the file removes
 everything.

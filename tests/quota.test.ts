@@ -12,18 +12,18 @@ function clientWithHeader(header: string | null) {
 }
 
 describe('X-Ratelimit-Remaining', () => {
-  it('is unknown until a response carries it, then tracks the latest value', async () => {
+  it('is unknown until a call is made, then tracks a live header value', async () => {
     const c = clientWithHeader('37');
     expect(c.quotaRemaining).toBeNull();
     await c.get('/beer/info/1');
     expect(c.quotaRemaining).toBe(37);
   });
 
-  it('stays unknown when the header is absent or garbage', async () => {
-    for (const h of [null, '', 'abc', '-3']) {
+  it('falls back to the local call count when the header is absent, garbage or the meaningless v4 0', async () => {
+    for (const h of [null, '', 'abc', '-3', '0']) {
       const c = clientWithHeader(h);
       await c.get('/beer/info/1');
-      expect(c.quotaRemaining).toBeNull();
+      expect(c.quotaRemaining).toBe(99); // 100/hour assumed, one call spent
     }
   });
 });

@@ -7,6 +7,7 @@ import { syncCheckins } from '../cache/sync.js';
 import { syncUserBeers } from '../cache/sync-beers.js';
 import { CONFIRM_FLOW, confirmWrite } from './confirm.js';
 import { clampToQuota } from '../quota.js';
+import { rateLimitStatus } from '../ratelimit.js';
 
 // Re-fetch cached beer metadata at most this often; a hit newer than this skips
 // the beer/info API call.
@@ -113,8 +114,11 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         'Diagnostics for the LOCAL check-in cache — NO API call. Returns the resolved cache file path, its size on ' +
         'disk (db + WAL), journal mode, schema version, the number of cached menu-line resolutions and beer-metadata ' +
         'rows, and for every cached user: cached vs total distinct beers, cached check-ins, coverage_complete, the ' +
-        'resume offset of an unfinished user/beers backfill, and last_synced_at. Use it to confirm the cache ' +
-        'persisted across restarts or to see how far a backfill has got.',
+        'resume offset of an unfinished user/beers backfill, and last_synced_at. Also reports rate_limit: API calls ' +
+        'made in the last hour (this process plus any other sharing the cache file), the ~100/hour limit, the ' +
+        'estimated calls left, the raw X-Ratelimit-* headers (the v4 API sends Remaining: 0 on every success, so it ' +
+        'is ignored until it reports a live value) and any 429 wait. Use it to confirm the cache persisted across ' +
+        'restarts, to see how far a backfill has got, or to check whether a sync can run now.',
       annotations: toolAnnotations({ title: 'Show the local cache location, schema and per-user coverage', readOnly: true, idempotent: true, openWorld: false }),
       inputSchema: z.object({}),
     },
@@ -130,6 +134,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         resolution_cache_entries: stats.resolution_cache_entries,
         beer_meta_entries: stats.beer_meta_entries,
         users: stats.users,
+        rate_limit: await rateLimitStatus(client, cache),
       });
     },
   );
@@ -145,7 +150,9 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         'than your own and will not page further — such a sync reports history_truncated and you should use ' +
         'untappd_sync_user_beers for full has-had coverage. backfill_complete is only reported once ~all of ' +
         'total_checkins is cached. Pass force_backfill: true to reset a cache wrongly marked complete and re-page ' +
-        'the whole history (cached rows are kept). Omit username for your own account.',
+        'the whole history (cached rows are kept). Stops BEFORE the ~100 calls/hour rate limit (or cleanly on a 429) ' +
+        'with stopped_for_rate_limit and rate_limit.resume_at — progress is saved; re-run after that time. Omit ' +
+        'username for your own account.',
       annotations: toolAnnotations({ title: "Sync a user's check-ins into the cache", readOnly: false, idempotent: false, openWorld: true, destructive: false }),
       inputSchema: z.object({
         username: UsernameArg,
@@ -185,7 +192,9 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         '"has had" coverage — thousands of beers instead of tens of thousands of check-ins — and, unlike ' +
         'user/checkins, it pages fully for any public/friend account. Offset-paged and resumable: fetches max_pages ' +
         'per call and persists progress; run again until another_run_needed is false. Feeds the same ' +
-        'untappd_cache_has_had / has_had_many / not_had tools. Omit username for your own account.',
+        'untappd_cache_has_had / has_had_many / not_had tools. Stops BEFORE the ~100 calls/hour rate limit (or ' +
+        'cleanly on a 429) with stopped_for_rate_limit and rate_limit.resume_at — progress is saved; re-run after ' +
+        'that time. Omit username for your own account.',
       annotations: toolAnnotations({ title: "Sync a user's complete distinct-beers list into the cache", readOnly: false, idempotent: false, openWorld: true, destructive: false }),
       inputSchema: z.object({
         username: UsernameArg,
@@ -493,9 +502,9 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
       title: "Forget a user's cached check-ins",
       description:
         "Delete everything the LOCAL cache holds for one user — their cached check-ins (beer, rating, comment, venue, " +
-        'date), distinct-beers list and sync state — e.g. after syncing a friend you no longer want a history of. Only ' +
-        'the local cache is touched; nothing on Untappd changes, and a later sync can re-fetch it. Shared beer ' +
-        'metadata is kept. The preview shows the username and exactly how many rows will be removed. Omit username ' +
+        'date), distinct-beers list, venue history, wishlist copy, local favorites, venue drinks and sync state — e.g. after syncing a friend you no longer want a history of. Only ' +
+        'the local cache is touched; nothing on Untappd changes, and a later sync can re-fetch it (manual favorites ' +
+        'cannot be re-fetched). Shared beer, venue and brewery facts are kept. The preview shows the username and exactly how many rows will be removed. Omit username ' +
         `for your own account. ${CONFIRM_FLOW}`,
       annotations: toolAnnotations({ title: "Forget a user's cached check-ins", readOnly: false, idempotent: true, openWorld: false, destructive: true }),
       inputSchema: z.object({

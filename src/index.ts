@@ -31,7 +31,20 @@ const client = new UntappdClient();
 const cachePath = defaultCachePath();
 console.error(describeCachePath(cachePath));
 let nodeCache: CacheStore | undefined;
-const nodeCacheProvider = (): CacheStore => (nodeCache ??= CheckinCache.open(cachePath));
+const nodeCacheProvider = (): CacheStore => {
+  if (!nodeCache) {
+    nodeCache = CheckinCache.open(cachePath);
+    // Hand the shared call log what this process already spent before the cache opened.
+    void nodeCache.recordApiCalls?.(client.rateLimit.observations()).catch(() => {});
+  }
+  return nodeCache;
+};
+// Persist every API response's rate-limit observation into the shared cache file
+// (once it is open), so a second process — or the next one — counts this hour's
+// calls too (src/ratelimit.ts). Recording never fails an API call.
+client.onApiCall((o) => {
+  void nodeCache?.recordApiCalls?.([o]).catch(() => {});
+});
 
 await runMcp({
   name: 'untappd-mcp',
