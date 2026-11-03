@@ -42,6 +42,7 @@
         "UNTAPPD_UTV": "${user_config.untappd_utv}",
         "UNTAPPD_USER_AGENT": "${user_config.untappd_user_agent}",
         "UNTAPPD_TIMEZONE": "${user_config.untappd_timezone}",
+        "UNTAPPD_RATE_LIMIT_PER_HOUR": "${user_config.untappd_rate_limit_per_hour}",
         "UNTAPPD_PHOTO_DIR": "${user_config.untappd_photo_dir}",
         "UNTAPPD_CACHE_DB": "${user_config.untappd_cache_db}",
         "UNTAPPD_CACHE_DIR": "${user_config.untappd_cache_dir}"
@@ -105,6 +106,12 @@
       "type": "string",
       "title": "Check-in Timezone",
       "description": "IANA timezone (e.g. America/New_York) that check-ins are stamped with when the call doesn't pass timezone. Set it when the server runs somewhere other than the drinker's zone (e.g. a hosted connector, usually UTC). Defaults to the server process's zone.",
+      "required": false
+    },
+    "untappd_rate_limit_per_hour": {
+      "type": "string",
+      "title": "Hourly Rate Limit",
+      "description": "Hourly Untappd API call limit the syncs' stop-before-429 guard enforces (default 100, Untappd's documented per-token limit). Only change it if Untappd gives your token a different limit.",
       "required": false
     },
     "untappd_photo_dir": {
