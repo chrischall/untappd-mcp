@@ -204,6 +204,12 @@ Non-obvious behaviours that were each fixed the hard way:
   cache (venue_menu), never stored in it. The venue months rule only knows first/recent visit, so it
   also needs total_count ≥ the month threshold (2 visits can't cover 3 distinct months). The
   `untappd` source is reserved: no follow/like sync exists (6a, report-first).
+- **Trip check (`src/tools/trip.ts`)**: `untappd_trip_check` answers visits/has-had from the cache only;
+  its ONLY API calls are `brewery/beer_list` (via `getBreweryBeers`, so they land in the 7-day list
+  cache) for a missing/stale list, under `api_budget` + `checkRateBudget`. A brewery stop with no
+  venue_id/name/lat is visit-matched by the brewery's name (cached list, else the user's distinct beers).
+  The near-a-favorite hint needs coordinates from the global `venues` table (`getVenues`), so a manual
+  favorite venue nobody has synced is never hinted.
 - **Batch, don't loop.** Use `hasHadMany(username, bids)` (two grouped queries per 500-bid chunk)
   for any list; `hasHad` per bid costs ~4 queries each. `tests/cache-batch.test.ts` pins the two
   to identical verdicts — change both or neither. Upsert "net new" counts look up only the batch's

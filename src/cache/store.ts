@@ -256,6 +256,8 @@ export interface CacheStore {
   getUserVenueVisits(username: string, venueIds: number[]): Promise<UserVenueRow[]>;
   /** How many venues the user has in `user_venues`. */
   userVenuesCount(username: string): Promise<number>;
+  /** Shared venue facts (the `venues` table) for the given ids — only those cached. */
+  getVenues(venueIds: number[]): Promise<VenueRow[]>;
   getListState(username: string, list: string): Promise<ListSyncState | undefined>;
   /** Insert-or-merge a list cursor; only keys present in `patch` are written. */
   setListState(username: string, list: string, patch: Partial<Omit<ListSyncState, 'username' | 'list'>>): Promise<void>;
@@ -1183,6 +1185,29 @@ export class CheckinStoreCore {
 
   userVenuesCount(username: string): number {
     return Number(this.db.get('SELECT COUNT(*) AS n FROM user_venues WHERE username = ?', [username.toLowerCase()])?.n ?? 0);
+  }
+
+  getVenues(venueIds: number[]): VenueRow[] {
+    const out: VenueRow[] = [];
+    for (const c of chunks([...new Set(venueIds)])) {
+      if (c.length === 0) continue;
+      const rows = this.db.all(`SELECT * FROM venues WHERE venue_id IN (${c.map(() => '?').join(', ')})`, c);
+      for (const r of rows) {
+        out.push({
+          venue_id: Number(r.venue_id),
+          name: str(r.name),
+          category: str(r.category),
+          address: str(r.address),
+          city: str(r.city),
+          state: str(r.state),
+          country: str(r.country),
+          lat: num(r.lat),
+          lng: num(r.lng),
+          is_verified: num(r.is_verified),
+        });
+      }
+    }
+    return out;
   }
 
   getListState(username: string, list: string): ListSyncState | undefined {
@@ -2260,6 +2285,9 @@ export class LocalCacheStore implements CacheStore {
   async userVenuesCount(username: string): Promise<number> {
     return this.core.userVenuesCount(username);
   }
+  async getVenues(venueIds: number[]): Promise<VenueRow[]> {
+    return this.core.getVenues(venueIds);
+  }
   async getListState(username: string, list: string): Promise<ListSyncState | undefined> {
     return this.core.getListState(username, list);
   }
@@ -2400,7 +2428,7 @@ function nameMatches(query: string, tokens: string[], venueName: string | null):
 }
 
 /** Great-circle distance in metres. */
-function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): number {
+export function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6_371_008.8;
   const rad = Math.PI / 180;
   const dLat = (lat2 - lat1) * rad;

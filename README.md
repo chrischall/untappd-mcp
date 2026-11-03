@@ -91,7 +91,22 @@ Writes (each asks you to confirm first — see [Confirmations](#confirmations)):
 Check-in cache: `untappd_sync_checkins`, `untappd_sync_user_beers`,
 `untappd_cache_has_had`, `untappd_cache_has_had_many`, `untappd_cache_not_had`,
 `untappd_cache_query`, `untappd_top_not_had`, `untappd_cache_status`, `untappd_cache_forget`,
-`untappd_sync_wishlist` (mirrors a user's wishlist locally so picks can boost wishlisted beers).
+`untappd_sync_wishlist` (mirrors a user's wishlist locally so picks can boost wishlisted beers),
+`untappd_sync_user_venues` + `untappd_cache_has_visited` (a user's full venue history — "has this person
+been here?" — which pages fully for any public/friend account, unlike their check-ins).
+
+Trip planning: `untappd_trip_check` takes a user (or `usernames` + `mode`) and up to 25 stops — each a
+`venue_id`, a `name` (+ `city`/`state`), a `lat`/`lng`, and/or a `brewery_id` — and returns per stop:
+whether they've been there (first/recent visit, total visits, the matched venues incl. Untappd's
+"(duplicate of …)" copies; a brewery stop is matched by the brewery's name), how many of the brewery's
+beers they've had, and the top N (default 4) **not-had** beers by Untappd global rating, with an
+optional `style` filter (out-of-production beers skipped unless asked). Visits and has-had are answered
+from the cache only; the one API call it may make is `brewery/beer_list` for a brewery whose list isn't
+cached or is past its 7-day TTL — at most `api_budget` (default 5; `0` = strictly cache-only, using a
+stale list flagged `stale`), under the rate-limit guard. Favorite venues and breweries are flagged,
+`prefer_favorites` (default true) boosts wishlisted and favorite-brewery beers, and a stop within
+`near_favorite_radius_m` (default 2 km) of a favorite venue gets `near_favorites` and a "Near a
+favorite: …" hint.
 
 Group checks: `untappd_cache_has_had_many` and `untappd_top_not_had` accept `usernames` (up to 10)
 with `mode: "none_had"` (default — beers new to everyone) or `"any_not_had"` (beers at least one of
@@ -111,8 +126,14 @@ and every threshold can be overridden per call. **Manual** favorites are added a
 `untappd_cache_has_had`, `untappd_cache_has_had_many`, `untappd_cache_has_visited`, `untappd_brewery_beers`, `untappd_venue_menu`
 and `untappd_top_not_had` carry a `favorite` field `{is_favorite, sources, reason}`, and
 `untappd_top_not_had` ranks wishlisted beers and beers from favorite breweries higher by default
-(`prefer_favorites: false` turns that off). The `untappd` source is reserved for Untappd's own
-followed lists, which are not synced.
+(`prefer_favorites: false` turns that off); `untappd_trip_check` carries the same flags and boost.
+
+Where favorites come from today: **derived + manual only**. Untappd has no followed or favorite
+*venue* list at all (no web or API route; `venue/info` has no per-user flag). For *breweries*,
+Untappd's "likes" (the app's "following") do have a route that works for other users, but syncing it
+is **pending the owner's decision** — so the `untappd` source is reserved and nothing carries it yet.
+`brewery/info`'s `follow_status` describes the signed-in account, like `have_had` below, so it is
+never used for anyone else.
 
 Cached reads (to stretch the ~100 calls/hour limit): `untappd_brewery_beers` keeps each brewery's
 list for 7 days, and `untappd_venue_menu` / `untappd_venue_activity` keep results for 6 hours; each

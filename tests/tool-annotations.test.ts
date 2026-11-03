@@ -14,6 +14,7 @@ import { registerCheckinTools } from '../src/tools/checkin.js';
 import { registerUtilityTools } from '../src/tools/utilities.js';
 import { registerCacheTools } from '../src/tools/cache.js';
 import { registerFavoriteTools } from '../src/tools/favorites.js';
+import { registerTripTools } from '../src/tools/trip.js';
 import { registerMenuTools } from '../src/tools/menu.js';
 
 /**
@@ -52,13 +53,14 @@ function registeredAnnotations(): Record<string, Ann | undefined> {
   registerUtilityTools(server, client);
   registerCacheTools(server, client, cache);
   registerFavoriteTools(server, client, cache);
+  registerTripTools(server, client, cache);
   registerMenuTools(server, client, cache);
   return seen;
 }
 
 describe('tool annotations', () => {
   it('covers the full served surface (guards against a registrar being dropped here)', () => {
-    expect(Object.keys(registeredAnnotations())).toHaveLength(56);
+    expect(Object.keys(registeredAnnotations())).toHaveLength(57);
   });
 
   it('sets an explicit boolean readOnlyHint and openWorldHint on every tool', () => {

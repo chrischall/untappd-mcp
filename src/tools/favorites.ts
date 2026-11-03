@@ -36,7 +36,7 @@ export function registerFavoriteTools(server: McpServer, client: UntappdClient, 
         'Add a MANUAL favorite — a beer, brewery or venue — with an optional note, to the local cache. ' +
         `${LOCAL_ONLY} Re-adding an existing favorite updates its note (omit note to keep it) and keeps its ` +
         'created_at. Manual favorites show in untappd_favorites_list (source "manual") and as the `favorite` field on ' +
-        'has_had, has_had_many, has_visited, brewery_beers, venue_menu and top_not_had results; a favorite brewery also boosts its ' +
+        'has_had, has_had_many, has_visited, brewery_beers, venue_menu, top_not_had and trip_check results; a favorite brewery also boosts its ' +
         'beers in untappd_top_not_had. Omit username for your own account.',
       annotations: toolAnnotations({ title: 'Mark a beer, brewery or venue as a favorite (local)', readOnly: false, idempotent: true, openWorld: false, destructive: false }),
       inputSchema: z.object({
@@ -80,7 +80,8 @@ export function registerFavoriteTools(server: McpServer, client: UntappdClient, 
       description:
         "List a user's favorites from the cache only — NO API call. Each item appears ONCE with every source that " +
         'names it (sources: "derived" = qualifies from their cached history, "manual" = added with ' +
-        'untappd_favorite_add, "untappd" = reserved for Untappd\'s own followed lists, which are not synced) and a ' +
+        'untappd_favorite_add, "untappd" = reserved: Untappd has no followed-venue list, and syncing its brewery ' +
+        '"likes" is pending the owner\'s decision, so today every favorite comes from derived + manual) and a ' +
         'reason ("12 check-ins since 2015", "avg 4.1 across 9 beers", "manual: <note>"). Derived rules, each ' +
         `overridable via thresholds: venue = ≥${D.venue_min_checkins} check-ins OR visits spanning ≥${D.venue_min_months} distinct ` +
         `months (ranked by check-ins); brewery = ≥${D.brewery_min_beers} beers had AND avg rating ≥${D.brewery_min_avg_rating}, OR ` +

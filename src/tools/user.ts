@@ -66,7 +66,9 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
       title: 'Get Untappd user check-ins',
       description:
         "Get a user's recent check-ins (most recent first): the beer, rating, comment, venue, and toasts/comments. " +
-        'Page backwards with max_id (the pagination.max_id from a prior call). Omit username for your own. Read-only.',
+        'Page backwards with max_id (the pagination.max_id from a prior call). Only your OWN history pages fully: for ' +
+        'any other user Untappd returns just the ~50 most recent check-ins and ignores max_id — use untappd_user_beers ' +
+        '(has had) or untappd_user_venues (has been) for their full history. Omit username for your own. Read-only.',
       annotations: toolAnnotations({ title: 'Get Untappd user check-ins', readOnly: true, idempotent: true, openWorld: true }),
       inputSchema: z.object({
         username: UsernameArg,

@@ -221,7 +221,18 @@ Query tools (has-had ones consult BOTH sources — a hit in either = had):
   had ≥3 times. has_had / has_had_many / has_visited / brewery_beers / venue_menu /
   top_not_had results carry `favorite` {is_favorite, sources, reason};
   `untappd_top_not_had` boosts wishlisted (+0.5) and favorite-brewery (+0.25)
-  beers unless `prefer_favorites: false`.
+  beers unless `prefer_favorites: false`. Favorites come from derived + manual
+  only: Untappd has no followed-venue list, and a brewery-likes sync is pending
+  the owner's decision (the `untappd` source is reserved).
+- `untappd_trip_check` — a whole trip in one call: per stop (`venue_id`, `name`
+  + `city`/`state`, `lat`/`lng`, and/or `brewery_id`) → visited with dates,
+  beers had from that brewery, and the top N (default 4) not-had beers by global
+  rating (`style` filter). Cache only, except `brewery/beer_list` for a missing or
+  >7-day-old list (`api_budget`, default 5; 0 = cache only). Flags favorite
+  venues/breweries, boosts wishlist/favorite-brewery beers (`prefer_favorites`),
+  and hints when a favorite venue is within `near_favorite_radius_m` (2 km).
+  Sync first: `untappd_sync_user_venues`, `untappd_sync_user_beers`,
+  `untappd_sync_wishlist`.
 
 **Retention.** The cache keeps what you sync until you remove it — including
 friends' dated check-ins, comments and venues. `untappd_cache_forget` (confirmation-gated)

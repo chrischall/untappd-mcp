@@ -350,6 +350,10 @@
     {
       "name": "untappd_favorites_list",
       "description": "List a user's favorite beers, breweries and venues: derived from their history (tunable thresholds) and manual, each with a reason"
+    },
+    {
+      "name": "untappd_trip_check",
+      "description": "Check trip stops against a user's (or group's) cached history: visited with dates, brewery beers had, top not-had beers, favorites and a near-a-favorite hint"
     }
   ],
   "compatibility": {

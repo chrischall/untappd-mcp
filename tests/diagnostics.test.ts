@@ -16,6 +16,7 @@ import { registerCheckinTools } from '../src/tools/checkin.js';
 import { registerUtilityTools } from '../src/tools/utilities.js';
 import { registerCacheTools } from '../src/tools/cache.js';
 import { registerFavoriteTools } from '../src/tools/favorites.js';
+import { registerTripTools } from '../src/tools/trip.js';
 import { registerMenuTools } from '../src/tools/menu.js';
 import { createTestHarness } from './helpers.js';
 
@@ -35,6 +36,7 @@ const CACHE_TOOLS = [
   'untappd_favorite_add',
   'untappd_favorite_remove',
   'untappd_favorites_list',
+  'untappd_trip_check',
 ];
 
 describe('healthcheck build diagnostics', () => {
@@ -64,6 +66,7 @@ describe('healthcheck build diagnostics', () => {
       registerUtilityTools(server, client);
       registerCacheTools(server, client, () => cache);
       registerFavoriteTools(server, client, () => cache);
+      registerTripTools(server, client, () => cache);
       registerMenuTools(server, client, () => cache);
     });
 
@@ -71,10 +74,10 @@ describe('healthcheck build diagnostics', () => {
     expect(out.server_version).toBe(VERSION);
 
     const tools = out.tools as string[];
-    // The full toolset (incl. the 15 cache + favorites tools) is registered — this is the
-    // 56-tool set the server must expose.
-    expect(tools.length).toBe(56);
-    expect(out.tool_count).toBe(56);
+    // The full toolset (incl. the 16 cache, favorites and trip tools) is registered — this is the
+    // 57-tool set the server must expose.
+    expect(tools.length).toBe(57);
+    expect(out.tool_count).toBe(57);
     for (const name of CACHE_TOOLS) expect(tools).toContain(name);
 
     // The hash is the FNV-1a of the sorted names — stable and self-consistent.
