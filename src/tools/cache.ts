@@ -5,7 +5,7 @@ import type { UntappdClient } from '../client.js';
 import { beerMetaFrom, DEFAULT_VISIT_RADIUS_M, type BeerMeta, type CacheStore, type SyncState, type VenueQuery } from '../cache/store.js';
 import { syncCheckins } from '../cache/sync.js';
 import { syncUserBeers } from '../cache/sync-beers.js';
-import { syncUserVenues, VENUES_LIST, VENUES_MAX_PAGES_CAP } from '../cache/sync-venues.js';
+import { syncUserVenues, VENUES_LIST, VENUES_MAX_PAGES_CAP, VENUES_REFRESH_LIST } from '../cache/sync-venues.js';
 import { CONFIRM_FLOW, confirmWrite } from './confirm.js';
 import { clampToQuota } from '../quota.js';
 import { rateLimitStatus } from '../ratelimit.js';
@@ -108,20 +108,29 @@ export async function freshness(cache: CacheStore, username: string): Promise<Re
  */
 export async function venueFreshness(cache: CacheStore, username: string): Promise<Record<string, unknown>> {
   const state = await cache.getListState(username, VENUES_LIST);
+  const refresh = await cache.getListState(username, VENUES_REFRESH_LIST);
   const cached = await cache.userVenuesCount(username);
-  const complete = state?.complete ?? false;
+  const backfilled = state?.complete ?? false;
+  // A cut-short incremental refresh means re-visited or new venues below its
+  // cursor may be missing, so the history is not authoritative until it ends.
+  const refreshing = backfilled && !!refresh && !refresh.complete;
+  const complete = backfilled && !refreshing;
   const total = state?.total_count ?? null;
   const percent = pct(cached, total, complete);
   let caveat: string | undefined;
   if (!state?.last_synced_at && cached === 0) {
     caveat =
       "This user's venue history has never been synced — the cache is EMPTY. Run untappd_sync_user_venues first; results here are not authoritative.";
+  } else if (refreshing) {
+    caveat =
+      'A venue-history refresh is unfinished — recently visited or new venues may be missing or show a stale recent_visit, so a "not visited" may be a false negative. Run untappd_sync_user_venues until another_run_needed is false.';
   } else if (!complete) {
     caveat = `Venue history incomplete (${percent !== null ? `~${percent}%` : 'unknown'} cached). A "not visited" may be a false negative — run untappd_sync_user_venues until another_run_needed is false.`;
   }
   return {
     last_synced_at: state?.last_synced_at ?? null,
     coverage_complete: complete,
+    ...(refreshing ? { refresh_in_progress: true } : {}),
     cached_venues: cached,
     total_venues: total,
     percent,
@@ -257,7 +266,8 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         'this is how to answer "has this person been here?" (via untappd_cache_has_visited). Untappd serves 25 venues ' +
         'per page, so a 2,700-venue history is ~110 calls: resumable — fetches max_pages per call, saves progress ' +
         'after every page; run again until another_run_needed is false. Once complete, a re-run is a cheap refresh ' +
-        'from the top that stops at the first page with no changed visits. Stops BEFORE the ~100 calls/hour rate ' +
+        'from the top that stops at the first page with no changed visits (a refresh cut short resumes where it ' +
+        'stopped; another_run_needed stays true until it finishes). Stops BEFORE the ~100 calls/hour rate ' +
         'limit (or cleanly on a 429) with stopped_for_rate_limit and rate_limit.resume_at. Omit username for your own account.',
       annotations: toolAnnotations({ title: "Sync a user's complete venue history into the cache", readOnly: false, idempotent: false, openWorld: true, destructive: false }),
       inputSchema: z.object({

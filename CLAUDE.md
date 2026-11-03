@@ -166,7 +166,10 @@ Non-obvious behaviours that were each fixed the hard way:
   offset + items), and never treat a 25-item page as the short final page (end = empty page, or offset
   reaching `total_count`). Cursor/total live in `list_sync_state` (list `venues`), persisted every page;
   a resumed backfill re-reads `VENUES_RESUME_OVERLAP`. Once complete, a re-run pages sort=date from 0 and
-  stops at the first page where EVERY venue's `recent_visit` and `total_count` are unchanged.
+  stops at the first page where EVERY venue's `recent_visit` and `total_count` are unchanged. A refresh
+  cut short before that page (max_pages, rate guard, 429) keeps its own cursor in list `venues_refresh`
+  and the next run RESUMES it — restarting at 0 would hit the already-upserted pages, read them as
+  unchanged and stop above the remaining changes. Coverage reads as incomplete until it finishes.
   `findVisitedVenues` matches name loosely (literal substring OR every significant word whole) because
   a brewery_id is not its taproom's venue_id and Untappd keeps "… (duplicate of …)" venues.
 - **Batch, don't loop.** Use `hasHadMany(username, bids)` (two grouped queries per 500-bid chunk)

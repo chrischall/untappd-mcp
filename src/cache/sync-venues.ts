@@ -6,6 +6,14 @@ import { checkRateBudget, resumeAdvice, stopFrom429, stopFromVerdict, type RateS
 /** The `list_sync_state` key for a user's venue history. */
 export const VENUES_LIST = 'venues';
 /**
+ * The `list_sync_state` key for an incremental refresh in flight. A row with
+ * `complete = false` means a refresh was cut short (max_pages, the rate guard
+ * or a 429) before it reached its stop page; `next_offset` is where it resumes.
+ * Without it an interrupted refresh would restart at 0, find the pages it had
+ * already upserted unchanged, and stop short of the changes further down.
+ */
+export const VENUES_REFRESH_LIST = 'venues_refresh';
+/**
  * What we ASK for per page. Untappd returns at most 25 venues whatever the
  * limit (live, 2026-11), so the cursor advances by the returned
  * `pagination.offset` — never by this number.
@@ -35,6 +43,8 @@ export interface SyncVenuesSummary {
   venues_complete: boolean;
   /** True when this run was a top-of-list refresh of an already-complete history. */
   incremental: boolean;
+  /** True when an incremental refresh is cut short and resumes on the next run. */
+  refresh_in_progress: boolean;
   another_run_needed: boolean;
   next_offset: number | null;
   stopped_for_rate_limit: boolean;
@@ -82,7 +92,10 @@ async function fetchVenuesPage(client: UntappdClient, encodedUser: string, offse
  * after EVERY page, at most `maxPages` (capped at 50) per call, stopping before
  * the hourly rate limit. Once the whole list is cached, a re-run is an
  * incremental refresh: page from offset 0 and stop at the first page on which
- * every venue's recent_visit (and visit count) is unchanged.
+ * every venue's recent_visit (and visit count) is unchanged. A refresh cut short
+ * before that stop page persists its own cursor and the next run resumes it
+ * (the history counts as incomplete meanwhile); only a finished refresh
+ * restarts at 0.
  */
 export async function syncUserVenues(
   client: UntappdClient,
@@ -96,9 +109,16 @@ export async function syncUserVenues(
   const prior = await cache.getListState(rawUsername, VENUES_LIST);
 
   const incremental = (prior?.complete ?? false) && !!prior?.last_synced_at;
-  let offset = incremental ? 0 : Math.max(0, (prior?.next_offset ?? 0) - (prior?.next_offset ? VENUES_RESUME_OVERLAP : 0));
+  const refreshPrior = incremental ? await cache.getListState(rawUsername, VENUES_REFRESH_LIST) : undefined;
+  const resumeFrom = (o: number | null | undefined) => Math.max(0, (o ?? 0) - (o ? VENUES_RESUME_OVERLAP : 0));
+  // A finished refresh (or none yet) starts at the top; an unfinished one resumes.
+  let offset = incremental
+    ? refreshPrior && !refreshPrior.complete
+      ? resumeFrom(refreshPrior.next_offset)
+      : 0
+    : resumeFrom(prior?.next_offset);
   let total = prior?.total_count ?? null;
-  let complete = incremental; // a refresh keeps the history complete whether or not it reaches a stop page
+  let complete = false; // backfill: the whole list cached; refresh: the stop page (or the end) reached
   let done = false;
   let pages = 0;
   let added = 0;
@@ -164,24 +184,50 @@ export async function syncUserVenues(
       done = true;
       complete = true;
     }
-    await cache.setListState(rawUsername, VENUES_LIST, {
-      // A refresh leaves the cursor at the end of the list, not mid-refresh.
-      next_offset: complete ? (total ?? offset) : offset,
-      total_count: total,
-      complete,
-      last_synced_at: now(),
-    });
+    if (incremental) {
+      // The backfill row stays complete (its cursor at the end of the list);
+      // the refresh's own progress lives in VENUES_REFRESH_LIST.
+      await cache.setListState(rawUsername, VENUES_REFRESH_LIST, {
+        next_offset: complete ? null : offset,
+        total_count: total,
+        complete,
+        last_synced_at: now(),
+      });
+      await cache.setListState(rawUsername, VENUES_LIST, {
+        next_offset: total ?? offset,
+        total_count: total,
+        complete: true,
+        ...(complete ? { last_synced_at: now() } : {}),
+      });
+    } else {
+      await cache.setListState(rawUsername, VENUES_LIST, {
+        next_offset: complete ? (total ?? offset) : offset,
+        total_count: total,
+        complete,
+        last_synced_at: now(),
+      });
+    }
   }
+  // A refresh that fetched nothing (rate-stopped before page 1) leaves any
+  // earlier unfinished refresh as it was; if there was none, the history is
+  // as complete as after the last finished refresh — but this one still has
+  // to run.
+  const refreshInProgress = incremental && (pages > 0 ? !complete : !!refreshPrior && !refreshPrior.complete);
+  const historyComplete = incremental ? !refreshInProgress : complete;
 
   const cached = await cache.userVenuesCount(rawUsername);
-  const percent = total && total > 0 ? Math.min(100, Math.round((cached / total) * 100)) : complete ? 100 : null;
+  const percent = total && total > 0 ? Math.min(100, Math.round((cached / total) * 100)) : historyComplete ? 100 : null;
   const anotherRunNeeded = !complete;
   const progress = `${cached}${total !== null ? `/${total}` : ''}`;
   const note = complete
     ? incremental
       ? `Venue history refreshed (${progress} cached). Re-run occasionally to pick up new visits.`
       : `Full venue history is cached (${progress}) — untappd_cache_has_visited answers are complete for this user.`
-    : rateStop
+    : refreshInProgress
+      ? `Venue history refresh unfinished (${progress} cached; resumes at offset ${offset}) — re-visited or new venues further down the list may not be cached yet. ${
+          rateStop ? resumeAdvice(rateStop, 'untappd_sync_user_venues') : 'Run untappd_sync_user_venues again to continue the refresh.'
+        }`
+      : rateStop
       ? `Venue history sync paused (${progress}). ${resumeAdvice(rateStop, 'untappd_sync_user_venues')}`
       : `Venue history sync in progress (${progress}). Run untappd_sync_user_venues again to fetch the next ${pagesBudget} pages.`;
 
@@ -194,10 +240,11 @@ export async function syncUserVenues(
     cached_venues: cached,
     total_venues: total,
     backfill_percent: percent,
-    venues_complete: complete,
+    venues_complete: historyComplete,
     incremental,
+    refresh_in_progress: refreshInProgress,
     another_run_needed: anotherRunNeeded,
-    next_offset: state?.next_offset ?? null,
+    next_offset: refreshInProgress ? offset : (state?.next_offset ?? null),
     stopped_for_rate_limit: rateStop !== undefined,
     ...(rateStop ? { rate_limit: rateStop } : {}),
     last_synced_at: now(),

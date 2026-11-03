@@ -312,7 +312,10 @@ export interface CacheUserStats {
 export interface VenueCoverage {
   cached_venues: number;
   total_venues: number | null;
+  /** The whole list is cached AND no incremental refresh is unfinished. */
   complete: boolean;
+  /** An incremental refresh was cut short; changes below its cursor may be missing. */
+  refresh_in_progress: boolean;
   percent: number | null;
   next_offset: number | null;
   last_synced_at: string | null;
@@ -1427,17 +1430,21 @@ export class CheckinStoreCore {
 
   /** The user's user/venues coverage, or null if their venue history was never synced. */
   venueCoverage(username: string): VenueCoverage | null {
+    // Literal keys: VENUES_LIST / VENUES_REFRESH_LIST in sync-venues.ts.
     const st = this.getListState(username, 'venues');
     const cached = this.userVenuesCount(username);
     if (!st && cached === 0) return null;
+    const refresh = this.getListState(username, 'venues_refresh');
+    const refreshing = (st?.complete ?? false) && !!refresh && !refresh.complete;
     const total = st?.total_count ?? null;
-    const complete = st?.complete ?? false;
+    const complete = (st?.complete ?? false) && !refreshing;
     return {
       cached_venues: cached,
       total_venues: total,
       complete,
+      refresh_in_progress: refreshing,
       percent: total && total > 0 ? Math.min(100, Math.round((cached / total) * 100)) : complete ? 100 : null,
-      next_offset: st?.next_offset ?? null,
+      next_offset: refreshing ? refresh!.next_offset : (st?.next_offset ?? null),
       last_synced_at: st?.last_synced_at ?? null,
     };
   }

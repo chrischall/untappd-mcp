@@ -163,6 +163,14 @@ describe('untappd_cache_has_visited (tool)', () => {
     expect(never.freshness.caveat).toMatch(/never been synced/);
   });
 
+  it('caveats results while an incremental refresh is unfinished', async () => {
+    await cache.setListState('mer', 'venues_refresh', { complete: false, next_offset: 25, last_synced_at: '2026-11-02T01:00:00.000Z' });
+    const out = parse(await harness.callTool('untappd_cache_has_visited', { username: 'mer', queries: [{ name: 'Ulele' }] }));
+    expect(out.freshness).toMatchObject({ coverage_complete: false, refresh_in_progress: true });
+    expect(out.freshness.caveat).toMatch(/refresh/i);
+    expect(out.freshness.caveat).toMatch(/untappd_sync_user_venues/);
+  });
+
   it('rejects a query with no criteria, and lat without lng', async () => {
     const empty = await harness.callTool('untappd_cache_has_visited', { username: 'mer', queries: [{ label: 'nothing' }] });
     expect((empty as { isError?: boolean }).isError).toBe(true);

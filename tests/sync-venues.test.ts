@@ -258,6 +258,111 @@ describe('syncUserVenues incremental refresh', () => {
   });
 });
 
+describe('syncUserVenues interrupted incremental refresh', () => {
+  const NEW_VISIT = 'Mon, 02 Nov 2026 20:00:00 +0000';
+  const vid = (it: unknown) => (it as { venue: { venue_id: number } }).venue.venue_id;
+
+  // 100 venues fully cached; then 40 of them re-visited and 10 brand-new venues
+  // appear — 50 changed venues, i.e. two full pages of changes at the top.
+  async function changedHistory() {
+    const cache = CheckinCache.open(':memory:');
+    const before = range(1, 100).map((id) => venueItem(id));
+    const seed = fakeClient({ route: venuesRoute(() => before) });
+    expect((await syncUserVenues(seed.client, cache, 'mer', 50)).venues_complete).toBe(true);
+    const revisitedIds = range(30, 40); // 30..69
+    const fresh = range(901, 10).map((id) => venueItem(id, { recent_visit: NEW_VISIT }));
+    const revisited = revisitedIds.map((id) => venueItem(id, { recent_visit: NEW_VISIT, total_count: 2 }));
+    const rest = before.filter((it) => !revisitedIds.includes(vid(it)));
+    return { cache, items: [...fresh, ...revisited, ...rest], revisitedIds };
+  }
+
+  async function expectAllChangesCached(cache: CheckinCache, revisitedIds: number[]) {
+    const fresh = await cache.findVisitedVenues('mer', { venue_ids: range(901, 10) });
+    expect(fresh).toHaveLength(10);
+    const rev = await cache.findVisitedVenues('mer', { venue_ids: revisitedIds });
+    expect(rev).toHaveLength(revisitedIds.length);
+    expect(rev.every((r) => r.total_count === 2 && r.recent_visit === '2026-11-02T20:00:00.000Z')).toBe(true);
+  }
+
+  it('cut short by max_pages: reports unfinished, then resumes the refresh instead of restarting at 0', async () => {
+    const { cache, items, revisitedIds } = await changedHistory();
+
+    const first = fakeClient({ route: venuesRoute(() => items) });
+    const s1 = await syncUserVenues(first.client, cache, 'mer', 1);
+    expect(first.calls.map((c) => c.q.offset)).toEqual([0]);
+    expect(s1).toMatchObject({ incremental: true, venues_complete: false, another_run_needed: true });
+    expect(s1.note).toMatch(/refresh/i);
+    // While the refresh is unfinished the history is not authoritative.
+    expect((await cache.stats()).users[0].venues).toMatchObject({ complete: false, refresh_in_progress: true });
+
+    const second = fakeClient({ route: venuesRoute(() => items) });
+    const s2 = await syncUserVenues(second.client, cache, 'mer', 10);
+    // Resumes at the refresh cursor (less the overlap), reaches the stop page.
+    expect(second.calls[0].q.offset).toBe(25 - VENUES_RESUME_OVERLAP);
+    // Changes occupy positions 0-49, so page 45 (45-69) still holds 5; page 70 is the stop page.
+    expect(second.calls.map((c) => c.q.offset)).toEqual([20, 45, 70]);
+    expect(s2).toMatchObject({ incremental: true, venues_complete: true, another_run_needed: false, cached_venues: 110 });
+    await expectAllChangesCached(cache, revisitedIds);
+    expect((await cache.stats()).users[0].venues).toMatchObject({ complete: true, refresh_in_progress: false });
+
+    // A finished refresh restarts at 0 next time: an unchanged list costs one page.
+    const third = fakeClient({ route: venuesRoute(() => items) });
+    const s3 = await syncUserVenues(third.client, cache, 'mer', 10);
+    expect(third.calls.map((c) => c.q.offset)).toEqual([0]);
+    expect(s3).toMatchObject({ venues_complete: true, another_run_needed: false, venues_added: 0, venues_updated: 0 });
+    cache.close();
+  });
+
+  it('cut short by a 429: the next run picks up every changed and new venue', async () => {
+    const { cache, items, revisitedIds } = await changedHistory();
+    const first = fakeClient({ route: venuesRoute(() => items), fail: (n) => n === 2 });
+    const s1 = await syncUserVenues(first.client, cache, 'mer', 10);
+    expect(s1).toMatchObject({ pages_fetched: 1, stopped_for_rate_limit: true, venues_complete: false, another_run_needed: true });
+
+    const second = fakeClient({ route: venuesRoute(() => items) });
+    const s2 = await syncUserVenues(second.client, cache, 'mer', 10);
+    expect(second.calls[0].q.offset).toBe(20);
+    expect(s2).toMatchObject({ venues_complete: true, another_run_needed: false });
+    await expectAllChangesCached(cache, revisitedIds);
+    cache.close();
+  });
+
+  it('cut short by the pre-emptive rate stop: the next run picks up every changed and new venue', async () => {
+    const { cache, items, revisitedIds } = await changedHistory();
+    // 97 spent: est 3 → exactly one page allowed.
+    const first = fakeClient({ spent: 97, route: venuesRoute(() => items) });
+    const s1 = await syncUserVenues(first.client, cache, 'mer', 10);
+    expect(first.calls).toHaveLength(1);
+    expect(s1).toMatchObject({ stopped_for_rate_limit: true, venues_complete: false, another_run_needed: true });
+    expect(s1.note).toMatch(/untappd_sync_user_venues again after/);
+
+    const second = fakeClient({ route: venuesRoute(() => items) });
+    await syncUserVenues(second.client, cache, 'mer', 10);
+    await expectAllChangesCached(cache, revisitedIds);
+    cache.close();
+  });
+
+  it('more changes than max_pages*25 are all picked up across runs', async () => {
+    const cache = CheckinCache.open(':memory:');
+    const before = range(1, 150).map((id) => venueItem(id));
+    await syncUserVenues(fakeClient({ route: venuesRoute(() => before) }).client, cache, 'mer', 50);
+    const revisitedIds = range(20, 100); // 4 pages of changes
+    const revisited = revisitedIds.map((id) => venueItem(id, { recent_visit: NEW_VISIT, total_count: 2 }));
+    const items = [...revisited, ...before.filter((it) => !revisitedIds.includes(vid(it)))];
+    let runs = 0;
+    let s;
+    do {
+      s = await syncUserVenues(fakeClient({ route: venuesRoute(() => items) }).client, cache, 'mer', 1);
+      runs++;
+    } while (s.another_run_needed && runs < 10);
+    expect(s.another_run_needed).toBe(false);
+    const rev = await cache.findVisitedVenues('mer', { venue_ids: revisitedIds });
+    expect(rev.every((r) => r.total_count === 2)).toBe(true);
+    expect(rev).toHaveLength(100);
+    cache.close();
+  });
+});
+
 describe('venue coverage in cache stats', () => {
   it('reports cached/total venues, completeness and the cursor per user', async () => {
     const cache = CheckinCache.open(':memory:');
