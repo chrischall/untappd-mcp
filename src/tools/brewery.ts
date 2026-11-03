@@ -6,6 +6,7 @@ import { UNTAPPD_VIEWS, compactBreweryBeers, upstreamCompact } from '../compact.
 import type { CacheStore } from '../cache/store.js';
 import { BREWERY_BEERS_TTL_MS, getBreweryBeers } from '../cache/brewery-beers.js';
 import { optionalCache } from './cache-optional.js';
+import { favoriteLookup } from '../cache/favorites.js';
 
 export function registerBreweryTools(
   server: McpServer,
@@ -64,7 +65,9 @@ export function registerBreweryTools(
         'without an API call — the default popularity order from the cached top-of-list, other sorts once the whole ' +
         'list is cached (sorted locally). refresh:true re-fetches. Untappd\'s per-beer have_had on this endpoint ' +
         'describes the AUTHENTICATED account, never the user you are asking about, so it is not cached or returned — ' +
-        'use untappd_cache_has_had_many for any user. view:"full" always calls Untappd and returns its raw page. Read-only.',
+        'use untappd_cache_has_had_many for any user. With the cache, the result carries favorite {is_favorite, sources, ' +
+        'reason} for the brewery and on each favorite beer (derived from username\'s history or added with ' +
+        'untappd_favorite_add; default your account). view:"full" always calls Untappd and returns its raw page. Read-only.',
       annotations: toolAnnotations({ title: "Get a brewery's beer list", readOnly: true, idempotent: true, openWorld: true }),
       inputSchema: z.object({
         brewery_id: z.number().int().positive().describe('Untappd brewery id'),
@@ -75,6 +78,11 @@ export function registerBreweryTools(
           .optional()
           .describe('Sort order (default by popularity)'),
         refresh: z.boolean().optional().describe('Re-fetch from Untappd even if a fresh cached list exists (default false)'),
+        username: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Whose favorites to mark (cache only; default your configured account)'),
         view: viewParam(UNTAPPD_VIEWS, {
           note: 'compact keeps each beer\'s identity, rating and counts and drops the description, label URLs and the copy of this brewery repeated on every row; "full" returns Untappd\'s whole page (always fetched live).',
         }),
@@ -85,7 +93,7 @@ export function registerBreweryTools(
     // honour an upstream `compact`, and sending an unverified parameter to see
     // what happens is not a rung. The projection is entirely ours and is
     // grounded on a live capture — see `compactBreweryBeer`.
-    async ({ brewery_id, limit, offset, sort, refresh, view }) => {
+    async ({ brewery_id, limit, offset, sort, refresh, username, view }) => {
       const v = resolveView(view, UNTAPPD_VIEWS);
       const cache = cacheOrNone();
       if (!cache) {
@@ -95,6 +103,9 @@ export function registerBreweryTools(
       // view:"full" wants Untappd's raw page, so it always fetches (and seeds the cache).
       const r = await getBreweryBeers(client, cache, brewery_id, { limit, offset, sort, refresh: refresh || v === 'full' });
       if (v === 'full') return viewResult(v, r.raw);
+      // Favorites are applied on read (never cached): the brewery itself, and any favorite beer.
+      const user = username ?? client.loginName;
+      const favs = user ? await favoriteLookup(cache, [user], { brewery: [brewery_id], beer: r.beers.map((b) => b.bid) }) : null;
       return viewResult(v, {
         brewery_id: r.brewery_id,
         brewery_name: r.brewery_name,
@@ -102,6 +113,7 @@ export function registerBreweryTools(
         source: r.source,
         fetched_at: r.fetched_at,
         expires_at: r.expires_at,
+        ...(favs ? { favorite: favs.get('brewery', brewery_id) } : {}),
         beers: {
           count: r.beers.length,
           items: r.beers.map((b) => ({
@@ -113,6 +125,7 @@ export function registerBreweryTools(
             rating_count: b.rating_count,
             checkin_count: b.checkin_count,
             in_production: b.in_production,
+            ...(favs?.isFavorite('beer', b.bid) ? { favorite: favs.get('beer', b.bid) } : {}),
           })),
         },
       });

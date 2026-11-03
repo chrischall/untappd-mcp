@@ -291,6 +291,28 @@ export interface CacheStore {
   upsertVenueDrinks(username: string, rows: VenueDrinkRow[], fetchedAt: string): Promise<void>;
   /** Cached drinks (tombstones excluded) at the given venues, newest first. */
   getVenueDrinks(username: string, venueIds: number[]): Promise<VenueDrinkRow[]>;
+  /**
+   * Add (or update the note of) a LOCAL manual favorite — never written to
+   * Untappd. `note: undefined` keeps an existing note; created_at is kept on update.
+   */
+  addFavorite(username: string, kind: FavoriteKind, id: number, note: string | null | undefined, createdAt: string): Promise<AddFavoriteResult>;
+  /** Remove a manual favorite; false when there was none. */
+  removeFavorite(username: string, kind: FavoriteKind, id: number): Promise<boolean>;
+  /** The user's manual favorites (newest first), named from what the cache knows. */
+  getManualFavorites(username: string, opts?: { kind?: FavoriteKind; ids?: number[] }): Promise<ManualFavoriteRow[]>;
+  /**
+   * Per-brewery aggregates over the user's distinct beers (both has-had
+   * sources): beers had, how many the user rated, and their average rating.
+   */
+  breweryHadStats(username: string, breweryIds?: number[]): Promise<BreweryHadStats[]>;
+  /**
+   * Per-beer best rating and times had (both sources, same merge as hasHadMany).
+   * With `bids`, those beers the user has had; without, only beers rated at least
+   * `minRating` OR had at least `minTimesHad` times.
+   */
+  beerHadStats(username: string, opts: { bids?: number[]; minRating?: number; minTimesHad?: number }): Promise<BeerHadStats[]>;
+  /** The user's visited venues (with names), restricted to `venueIds` and/or a minimum total_count. */
+  venueVisitStats(username: string, opts: { venueIds?: number[]; minCheckins?: number }): Promise<VisitedVenue[]>;
   /** Append API call observations to the shared log (see src/ratelimit.ts). Optional for non-file backends. */
   recordApiCalls?(rows: ApiCallObservation[]): Promise<void>;
   /** Logged API calls at or after `sinceMs` (epoch ms), oldest first. */
@@ -459,6 +481,47 @@ export interface CacheStats {
 }
 
 /** Rows removed by {@link CacheStore.forgetUser}, per table. */
+/** What a favorite points at. */
+export type FavoriteKind = 'beer' | 'brewery' | 'venue';
+export const FAVORITE_KINDS = ['beer', 'brewery', 'venue'] as const;
+
+/** One manual favorite (`favorites` table), plus a display name when the cache knows one. */
+export interface ManualFavoriteRow {
+  kind: FavoriteKind;
+  id: number;
+  note: string | null;
+  created_at: string;
+  name: string | null;
+}
+
+export interface AddFavoriteResult {
+  /** False when the favorite already existed (its note may have been updated). */
+  added: boolean;
+  note: string | null;
+  created_at: string;
+}
+
+/** Per-brewery has-had aggregate (see {@link CacheStore.breweryHadStats}). */
+export interface BreweryHadStats {
+  brewery_id: number;
+  brewery_name: string | null;
+  beers: number;
+  rated_beers: number;
+  /** Mean of the user's ratings over rated beers only; null when none is rated. */
+  avg_rating: number | null;
+}
+
+/** Per-beer has-had aggregate (see {@link CacheStore.beerHadStats}). */
+export interface BeerHadStats {
+  bid: number;
+  beer_name: string | null;
+  brewery_id: number | null;
+  brewery_name: string | null;
+  /** Best rating across both sources (unrated = null). */
+  rating: number | null;
+  times_had: number;
+}
+
 export type ForgetResult = Record<(typeof PER_USER_TABLES)[number], number>;
 
 export type SqlParam = string | number | null;
@@ -1932,6 +1995,170 @@ export class CheckinStoreCore {
     return out.sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')) || b.checkin_id - a.checkin_id);
   }
 
+  addFavorite(username: string, kind: FavoriteKind, id: number, note: string | null | undefined, createdAt: string): AddFavoriteResult {
+    const key = username.toLowerCase();
+    let out: AddFavoriteResult = { added: false, note: null, created_at: createdAt };
+    this.db.transaction(() => {
+      const cur = this.db.get('SELECT note, created_at FROM favorites WHERE username = ? AND kind = ? AND id = ?', [key, kind, id]);
+      if (!cur) {
+        const n = note ?? null;
+        this.db.run('INSERT INTO favorites (username, kind, id, note, created_at) VALUES (?, ?, ?, ?, ?)', [key, kind, id, n, createdAt]);
+        out = { added: true, note: n, created_at: createdAt };
+        return;
+      }
+      const n = note === undefined ? str(cur.note) : note;
+      this.db.run('UPDATE favorites SET note = ? WHERE username = ? AND kind = ? AND id = ?', [n, key, kind, id]);
+      out = { added: false, note: n, created_at: String(cur.created_at) };
+    });
+    return out;
+  }
+
+  removeFavorite(username: string, kind: FavoriteKind, id: number): boolean {
+    let removed = false;
+    this.db.transaction(() => {
+      const key = username.toLowerCase();
+      removed = !!this.db.get('SELECT 1 AS x FROM favorites WHERE username = ? AND kind = ? AND id = ?', [key, kind, id]);
+      if (removed) this.db.run('DELETE FROM favorites WHERE username = ? AND kind = ? AND id = ?', [key, kind, id]);
+    });
+    return removed;
+  }
+
+  getManualFavorites(username: string, opts: { kind?: FavoriteKind; ids?: number[] } = {}): ManualFavoriteRow[] {
+    const key = username.toLowerCase();
+    // Best-effort display name from whatever the cache already holds.
+    const nameSql = `CASE f.kind
+        WHEN 'beer' THEN COALESCE(
+          (SELECT beer_name FROM distinct_beers d WHERE d.username = f.username AND d.bid = f.id),
+          (SELECT name FROM beer_meta m WHERE m.bid = f.id),
+          (SELECT beer_name FROM checkins c WHERE c.username = f.username AND c.bid = f.id LIMIT 1),
+          (SELECT beer_name FROM wishlist w WHERE w.username = f.username AND w.bid = f.id))
+        WHEN 'brewery' THEN COALESCE(
+          (SELECT brewery_name FROM brewery_beer_lists l WHERE l.brewery_id = f.id),
+          (SELECT brewery_name FROM distinct_beers d WHERE d.username = f.username AND d.brewery_id = f.id LIMIT 1),
+          (SELECT brewery FROM beer_meta m WHERE m.brewery_id = f.id LIMIT 1),
+          (SELECT brewery_name FROM checkins c WHERE c.username = f.username AND c.brewery_id = f.id LIMIT 1))
+        ELSE (SELECT name FROM venues v WHERE v.venue_id = f.id) END`;
+    const where = ['f.username = ?'];
+    const params: SqlParam[] = [key];
+    if (opts.kind) {
+      where.push('f.kind = ?');
+      params.push(opts.kind);
+    }
+    const run = (extra: string, extraParams: SqlParam[]) =>
+      this.db
+        .all(
+          `SELECT f.kind AS kind, f.id AS id, f.note AS note, f.created_at AS created_at, ${nameSql} AS name
+           FROM favorites f WHERE ${[...where, ...(extra ? [extra] : [])].join(' AND ')}`,
+          [...params, ...extraParams],
+        )
+        .map((r) => ({
+          kind: String(r.kind) as FavoriteKind,
+          id: Number(r.id),
+          note: str(r.note),
+          created_at: String(r.created_at),
+          name: str(r.name),
+        }));
+    let rows: ManualFavoriteRow[];
+    if (opts.ids === undefined) rows = run('', []);
+    else {
+      rows = [];
+      for (const c of chunks([...new Set(opts.ids)])) {
+        if (c.length) rows.push(...run(`f.id IN (${c.map(() => '?').join(', ')})`, c));
+      }
+    }
+    return rows.sort((a, b) => b.created_at.localeCompare(a.created_at) || a.kind.localeCompare(b.kind) || a.id - b.id);
+  }
+
+  /**
+   * One row per distinct beer the user has had, from BOTH sources: user/beers
+   * (rating = the user's rating, times = had_count) and check-ins for beers
+   * user/beers doesn't hold. `best` is the max rating across both (as
+   * hasHadMany), `avg_basis` the rating used for brewery averages.
+   */
+  private perBeerSql(bidFilter: string): string {
+    return `WITH c AS (
+        SELECT bid, COUNT(*) AS n, MAX(NULLIF(rating, 0)) AS best, AVG(NULLIF(rating, 0)) AS avg_r,
+               MAX(beer_name) AS beer_name, MAX(brewery_id) AS brewery_id, MAX(brewery_name) AS brewery_name
+        FROM checkins WHERE username = ? AND bid IS NOT NULL${bidFilter} GROUP BY bid),
+      d AS (
+        SELECT bid, had_count, NULLIF(rating, 0) AS rating, beer_name, brewery_id, brewery_name
+        FROM distinct_beers WHERE username = ?${bidFilter}),
+      ids AS (SELECT bid FROM c UNION SELECT bid FROM d)
+      SELECT ids.bid AS bid,
+             COALESCE(d.beer_name, c.beer_name) AS beer_name,
+             COALESCE(d.brewery_id, c.brewery_id) AS brewery_id,
+             COALESCE(d.brewery_name, c.brewery_name) AS brewery_name,
+             CASE WHEN d.rating IS NULL THEN c.best WHEN c.best IS NULL THEN d.rating
+                  WHEN d.rating > c.best THEN d.rating ELSE c.best END AS best,
+             COALESCE(d.rating, c.avg_r) AS avg_basis,
+             COALESCE(d.had_count, c.n, 1) AS times_had
+      FROM ids LEFT JOIN d ON d.bid = ids.bid LEFT JOIN c ON c.bid = ids.bid`;
+  }
+
+  breweryHadStats(username: string, breweryIds?: number[]): BreweryHadStats[] {
+    const key = username.toLowerCase();
+    const sql = (filter: string) =>
+      `SELECT brewery_id, MAX(brewery_name) AS brewery_name, COUNT(*) AS beers, COUNT(avg_basis) AS rated,
+              AVG(avg_basis) AS avg_rating
+       FROM (${this.perBeerSql('')}) WHERE brewery_id IS NOT NULL${filter} GROUP BY brewery_id`;
+    const map = (r: Row): BreweryHadStats => ({
+      brewery_id: Number(r.brewery_id),
+      brewery_name: str(r.brewery_name),
+      beers: Number(r.beers),
+      rated_beers: Number(r.rated),
+      avg_rating: num(r.avg_rating),
+    });
+    if (breweryIds === undefined) return this.db.all(sql(''), [key, key]).map(map);
+    const out: BreweryHadStats[] = [];
+    for (const c of chunks([...new Set(breweryIds)])) {
+      if (c.length) out.push(...this.db.all(sql(` AND brewery_id IN (${c.map(() => '?').join(', ')})`), [key, key, ...c]).map(map));
+    }
+    return out;
+  }
+
+  beerHadStats(username: string, opts: { bids?: number[]; minRating?: number; minTimesHad?: number }): BeerHadStats[] {
+    const key = username.toLowerCase();
+    const map = (r: Row): BeerHadStats => ({
+      bid: Number(r.bid),
+      beer_name: str(r.beer_name),
+      brewery_id: num(r.brewery_id),
+      brewery_name: str(r.brewery_name),
+      rating: num(r.best),
+      times_had: Number(r.times_had),
+    });
+    if (opts.bids !== undefined) {
+      const out: BeerHadStats[] = [];
+      for (const c of chunks([...new Set(opts.bids)])) {
+        if (c.length === 0) continue;
+        const f = ` AND bid IN (${c.map(() => '?').join(', ')})`;
+        out.push(...this.db.all(this.perBeerSql(f), [key, ...c, key, ...c]).map(map));
+      }
+      return out;
+    }
+    return this.db
+      .all(`SELECT * FROM (${this.perBeerSql('')}) WHERE best >= ? OR times_had >= ?`, [
+        key,
+        key,
+        opts.minRating ?? Number.MAX_VALUE,
+        opts.minTimesHad ?? Number.MAX_SAFE_INTEGER,
+      ])
+      .map(map);
+  }
+
+  venueVisitStats(username: string, opts: { venueIds?: number[]; minCheckins?: number }): VisitedVenue[] {
+    const key = username.toLowerCase();
+    const base = `SELECT u.*, v.name, v.category, v.address, v.city, v.state, v.country, v.lat, v.lng, v.is_verified
+       FROM user_venues u LEFT JOIN venues v ON v.venue_id = u.venue_id
+       WHERE u.username = ? AND COALESCE(u.total_count, 0) >= ?`;
+    const min = opts.minCheckins ?? 0;
+    if (opts.venueIds === undefined) return this.db.all(base, [key, min]).map(visitedFrom);
+    const out: VisitedVenue[] = [];
+    for (const c of chunks([...new Set(opts.venueIds)])) {
+      if (c.length) out.push(...this.db.all(`${base} AND u.venue_id IN (${c.map(() => '?').join(', ')})`, [key, min, ...c]).map(visitedFrom));
+    }
+    return out;
+  }
+
   getBeerMeta(bids: number[]): BeerMeta[] {
     if (bids.length === 0) return [];
     const placeholders = bids.map(() => '?').join(', ');
@@ -2077,6 +2304,24 @@ export class LocalCacheStore implements CacheStore {
   }
   async getVenueDrinks(username: string, venueIds: number[]): Promise<VenueDrinkRow[]> {
     return this.core.getVenueDrinks(username, venueIds);
+  }
+  async addFavorite(username: string, kind: FavoriteKind, id: number, note: string | null | undefined, createdAt: string): Promise<AddFavoriteResult> {
+    return this.core.addFavorite(username, kind, id, note, createdAt);
+  }
+  async removeFavorite(username: string, kind: FavoriteKind, id: number): Promise<boolean> {
+    return this.core.removeFavorite(username, kind, id);
+  }
+  async getManualFavorites(username: string, opts?: { kind?: FavoriteKind; ids?: number[] }): Promise<ManualFavoriteRow[]> {
+    return this.core.getManualFavorites(username, opts);
+  }
+  async breweryHadStats(username: string, breweryIds?: number[]): Promise<BreweryHadStats[]> {
+    return this.core.breweryHadStats(username, breweryIds);
+  }
+  async beerHadStats(username: string, opts: { bids?: number[]; minRating?: number; minTimesHad?: number }): Promise<BeerHadStats[]> {
+    return this.core.beerHadStats(username, opts);
+  }
+  async venueVisitStats(username: string, opts: { venueIds?: number[]; minCheckins?: number }): Promise<VisitedVenue[]> {
+    return this.core.venueVisitStats(username, opts);
   }
   async recordApiCalls(rows: ApiCallObservation[]): Promise<void> {
     this.core.recordApiCalls(rows);

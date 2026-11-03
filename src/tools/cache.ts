@@ -16,6 +16,7 @@ import {
   resolveUsers,
   type MultiUserMode,
 } from '../cache/multi-user.js';
+import { favoriteLookup } from '../cache/favorites.js';
 import { CONFIRM_FLOW, confirmWrite } from './confirm.js';
 import { clampToQuota } from '../quota.js';
 import { rateLimitStatus } from '../ratelimit.js';
@@ -23,6 +24,14 @@ import { rateLimitStatus } from '../ratelimit.js';
 // Re-fetch cached beer metadata at most this often; a hit newer than this skips
 // the beer/info API call.
 const BEER_META_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * untappd_top_not_had's prefer_favorites boost, added to a beer's global rating
+ * (0–5) for ranking only: a wishlisted beer (explicit intent) gets more than one
+ * from a favorite brewery. Small enough that a clearly better beer still wins.
+ */
+export const WISHLIST_BOOST = 0.5;
+export const FAVORITE_BREWERY_BOOST = 0.25;
 
 /**
  * A source of the {@link CacheStore} to use for a request. Injected per
@@ -456,7 +465,8 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         'because a brewery_id is NOT its taproom\'s venue_id, a brewery can have several venues, and Untappd keeps ' +
         '"… (duplicate of …)" venues — so expect, and check, several matches. Returns per query: visited, the matched ' +
         'venues (first_visit, recent_visit, total_count, is_duplicate, distance_m, and — once untappd_sync_venue_drinks ' +
-        'has fetched them — drinks: the beer from the first/recent visit check-ins), and total_visits; plus a freshness ' +
+        'has fetched them — drinks: the beer from the first/recent visit check-ins — and favorite {is_favorite, sources, ' +
+        'reason}: derived from the visit history or added with untappd_favorite_add), and total_visits; plus a freshness ' +
         'block (last_synced_at, coverage_complete, caveat). Run untappd_sync_user_venues first.',
       annotations: toolAnnotations({ title: 'Check if a user has been to a venue (from the cache)', readOnly: true, idempotent: true, openWorld: false }),
       inputSchema: z.object({
@@ -482,8 +492,10 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
       const limit = max_matches ?? 10;
       const results = [];
       let visitedCount = 0;
-      for (const { label, ...q } of queries) {
-        const matches = await cache.findVisitedVenues(user, q as VenueQuery);
+      const found = [];
+      for (const { label, ...q } of queries) found.push({ label, q, matches: await cache.findVisitedVenues(user, q as VenueQuery) });
+      const favs = await favoriteLookup(cache, [user], { venue: found.flatMap((f) => f.matches.slice(0, limit).map((m) => m.venue_id)) });
+      for (const { label, q, matches } of found) {
         if (matches.length > 0) visitedCount++;
         const shown = matches.slice(0, limit);
         const drinksByVenue = new Map<number, Array<Record<string, unknown>>>();
@@ -513,6 +525,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
             first_checkin_id: m.first_checkin_id,
             recent_checkin_id: m.recent_checkin_id,
             ...(drinksByVenue.has(m.venue_id) ? { drinks: drinksByVenue.get(m.venue_id) } : {}),
+            favorite: favs.get('venue', m.venue_id),
           })),
         });
       }
@@ -534,7 +547,8 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         'Answer "has this user ever checked in this beer?" from the cache only — NO API call. Consults BOTH cached ' +
         'sources (check-ins and the distinct-beers list); a hit in either counts as had. Match by exact bid or a ' +
         'case-insensitive substring of the beer name. Returns whether they had it, the times-had count, best rating, ' +
-        'last date, which sources matched, and any detailed check-ins. Reports per-source freshness so you can ' +
+        'last date, which sources matched, any detailed check-ins, and favorite {is_favorite, sources, reason} (rated ' +
+        '≥4.25 / had ≥3 times, or added with untappd_favorite_add). Reports per-source freshness so you can ' +
         'caveat incomplete data. Requires bid or beer_name. Run untappd_sync_user_beers first for full coverage.',
       annotations: toolAnnotations({ title: 'Check if a user has had a beer (from the cache)', readOnly: true, idempotent: true, openWorld: false }),
       inputSchema: z.object({
@@ -550,7 +564,11 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
       const user = resolveUser(username, client.loginName);
       const cache = cacheProvider();
       const result = await cache.hasHad(user, { bid, beerName: beer_name });
-      return minifiedResult({ username: user, query: { bid, beer_name }, ...result, freshness: await freshness(cache, user) });
+      // By bid: that beer. By name only: any matched check-in's beer that is a favorite.
+      const favBids = bid !== undefined ? [bid] : [...new Set(result.matches.map((m) => m.bid).filter((b): b is number => b !== null))];
+      const favs = await favoriteLookup(cache, [user], { beer: favBids });
+      const favorite = favBids.map((b) => favs.get('beer', b)).find((f) => f.is_favorite) ?? favs.get('beer', null);
+      return minifiedResult({ username: user, query: { bid, beer_name }, ...result, favorite, freshness: await freshness(cache, user) });
     },
   );
 
@@ -693,7 +711,10 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         're-running fills the rest. A beer whose refresh is deferred or fails is still ranked on its older cached ' +
         'metadata and marked stale: true. Reports the same freshness/caveat block as untappd_cache_not_had. Omit username ' +
         'for your own account. For a GROUP pass usernames: mode "none_had" (default) ranks only beers new to everyone, ' +
-        '"any_not_had" ranks beers at least one of them still needs (each ranked beer lists not_had_by / had_by).',
+        '"any_not_had" ranks beers at least one of them still needs (each ranked beer lists not_had_by / had_by). ' +
+        `prefer_favorites (default true) lifts wishlisted beers (+${WISHLIST_BOOST}) and beers from a favorite brewery ` +
+        `(+${FAVORITE_BREWERY_BOOST}) — derived or manual, any user's in a group; the wishlist needs untappd_sync_wishlist — ` +
+        'and says so per beer (score, boosted_by, wishlisted, brewery_favorite/favorite).',
       annotations: toolAnnotations({ title: 'Top-rated beers a user has NOT had, from a candidate list', readOnly: false, idempotent: false, openWorld: true, destructive: false }),
       inputSchema: z.object({
         username: UsernameArg,
@@ -713,9 +734,16 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
           .max(100)
           .optional()
           .describe('Max beer/info API calls this run for uncached/stale metadata (default 25). Keep modest to respect the ~100 calls/hour rate limit.'),
+        prefer_favorites: z
+          .boolean()
+          .optional()
+          .describe(
+            `Boost beers on the wishlist (+${WISHLIST_BOOST}) or from a favorite brewery (+${FAVORITE_BREWERY_BOOST}) when ranking (default true). ` +
+              'false ranks by global rating alone.',
+          ),
       }),
     },
-    async ({ username, usernames, mode, bids, top_n, style, api_budget }) => {
+    async ({ username, usernames, mode, bids, top_n, style, api_budget, prefer_favorites }) => {
       const group = usernames !== undefined && usernames.length > 0;
       const users = resolveUsers(username, usernames, client.loginName);
       const groupMode: MultiUserMode = mode ?? DEFAULT_MULTI_USER_MODE;
@@ -795,11 +823,32 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         );
       }
 
+      // Favorites (any group member's) and wishlists — cache only.
+      const preferFavorites = prefer_favorites ?? true;
+      const favs = await favoriteLookup(cache, users, { beer: matched.map((m) => m.bid), brewery: matched.map((m) => m.brewery_id) });
+      const wishlisted = new Set<number>();
+      for (const u of users) for (const w of await cache.getWishlist(u, matched.map((m) => m.bid))) wishlisted.add(w.bid);
+      const boostsOf = (m: BeerMeta): Array<'wishlist' | 'favorite_brewery'> => {
+        const out: Array<'wishlist' | 'favorite_brewery'> = [];
+        if (wishlisted.has(m.bid)) out.push('wishlist');
+        if (favs.isFavorite('brewery', m.brewery_id)) out.push('favorite_brewery');
+        return out;
+      };
+      const scoreOf = (m: BeerMeta): number =>
+        ratingOf(m) +
+        (preferFavorites
+          ? boostsOf(m).reduce((n, b) => n + (b === 'wishlist' ? WISHLIST_BOOST : FAVORITE_BREWERY_BOOST), 0)
+          : 0);
+
       const ranked = matched
         .slice()
-        .sort((a, b) => ratingOf(b) - ratingOf(a))
+        .sort((a, b) => scoreOf(b) - scoreOf(a) || ratingOf(b) - ratingOf(a))
         .slice(0, topN)
-        .map((m) => ({
+        .map((m) => {
+          const boosts = preferFavorites ? boostsOf(m) : [];
+          const beerFav = favs.get('beer', m.bid);
+          const breweryFav = favs.get('brewery', m.brewery_id);
+          return {
           bid: m.bid,
           name: m.name,
           brewery: m.brewery,
@@ -807,6 +856,10 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
           abv: m.abv,
           rating: m.weighted_rating_score ?? m.rating_score,
           rating_count: m.rating_count,
+          ...(boosts.length ? { score: Number(scoreOf(m).toFixed(3)), boosted_by: boosts } : {}),
+          ...(wishlisted.has(m.bid) ? { wishlisted: true } : {}),
+          ...(beerFav.is_favorite ? { favorite: beerFav } : {}),
+          ...(breweryFav.is_favorite ? { brewery_favorite: breweryFav } : {}),
           ...(staleBids.has(m.bid) ? { stale: true } : {}),
           ...(group
             ? {
@@ -814,7 +867,8 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
                 had_by: verdicts.get(m.bid)!.had_by.map((x) => x.username),
               }
             : {}),
-        }));
+          };
+        });
 
       // Errors leave beers unranked (or ranked on stale data) just like a
       // deferral does, so a re-run is worth it in both cases.
@@ -827,6 +881,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
           candidates: candidates.length,
           not_had: notHad.length,
           style_matched: style !== undefined ? matched.length : null,
+          prefer_favorites: preferFavorites,
           api_calls_used: apiCalls,
           errors,
           stale: staleMeta.length,

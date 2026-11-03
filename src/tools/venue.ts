@@ -7,6 +7,7 @@ import { walkVenueMenu } from '../menu/venue-menu.js';
 import type { CacheStore } from '../cache/store.js';
 import { cachedResponse, VENUE_RESPONSE_TTL_MS } from '../cache/response-cache.js';
 import { optionalCache } from './cache-optional.js';
+import { favoriteLookup } from '../cache/favorites.js';
 
 const TTL_HOURS = VENUE_RESPONSE_TTL_MS / 3_600_000;
 const RefreshArg = z
@@ -69,12 +70,15 @@ export function registerVenueTools(server: McpServer, client: UntappdClient, cac
         'spans multiple sections — e.g. a 23-beer wall that comes back with 2 items. This tool forwards the ' +
         'section_limit / section_offset paging params venue/info echoes back but never receives, walks sections up to a ' +
         'per-call max_pages budget (respecting the ~100 calls/hour limit — it does NOT loop to completion in one call), and ' +
-        'flattens to [{bid, name, brewery, style, abv, price, serving_type, menu, section}]. Like the sync tools it is ' +
+        'flattens to [{bid, name, brewery, brewery_id, style, abv, price, serving_type, menu, section}]. Like the sync tools it is ' +
         'resumable: when the budget runs out before full coverage it returns another_run_needed:true plus next_section_offset ' +
         'to pass back on the next call. truncated:true means the upstream returned no more sections short of total_count ' +
         '(e.g. it ignored the paging params) — not resumable. Results are cached locally for ' + TTL_HOURS + ' hours per ' +
         'venue + paging params (cache.hit, fetched_at, expires_at) so repeated trip planning does not re-spend calls; ' +
-        'refresh:true re-fetches. Get an id from untappd_search_venue. Read-only.',
+        'refresh:true re-fetches. With the cache, the result also carries favorite {is_favorite, sources, reason} for the ' +
+        'venue, and favorite / brewery_favorite on each beer that is one (derived from username\'s history or added ' +
+        'with untappd_favorite_add; default your account) — applied on read, so never stale. Get an id from ' +
+        'untappd_search_venue. Read-only.',
       annotations: toolAnnotations({ title: "Get a venue's verified beer menu (section-paged)", readOnly: true, idempotent: true, openWorld: true }),
       inputSchema: z.object({
         venue_id: z.number().int().positive().describe('Untappd venue id'),
@@ -84,12 +88,37 @@ export function registerVenueTools(server: McpServer, client: UntappdClient, cac
         max_pages: z.number().int().min(1).max(10).optional().describe('API calls to spend THIS run — page budget, not page size (default 3). Resume with next_section_offset if another_run_needed.'),
         sort: z.string().optional().describe("Menu sort key (e.g. 'publish_order', 'highest_rated'). Optional."),
         refresh: RefreshArg,
+        username: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Whose favorites to mark (cache only; default your configured account)'),
       }),
     },
-    async ({ venue_id, menu_id, section_limit, section_offset, max_pages, sort, refresh }) => {
+    async ({ venue_id, menu_id, section_limit, section_offset, max_pages, sort, refresh, username }) => {
       const key = `venue_menu:${venue_id}:${JSON.stringify([menu_id ?? null, section_limit ?? null, section_offset ?? 0, max_pages ?? 3, sort ?? null])}`;
-      const r = await cachedResponse(cacheOrNone(), key, 'venue_menu', () => fetchMenu(), { refresh });
-      return minifiedResult({ ...r.data, ...cacheBlock(r) });
+      const cache = cacheOrNone();
+      const r = await cachedResponse(cache, key, 'venue_menu', () => fetchMenu(), { refresh });
+      // Favorites are applied on read (not cached), so a change shows even on a cache hit.
+      const user = username ?? client.loginName;
+      if (!cache || !user) return minifiedResult({ ...r.data, ...cacheBlock(r) });
+      const beers = (Array.isArray(r.data.beers) ? r.data.beers : []) as Array<Record<string, unknown>>;
+      const ids = (k: string) => beers.map((b) => b[k]).filter((x): x is number => typeof x === 'number');
+      const favs = await favoriteLookup(cache, [user], { venue: [venue_id], beer: ids('bid'), brewery: ids('brewery_id') });
+      return minifiedResult({
+        ...r.data,
+        favorite: favs.get('venue', venue_id),
+        beers: beers.map((b) => {
+          const beerFav = favs.get('beer', b.bid as number);
+          const breweryFav = favs.get('brewery', b.brewery_id as number | undefined);
+          return {
+            ...b,
+            ...(beerFav.is_favorite ? { favorite: beerFav } : {}),
+            ...(breweryFav.is_favorite ? { brewery_favorite: breweryFav } : {}),
+          };
+        }),
+        ...cacheBlock(r),
+      });
 
       async function fetchMenu(): Promise<Record<string, unknown>> {
         // Per CLAUDE.md's rate-limit design this spends at most `max_pages` API
@@ -104,7 +133,9 @@ export function registerVenueTools(server: McpServer, client: UntappdClient, cac
           sort,
         });
         const { totalCount, sawMenu, pagesFetched, reachedEnd } = walk;
-        const beers = walk.beers.map(({ rawBeer: _b, rawBrewery: _w, ...b }) => b);
+        const beers = walk.beers.map(({ rawBeer: _b, rawBrewery: w, ...b }) =>
+          typeof w?.brewery_id === 'number' ? { ...b, brewery_id: w.brewery_id } : b,
+        );
 
         if (!sawMenu) {
           return { venue_id, total_count: 0, returned: 0, pages_fetched: pagesFetched, another_run_needed: false, truncated: false, beers: [], note: 'No verified menu on this venue.' };

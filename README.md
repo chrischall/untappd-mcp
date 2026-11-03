@@ -102,6 +102,18 @@ each cached venue's first and most-recent visit check-in (`checkin/view`, budget
 stops before the rate limit). It's a partial picture — two check-ins per venue at most — shown in
 `untappd_cache_has_visited` as `drinks`.
 
+Favorites (cache only, never written to Untappd): `untappd_favorites_list` lists a user's favorite
+beers, breweries and venues, each once with its `sources` and a `reason`. **Derived** favorites come
+from the synced history — venues with ≥5 check-ins or visits spanning ≥3 distinct months; breweries
+with ≥5 beers had and an average rating ≥3.75, or ≥15 beers; beers rated ≥4.25 or had ≥3 times —
+and every threshold can be overridden per call. **Manual** favorites are added and removed with
+`untappd_favorite_add` / `untappd_favorite_remove` (local table, optional note). Results from
+`untappd_cache_has_had`, `untappd_cache_has_visited`, `untappd_brewery_beers`, `untappd_venue_menu`
+and `untappd_top_not_had` carry a `favorite` field `{is_favorite, sources, reason}`, and
+`untappd_top_not_had` ranks wishlisted beers and beers from favorite breweries higher by default
+(`prefer_favorites: false` turns that off). The `untappd` source is reserved for Untappd's own
+followed lists, which are not synced.
+
 Cached reads (to stretch the ~100 calls/hour limit): `untappd_brewery_beers` keeps each brewery's
 list for 7 days, and `untappd_venue_menu` / `untappd_venue_activity` keep results for 6 hours; each
 reports where the answer came from and takes `refresh: true` to re-fetch. Untappd's `have_had` on a

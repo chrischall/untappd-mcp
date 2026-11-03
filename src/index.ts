@@ -14,6 +14,7 @@ import { registerWishlistTools } from './tools/wishlist.js';
 import { registerCheckinTools } from './tools/checkin.js';
 import { registerUtilityTools } from './tools/utilities.js';
 import { registerCacheTools } from './tools/cache.js';
+import { registerFavoriteTools } from './tools/favorites.js';
 import { registerMenuTools } from './tools/menu.js';
 import { logRegisteredTools } from './tools/diagnostics.js';
 import { CheckinCache, defaultCachePath, describeCachePath } from './cache/db.js';
@@ -66,6 +67,7 @@ await runMcp({
     // The cache is backed by a local `node:sqlite` file here; the provider is
     // injectable, so another deployment can back the same tools differently.
     (s) => registerCacheTools(s, client, nodeCacheProvider),
+    (s) => registerFavoriteTools(s, client, nodeCacheProvider),
     (s) => registerMenuTools(s, client, nodeCacheProvider),
     // Keep last: logs the full registered toolset (count + names) at startup.
     (s) => logRegisteredTools(s, 'stdio'),

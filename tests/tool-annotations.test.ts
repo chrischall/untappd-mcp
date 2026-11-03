@@ -13,6 +13,7 @@ import { registerWishlistTools } from '../src/tools/wishlist.js';
 import { registerCheckinTools } from '../src/tools/checkin.js';
 import { registerUtilityTools } from '../src/tools/utilities.js';
 import { registerCacheTools } from '../src/tools/cache.js';
+import { registerFavoriteTools } from '../src/tools/favorites.js';
 import { registerMenuTools } from '../src/tools/menu.js';
 
 /**
@@ -50,13 +51,14 @@ function registeredAnnotations(): Record<string, Ann | undefined> {
   registerCheckinTools(server, client);
   registerUtilityTools(server, client);
   registerCacheTools(server, client, cache);
+  registerFavoriteTools(server, client, cache);
   registerMenuTools(server, client, cache);
   return seen;
 }
 
 describe('tool annotations', () => {
   it('covers the full served surface (guards against a registrar being dropped here)', () => {
-    expect(Object.keys(registeredAnnotations())).toHaveLength(53);
+    expect(Object.keys(registeredAnnotations())).toHaveLength(56);
   });
 
   it('sets an explicit boolean readOnlyHint and openWorldHint on every tool', () => {

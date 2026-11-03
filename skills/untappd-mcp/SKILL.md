@@ -213,6 +213,15 @@ Query tools (has-had ones consult BOTH sources — a hit in either = had):
   beer from each cached venue's first/recent visit (`checkin/view`), budgeted by
   `max_calls`; `untappd_cache_has_visited` then shows them as `drinks`. Partial
   by design (two check-ins per venue at most).
+- **Favorites** (local, no API): `untappd_favorites_list` (filter `kind`
+  beer|brewery|venue, `source` derived|manual|untappd, override `thresholds`),
+  `untappd_favorite_add` / `untappd_favorite_remove` (manual, with a note —
+  never written to Untappd). Derived defaults: venue ≥5 check-ins or ≥3 distinct
+  months; brewery ≥5 beers with avg ≥3.75, or ≥15 beers; beer rated ≥4.25 or
+  had ≥3 times. has_had / has_visited / brewery_beers / venue_menu /
+  top_not_had results carry `favorite` {is_favorite, sources, reason};
+  `untappd_top_not_had` boosts wishlisted (+0.5) and favorite-brewery (+0.25)
+  beers unless `prefer_favorites: false`.
 
 **Retention.** The cache keeps what you sync until you remove it — including
 friends' dated check-ins, comments and venues. `untappd_cache_forget` (confirmation-gated)

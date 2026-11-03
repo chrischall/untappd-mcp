@@ -196,6 +196,14 @@ Non-obvious behaviours that were each fixed the hard way:
   check-in, one call each under `max_calls` + the rate guard. Only beer/brewery/date are stored (never
   comments). A 404 is stored as a tombstone (bid AND beer_name null) so it is never re-asked;
   other errors stay pending. `getVenueDrinks` hides tombstones.
+- **Favorites (`favorites.ts`)**: derived favorites are COMPUTED on read from the cache (thresholds in
+  `DEFAULT_FAVORITE_THRESHOLDS`, each overridable), never stored, so they track the latest sync; manual
+  ones live in the `favorites` table (local only). `listFavorites` / `favoriteLookup` merge per
+  (kind, id) so an item appears ONCE with ordered, de-duplicated `sources`. Every `favorite` field is
+  built by `favoriteLookup` — reuse it (trip_check too). Annotations are applied AFTER the response
+  cache (venue_menu), never stored in it. The venue months rule only knows first/recent visit, so it
+  also needs total_count ≥ the month threshold (2 visits can't cover 3 distinct months). The
+  `untappd` source is reserved: no follow/like sync exists (6a, report-first).
 - **Batch, don't loop.** Use `hasHadMany(username, bids)` (two grouped queries per 500-bid chunk)
   for any list; `hasHad` per bid costs ~4 queries each. `tests/cache-batch.test.ts` pins the two
   to identical verdicts — change both or neither. Upsert "net new" counts look up only the batch's
