@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.6.0](https://github.com/chrischall/untappd-mcp/compare/v2.5.2...v2.6.0) (2026-11-04)
+
+
+### Features
+
+* context-group hints, a brief view on the friend feed ([#262](https://github.com/chrischall/untappd-mcp/issues/262)) ([94d3ea6](https://github.com/chrischall/untappd-mcp/commit/94d3ea6eb7ab6d5108252816bb3d643ddf0689b6))
+
+
+### Bug Fixes
+
+* **deps:** bump @chrischall/mcp-utils ([#260](https://github.com/chrischall/untappd-mcp/issues/260)) ([cc5971e](https://github.com/chrischall/untappd-mcp/commit/cc5971e9fd7383dcadce38675e46838ccf0aa390))
+
 ## [2.5.2](https://github.com/chrischall/untappd-mcp/compare/v2.5.1...v2.5.2) (2026-11-03)
 
 
