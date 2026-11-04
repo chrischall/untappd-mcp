@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
+import { foodMeta } from './hints.js';
 import { createHelpfulError, minifiedResult, resolveView, toolAnnotations, viewParam, viewResult } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 import { compactCheckins, compactWishlist, compactUserBeers, UNTAPPD_VIEWS, upstreamCompact } from '../compact.js';
@@ -52,6 +53,7 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
         "Get an Untappd user's profile: bio, location, total check-ins, distinct beers, badges, and stats. " +
         'Omit username for your own account. Read-only.',
       annotations: toolAnnotations({ title: 'Get Untappd user profile', readOnly: true, idempotent: true, openWorld: true }),
+      _meta: foodMeta('lookup'),
       inputSchema: z.object({
         username: UsernameArg,
         view: viewParam(UNTAPPD_VIEWS, { note: 'compact also asks Untappd for its own slim record, dropping the embedded activity/list blocks; \'full\' returns everything.' }),
@@ -74,6 +76,7 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
         'any other user Untappd returns just the ~50 most recent check-ins and ignores max_id — use untappd_user_beers ' +
         '(has had) or untappd_user_venues (has been) for their full history. Omit username for your own. Read-only.',
       annotations: toolAnnotations({ title: 'Get Untappd user check-ins', readOnly: true, idempotent: true, openWorld: true }),
+      _meta: foodMeta('lookup'),
       inputSchema: z.object({
         username: UsernameArg,
         limit: z.number().int().min(1).max(50).optional().describe('Max check-ins (1–50, default 25)'),
@@ -95,6 +98,7 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
       description:
         "Get the beers on a user's wishlist. Supports sorting and paging. Omit username for your own account. Read-only.",
       annotations: toolAnnotations({ title: 'Get Untappd user wishlist', readOnly: true, idempotent: true, openWorld: true }),
+      _meta: foodMeta('lookup', { aliases: ['wishlist', 'beers to try'] }),
       inputSchema: z.object({
         username: UsernameArg,
         limit: z.number().int().min(1).max(50).optional().describe('Max beers (1–50, default 25)'),
@@ -121,6 +125,7 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
         "Get the distinct (unique) beers a user has ever checked in, with their rating and check-in count per beer. " +
         'Supports sorting and paging. Omit username for your own account. Read-only.',
       annotations: toolAnnotations({ title: 'Get Untappd distinct beers', readOnly: true, idempotent: true, openWorld: true }),
+      _meta: foodMeta('lookup'),
       inputSchema: z.object({
         username: UsernameArg,
         limit: z.number().int().min(1).max(50).optional().describe('Max beers (1–50, default 25)'),
@@ -145,6 +150,7 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
       title: 'Get Untappd user badges',
       description: "Get the badges a user has earned, most recent first. Omit username for your own account. Read-only.",
       annotations: toolAnnotations({ title: 'Get Untappd user badges', readOnly: true, idempotent: true, openWorld: true }),
+      _meta: foodMeta('lookup'),
       inputSchema: z.object({
         username: UsernameArg,
         limit: z.number().int().min(1).max(50).optional().describe('Max badges (1–50, default 25)'),
@@ -163,6 +169,7 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
       title: 'Get Untappd user friends',
       description: "Get a user's friend list. Omit username for your own account. Read-only.",
       annotations: toolAnnotations({ title: 'Get Untappd user friends', readOnly: true, idempotent: true, openWorld: true }),
+      _meta: foodMeta('lookup'),
       inputSchema: z.object({
         username: UsernameArg,
         limit: z.number().int().min(1).max(50).optional().describe('Max friends (1–50, default 25)'),
@@ -185,6 +192,7 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
         'other users). Untappd returns at most 25 venues per page whatever limit you ask for — advance by the ' +
         "returned pagination offset. Omit username for your own account. Read-only.",
       annotations: toolAnnotations({ title: 'Get venues a user has checked in at', readOnly: true, idempotent: true, openWorld: true }),
+      _meta: foodMeta('lookup'),
       inputSchema: z.object({
         username: UsernameArg,
         limit: z.number().int().min(1).max(50).optional().describe('Max venues (1–50; Untappd caps a page at 25)'),
@@ -217,6 +225,7 @@ export function registerUserTools(server: McpServer, client: UntappdClient): voi
         'Get the incoming friend requests waiting on YOUR account — the users who have requested to be your ' +
         'friend. Read-only.',
       annotations: toolAnnotations({ title: 'Get your pending friend requests', readOnly: true, idempotent: true, openWorld: true }),
+      _meta: foodMeta('lookup'),
       inputSchema: z.object({
         limit: z.number().int().min(1).max(50).optional().describe('Max requests (1–50, default 25)'),
         offset: z.number().int().min(0).optional().describe('Result offset for paging (default 0)'),

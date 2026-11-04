@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
+import { foodMeta } from './hints.js';
 import { minifiedResult, toolAnnotations } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 import { FAVORITE_KINDS } from '../cache/store.js';
@@ -39,6 +40,7 @@ export function registerFavoriteTools(server: McpServer, client: UntappdClient, 
         'has_had, has_had_many, has_visited, brewery_beers, venue_menu, top_not_had and trip_check results; a favorite brewery also boosts its ' +
         'beers in untappd_top_not_had. Omit username for your own account.',
       annotations: toolAnnotations({ title: 'Mark a beer, brewery or venue as a favorite (local)', readOnly: false, idempotent: true, openWorld: false, destructive: false }),
+      _meta: foodMeta('change'),
       inputSchema: z.object({
         username: UsernameArg,
         kind: KindArg,
@@ -64,6 +66,7 @@ export function registerFavoriteTools(server: McpServer, client: UntappdClient, 
         'when there was none. A DERIVED favorite (from the user\'s history) cannot be removed — it is computed from ' +
         'the thresholds; change them in untappd_favorites_list instead. Omit username for your own account.',
       annotations: toolAnnotations({ title: 'Remove a manual favorite (local)', readOnly: false, idempotent: true, openWorld: false, destructive: false }),
+      _meta: foodMeta('change'),
       inputSchema: z.object({ username: UsernameArg, kind: KindArg, id: IdArg }),
     },
     async ({ username, kind, id }) => {
@@ -91,6 +94,7 @@ export function registerFavoriteTools(server: McpServer, client: UntappdClient, 
         '(untappd_sync_user_venues, untappd_sync_user_beers); "untappd" ones as the last untappd_sync_brewery_likes ' +
         '(freshness.brewery_likes). Filter by kind and source. Omit username for your own account.',
       annotations: toolAnnotations({ title: "List a user's favorite beers, breweries and venues", readOnly: true, idempotent: true, openWorld: false }),
+      _meta: foodMeta('lookup'),
       inputSchema: z.object({
         username: UsernameArg,
         kind: z.enum(FAVORITE_KINDS).optional().describe('Only this kind (default all three)'),

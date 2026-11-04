@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
+import { foodMeta } from './hints.js';
 import { createHelpfulError, minifiedResult, toolAnnotations } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 
@@ -65,6 +66,7 @@ export function registerResolveTools(server: McpServer, client: UntappdClient): 
         'Parse an untappd.com URL (a beer /b/, brewery /w/, venue /v/, user /user/, or check-in link) into its ' +
         'entity type and id, and name the tool to call next. Pure local parsing — no network. Read-only.',
       annotations: toolAnnotations({ title: 'Resolve an Untappd URL', readOnly: true, idempotent: true, openWorld: false }),
+      _meta: foodMeta('lookup'),
       inputSchema: z.object({
         url: z.string().min(1).describe('An untappd.com URL to resolve'),
       }),
@@ -88,6 +90,7 @@ export function registerResolveTools(server: McpServer, client: UntappdClient): 
         'Resolve an untappd.com URL AND fetch the entity detail in one call — the convenience combination of ' +
         'untappd_resolve + the matching info tool. Returns { resolved, detail }. Read-only.',
       annotations: toolAnnotations({ title: 'Open an Untappd URL', readOnly: true, idempotent: true, openWorld: true }),
+      _meta: foodMeta('lookup'),
       inputSchema: z.object({
         url: z.string().min(1).describe('An untappd.com URL to resolve and fetch'),
       }),

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
+import { foodMeta } from './hints.js';
 import { confirmTokenParam, minifiedResult, toolAnnotations } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 import { CONFIRM_FLOW, confirmWrite } from './confirm.js';
@@ -13,6 +14,7 @@ export function registerWishlistTools(server: McpServer, client: UntappdClient):
       title: 'Add a beer to your wishlist',
       description: `Add a beer to YOUR Untappd wishlist by its bid. Writes to your account. ${CONFIRM_FLOW}`,
       annotations: toolAnnotations({ title: 'Add a beer to your wishlist', readOnly: false, idempotent: true, openWorld: true, destructive: false }),
+      _meta: foodMeta('change', { aliases: ['want to try', 'save a beer'] }),
       inputSchema: z.object({
         bid: BidSchema,
         confirmToken: confirmTokenParam,
@@ -43,6 +45,7 @@ export function registerWishlistTools(server: McpServer, client: UntappdClient):
       title: 'Remove a beer from your wishlist',
       description: `Remove a beer from YOUR Untappd wishlist by its bid. Writes to your account. ${CONFIRM_FLOW}`,
       annotations: toolAnnotations({ title: 'Remove a beer from your wishlist', readOnly: false, idempotent: true, openWorld: true, destructive: false }),
+      _meta: foodMeta('change'),
       inputSchema: z.object({
         bid: BidSchema,
         confirmToken: confirmTokenParam,

@@ -73,6 +73,12 @@ answer, wrong reason. **The same silence bites the other way**: `compact:
 false` no longer buys you the full record either. It is dropped identically
 and you still get compact. `view: "full"` is the only way back.
 
+`untappd_activity_feed` also takes a third rung, `view: "brief"`: one line per
+check-in, `<user>: <beer> (<brewery>) at <venue> — <ISO date | no date> —
+<rated N | not rated>`, each at most 120 characters. It is the shape a
+context-group host reads aloud (below); use it when you only need to say what
+friends have been drinking.
+
 Compact comes in two tiers here, and they are not the same thing:
 
 **A hand-written field projection — 9 tools.**
@@ -245,3 +251,25 @@ owner-only (dir `0700`, file `0600`).
 Every cache read returns a `freshness` block reporting each source's completeness
 separately (plus `coverage_complete` and a `caveat` when incomplete), so you can
 flag a "not found" as possibly a false negative until the relevant sync finishes.
+
+## In context groups
+
+On an mcp-host connector this server is a member of the **food** group (every
+tool but `untappd_healthcheck` carries a `_meta.mint` hint with
+`domain: "food"`). Its one canonical read is **`untappd_activity_feed`** for
+**what's new** — the friend feed, answered with `view: "brief"`. It takes no
+subject and no date range: Untappd has no listable set of the person's own
+subjects (no children, properties or accounts to fan out over), so the group
+asks it once, not once per person. Nothing here answers what's due or what's
+on; every other read is a `lookup` (`untappd_notifications` is a non-canonical
+what's-new), and the writes are `send` (toast, comment, friend request),
+`change` (check-in, deletes, wishlist, favourites, friend accept/reject/remove)
+or `other` (the cache syncs and the pickers, which refresh the local cache as
+they read).
+
+A compound ask looks like *"what's new with food — any new reservations, and
+what have my friends been drinking?"*: the host answers the Untappd half from
+the feed's brief lines beside the group's other members. This server calls the
+Untappd API directly, so it never answers "needs your browser open"; if it is
+not configured, the group reports it as unable to answer and
+`untappd_healthcheck` says which credential is missing.

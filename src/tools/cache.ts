@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
+import { foodMeta } from './hints.js';
 import { RateLimitError, confirmTokenParam, createHelpfulError, minifiedResult, toolAnnotations } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 import { beerMetaFrom, DEFAULT_VISIT_RADIUS_M, type BeerMeta, type CacheStore, type SyncState, type VenueQuery } from '../cache/store.js';
@@ -220,6 +221,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         'is ignored until it reports a live value) and any 429 wait. Use it to confirm the cache persisted across ' +
         'restarts, to see how far a backfill has got, or to check whether a sync can run now.',
       annotations: toolAnnotations({ title: 'Show the local cache location, schema and per-user coverage', readOnly: true, idempotent: true, openWorld: false }),
+      _meta: foodMeta('lookup'),
       inputSchema: z.object({}),
     },
     async () => {
@@ -255,6 +257,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         'with stopped_for_rate_limit and rate_limit.resume_at — progress is saved; re-run after that time. Omit ' +
         'username for your own account.',
       annotations: toolAnnotations({ title: "Sync a user's check-ins into the cache", readOnly: false, idempotent: false, openWorld: true, destructive: false }),
+      _meta: foodMeta('other'),
       inputSchema: z.object({
         username: UsernameArg,
         max_pages: z
@@ -297,6 +300,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         'cleanly on a 429) with stopped_for_rate_limit and rate_limit.resume_at — progress is saved; re-run after ' +
         'that time. Omit username for your own account.',
       annotations: toolAnnotations({ title: "Sync a user's complete distinct-beers list into the cache", readOnly: false, idempotent: false, openWorld: true, destructive: false }),
+      _meta: foodMeta('other'),
       inputSchema: z.object({
         username: UsernameArg,
         max_pages: z
@@ -331,6 +335,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         'stopped; another_run_needed stays true until it finishes). Stops BEFORE the ~100 calls/hour rate ' +
         'limit (or cleanly on a 429) with stopped_for_rate_limit and rate_limit.resume_at. Omit username for your own account.',
       annotations: toolAnnotations({ title: "Sync a user's complete venue history into the cache", readOnly: false, idempotent: false, openWorld: true, destructive: false }),
+      _meta: foodMeta('other'),
       inputSchema: z.object({
         username: UsernameArg,
         max_pages: z
@@ -363,6 +368,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         'Only reads Untappd — never changes the wishlist (that is untappd_wishlist_add / _remove). Omit username for ' +
         'your own account; another user\'s wishlist needs a public account or friendship.',
       annotations: toolAnnotations({ title: "Sync a user's wishlist into the cache", readOnly: false, idempotent: false, openWorld: true, destructive: false }),
+      _meta: foodMeta('other'),
       inputSchema: z.object({
         username: UsernameArg,
         max_pages: z
@@ -404,6 +410,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         openWorld: true,
         destructive: false,
       }),
+      _meta: foodMeta('other'),
       inputSchema: z.object({
         username: UsernameArg,
         max_pages: z
@@ -444,6 +451,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         openWorld: true,
         destructive: false,
       }),
+      _meta: foodMeta('other'),
       inputSchema: z.object({
         username: UsernameArg,
         max_calls: z
@@ -513,6 +521,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         'reason}: derived from the visit history or added with untappd_favorite_add), and total_visits; plus a freshness ' +
         'block (last_synced_at, coverage_complete, caveat). Run untappd_sync_user_venues first.',
       annotations: toolAnnotations({ title: 'Check if a user has been to a venue (from the cache)', readOnly: true, idempotent: true, openWorld: false }),
+      _meta: foodMeta('lookup'),
       inputSchema: z.object({
         username: UsernameArg,
         queries: z.array(VenueQueryArg).min(1).max(50).describe('Places to check (1–50); each needs venue_ids, name, or lat+lng'),
@@ -595,6 +604,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         '≥4.25 / had ≥3 times, or added with untappd_favorite_add). Reports per-source freshness so you can ' +
         'caveat incomplete data. Requires bid or beer_name. Run untappd_sync_user_beers first for full coverage.',
       annotations: toolAnnotations({ title: 'Check if a user has had a beer (from the cache)', readOnly: true, idempotent: true, openWorld: false }),
+      _meta: foodMeta('lookup', { aliases: ['have i had', 'tried before'] }),
       inputSchema: z.object({
         username: UsernameArg,
         bid: z.number().int().positive().optional().describe('Exact Untappd beer id to look for'),
@@ -630,6 +640,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         '"any_not_had" (at least one of them still needs it) — with qualifying_bids and a per-user freshness block. ' +
         'Run untappd_sync_user_beers first (for every user); the freshness block flags if coverage is incomplete.',
       annotations: toolAnnotations({ title: 'Batch-check many beers against the cache', readOnly: true, idempotent: true, openWorld: false }),
+      _meta: foodMeta('lookup'),
       inputSchema: z.object({
         username: UsernameArg,
         usernames: UsernamesArg,
@@ -696,6 +707,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         'untappd_sync_user_beers first; if coverage is incomplete the freshness caveat flags that a "not had" may be ' +
         'a false negative.',
       annotations: toolAnnotations({ title: 'From a list of beers, return the ones a user has NOT had', readOnly: true, idempotent: true, openWorld: false }),
+      _meta: foodMeta('lookup'),
       inputSchema: z.object({
         username: UsernameArg,
         bids: z.array(z.number().int().positive()).min(1).max(500).describe('Candidate beer ids to filter (1–500)'),
@@ -730,6 +742,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         'for non-self accounts is only the recent window; for full coverage of which beers a user has had, use ' +
         'untappd_cache_has_had / not_had instead. Run untappd_sync_checkins first.',
       annotations: toolAnnotations({ title: 'Query cached check-ins with filters', readOnly: true, idempotent: true, openWorld: false }),
+      _meta: foodMeta('lookup'),
       inputSchema: z.object({
         username: UsernameArg,
         brewery_id: z.number().int().positive().optional().describe('Exact brewery id'),
@@ -774,6 +787,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         'untappd_sync_wishlist and Untappd likes untappd_sync_brewery_likes — ' +
         'and says so per beer (score, boosted_by, wishlisted, brewery_favorite/favorite).',
       annotations: toolAnnotations({ title: 'Top-rated beers a user has NOT had, from a candidate list', readOnly: false, idempotent: false, openWorld: true, destructive: false }),
+      _meta: foodMeta('other', { aliases: ['what should i order', 'beers i have not had'] }),
       inputSchema: z.object({
         username: UsernameArg,
         usernames: UsernamesArg,
@@ -964,6 +978,7 @@ export function registerCacheTools(server: McpServer, client: UntappdClient, cac
         'cannot be re-fetched). Shared beer, venue and brewery facts are kept. The preview shows the username and exactly how many rows will be removed. Omit username ' +
         `for your own account. ${CONFIRM_FLOW}`,
       annotations: toolAnnotations({ title: "Forget a user's cached check-ins", readOnly: false, idempotent: true, openWorld: false, destructive: true }),
+      _meta: foodMeta('change'),
       inputSchema: z.object({
         username: UsernameArg,
         confirmToken: confirmTokenParam,
