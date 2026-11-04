@@ -15,7 +15,8 @@ const FEED_VIEW = z
   .describe(
     'Response shape: "compact" (default) projects each check-in to {id, user, beer, brewery, venue, rating, comment, ' +
       'toast/comment counts}; "full" returns Untappd\'s whole ~5 KB record; "brief" returns one line per check-in: ' +
-      '<user>: <beer> (<brewery>) at <venue> — <ISO date or "no date"> — <rated N|not rated>.',
+      '<user>: <beer> (<brewery>) at <venue> — <ISO date or "no date"> — <rated N|not rated>, inside the untrusted-data ' +
+        'envelope as data: string[], with "-- " note lines ("-- none", "-- more").',
   );
 
 export function registerFeedTools(server: McpServer, client: UntappdClient): void {

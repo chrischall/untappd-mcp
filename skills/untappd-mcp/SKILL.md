@@ -75,7 +75,11 @@ and you still get compact. `view: "full"` is the only way back.
 
 `untappd_activity_feed` also takes a third rung, `view: "brief"`: one line per
 check-in, `<user>: <beer> (<brewery>) at <venue> — <ISO date | no date> —
-<rated N | not rated>`, each at most 120 characters. It is the shape a
+<rated N | not rated>`, each at most 120 characters, answered inside the
+untrusted-data envelope as `data: string[]` (the names are other Untappd
+users'). A line starting `-- ` is a note, not a check-in: `-- none` for an
+empty feed, `-- more` when an older page exists; a name that itself starts
+with `-- ` or `\` is escaped with one leading `\`. It is the shape a
 context-group host reads aloud (below); use it when you only need to say what
 friends have been drinking.
 

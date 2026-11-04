@@ -1,3 +1,5 @@
+import { UNTRUSTED_CONTENT_RULE, untrustedEnvelope } from '@chrischall/mcp-utils';
+
 /**
  * Context-group hints, published on each tool as `_meta.mint` (the mcp-host
  * context-groups contract, `mintHintSchema`). Inert data: a host that does not
@@ -50,8 +52,10 @@ function isoInstant(v: unknown): string | undefined {
 
 /**
  * One check-in as one line, `<user>: <beer> (<brewery>) at <venue> — <ISO date | no date> — <rated N | not rated>`,
- * at most 120 characters (the title is shortened). Read only from the fields a
- * check-in record carries; a rating of 0 is Untappd's "no rating".
+ * cut to at most 120 characters as a whole, title first. A title starting with
+ * `-- ` or `\\` is escaped with one leading `\\`, so an item never reads as a
+ * note. Read only from the fields a check-in record carries; a rating of 0 is
+ * Untappd's "no rating".
  */
 export function briefCheckinLine(item: unknown): string {
   const c = dict(item);
@@ -59,7 +63,9 @@ export function briefCheckinLine(item: unknown): string {
   const beer = str(dict(c.beer).beer_name) ?? 'a beer';
   const brewery = str(dict(c.brewery).brewery_name);
   const venue = str(dict(c.venue).venue_name);
-  const title = `${who}: ${beer}${brewery ? ` (${brewery})` : ''}${venue ? ` at ${venue}` : ''}`;
+  const raw = `${who}: ${beer}${brewery ? ` (${brewery})` : ''}${venue ? ` at ${venue}` : ''}`;
+  // A title that could read as a note (`-- `) or lose a character to the host's one-backslash strip is escaped.
+  const title = raw.startsWith('-- ') || raw.startsWith('\\') ? `\\${raw}` : raw;
   const rating = typeof c.rating_score === 'number' && c.rating_score > 0 ? `rated ${c.rating_score}` : 'not rated';
   const tail = ` — ${isoInstant(c.created_at) ?? 'no date'} — ${rating}`;
   const room = BRIEF_MAX - tail.length;
@@ -67,8 +73,34 @@ export function briefCheckinLine(item: unknown): string {
   return `${shown}${tail}`;
 }
 
-/** A `{ checkins: { items } }` response as brief lines, one per check-in (none for an empty or unexpected page). */
+/** Who writes the brief lines' text — the head of the untrusted-data envelope's note. */
+const BRIEF_WHO_WROTE =
+  'Check-in user names and beer, brewery and venue names are written by other Untappd users and breweries.';
+
+/**
+ * A `{ checkins: { items, pagination } }` response as brief lines, one per
+ * check-in, plus `-- ` notes: `-- none` for an empty page, `-- more` when
+ * Untappd returned an older-page cursor (`pagination.max_id`), and
+ * `-- error: …` for a shape this view does not read.
+ */
+export function briefCheckinLines(resp: unknown): string[] {
+  const box = dict(dict(resp).checkins);
+  if (!Array.isArray(box.items)) {
+    return ['-- error: Untappd answered in a shape this brief view does not read; ask with view "full"'];
+  }
+  if (box.items.length === 0) return ['-- none'];
+  const lines = box.items.map(briefCheckinLine);
+  const next = dict(box.pagination).max_id;
+  if (typeof next === 'number' && next > 0) lines.push('-- more');
+  return lines;
+}
+
+/**
+ * The brief answer: the lines inside the fleet's untrusted-data envelope as
+ * `data: string[]`, minified, note first — the text in them is other people's.
+ */
 export function briefCheckins(resp: unknown): string {
-  const items = dict(dict(resp).checkins).items;
-  return Array.isArray(items) ? items.map(briefCheckinLine).join('\n') : '';
+  return JSON.stringify(
+    untrustedEnvelope(briefCheckinLines(resp), { note: `${BRIEF_WHO_WROTE} ${UNTRUSTED_CONTENT_RULE}` }),
+  );
 }
