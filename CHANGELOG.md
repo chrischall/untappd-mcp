@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.6.1](https://github.com/chrischall/untappd-mcp/compare/v2.6.0...v2.6.1) (2026-11-04)
+
+
+### Bug Fixes
+
+* **brief:** align the brief view with the fleet contract ([#263](https://github.com/chrischall/untappd-mcp/issues/263)) ([6352327](https://github.com/chrischall/untappd-mcp/commit/6352327eff749fe3cc0a7b8b89fb5d3f51a995f3))
+
 ## [2.6.0](https://github.com/chrischall/untappd-mcp/compare/v2.5.2...v2.6.0) (2026-11-04)
 
 
