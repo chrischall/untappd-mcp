@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
+import { foodMeta } from './hints.js';
 import { minifiedResult, resolveView, toolAnnotations, viewParam, viewResult } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 import { compactCheckins, UNTAPPD_VIEWS } from '../compact.js';
@@ -13,6 +14,7 @@ export function registerDiscoverTools(server: McpServer, client: UntappdClient):
         'Get the beers trending on Untappd right now, split into macro (big/widely-available) and micro ' +
         '(craft/independent) lists. Read-only.',
       annotations: toolAnnotations({ title: 'Get trending beers', readOnly: true, idempotent: false, openWorld: true }),
+      _meta: foodMeta('lookup', { aliases: ['popular beers', 'trending beers'] }),
       inputSchema: z.object({}),
     },
     async () => {
@@ -29,6 +31,7 @@ export function registerDiscoverTools(server: McpServer, client: UntappdClient):
         'Get your Untappd notifications — toasts, comments, friend requests, and badges earned on YOUR account, ' +
         'plus news items. Read-only.',
       annotations: toolAnnotations({ title: 'Get your Untappd notifications', readOnly: true, idempotent: false, openWorld: true }),
+      _meta: foodMeta('whats-new', { aliases: ['toasts', 'badges', 'friend requests', 'beer notifications'] }),
       inputSchema: z.object({
         limit: z.number().int().min(1).max(50).optional().describe('Max notifications (1–50, default 25)'),
         offset: z.number().int().min(0).optional().describe('Result offset for paging (default 0)'),
@@ -48,6 +51,7 @@ export function registerDiscoverTools(server: McpServer, client: UntappdClient):
         'Get recent check-ins near a location (lat/lng) — what people are drinking nearby right now. Optionally ' +
         'widen the search radius. Read-only.',
       annotations: toolAnnotations({ title: 'Get nearby Untappd check-ins', readOnly: true, idempotent: false, openWorld: true }),
+      _meta: foodMeta('lookup', { aliases: ['drinking nearby'] }),
       inputSchema: z.object({
         lat: z.number().min(-90).max(90).describe('Latitude of the location'),
         lng: z.number().min(-180).max(180).describe('Longitude of the location'),

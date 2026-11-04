@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
+import { foodMeta } from './hints.js';
 import { minifiedResult, resolveView, toolAnnotations, viewParam, viewResult } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 import { compactCheckins, UNTAPPD_VIEWS, upstreamCompact } from '../compact.js';
@@ -29,6 +30,7 @@ export function registerVenueTools(server: McpServer, client: UntappdClient, cac
         'Search Untappd for venues (bars, breweries, restaurants) by name. Returns matches with their venue id, ' +
         'category, and location. Feed a venue id into untappd_venue_info for full detail. Read-only.',
       annotations: toolAnnotations({ title: 'Search Untappd venues', readOnly: true, idempotent: true, openWorld: true }),
+      _meta: foodMeta('lookup', { aliases: ['bar', 'pub', 'taproom', 'brewpub'] }),
       inputSchema: z.object({
         query: z.string().min(1).describe('Venue name to search for'),
         limit: z.number().int().min(1).max(50).optional().describe('Max results (1–50, default 25)'),
@@ -48,6 +50,7 @@ export function registerVenueTools(server: McpServer, client: UntappdClient, cac
         'Get full detail for a venue by its Untappd venue id: category, address, contact, rating, total check-ins, ' +
         'and — on view:"full" — top beers and recent activity. Get an id from untappd_search_venue. Read-only.',
       annotations: toolAnnotations({ title: 'Get Untappd venue detail', readOnly: true, idempotent: true, openWorld: true }),
+      _meta: foodMeta('lookup'),
       inputSchema: z.object({
         venue_id: z.number().int().positive().describe('Untappd venue id'),
         view: viewParam(UNTAPPD_VIEWS, { note: 'compact also asks Untappd for its own slim record, dropping the embedded activity/list blocks; "full" returns everything.' }),
@@ -80,6 +83,7 @@ export function registerVenueTools(server: McpServer, client: UntappdClient, cac
         'with untappd_favorite_add; default your account) — applied on read, so never stale. Get an id from ' +
         'untappd_search_venue. Read-only.',
       annotations: toolAnnotations({ title: "Get a venue's verified beer menu (section-paged)", readOnly: true, idempotent: true, openWorld: true }),
+      _meta: foodMeta('lookup', { aliases: ['on tap', 'tap list', 'beer menu'] }),
       inputSchema: z.object({
         venue_id: z.number().int().positive().describe('Untappd venue id'),
         menu_id: z.number().int().positive().optional().describe('Restrict to a single menu id (from a prior result). Optional.'),
@@ -168,6 +172,7 @@ export function registerVenueTools(server: McpServer, client: UntappdClient, cac
         'Resolve a Foursquare venue id to its Untappd venue. Useful to turn a foursquare_id (e.g. from a check-in) ' +
         'into an Untappd venue you can pass to untappd_venue_info / untappd_venue_activity. Read-only.',
       annotations: toolAnnotations({ title: 'Look up an Untappd venue by Foursquare id', readOnly: true, idempotent: true, openWorld: true }),
+      _meta: foodMeta('lookup'),
       inputSchema: z.object({
         foursquare_id: z.string().min(1).describe('Foursquare venue id'),
       }),
@@ -187,6 +192,7 @@ export function registerVenueTools(server: McpServer, client: UntappdClient, cac
         'Page backwards with max_id (the pagination.max_id from a prior call). Cached locally for ' + TTL_HOURS + ' hours ' +
         'per venue + limit + max_id (cache.hit, fetched_at, expires_at); refresh:true re-fetches. Read-only.',
       annotations: toolAnnotations({ title: 'Get recent check-ins at a venue', readOnly: true, idempotent: false, openWorld: true }),
+      _meta: foodMeta('lookup'),
       inputSchema: z.object({
         venue_id: z.number().int().positive().describe('Untappd venue id'),
         limit: z.number().int().min(1).max(50).optional().describe('Max check-ins (1–50, default 25)'),

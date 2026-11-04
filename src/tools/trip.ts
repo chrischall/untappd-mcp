@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
+import { foodMeta } from './hints.js';
 import { RateLimitError, createHelpfulError, messageOf, minifiedResult, toolAnnotations } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 import { DEFAULT_VISIT_RADIUS_M, haversineM, type BreweryBeerList, type BreweryBeerRow, type VenueQuery, type VisitedVenue } from '../cache/store.js';
@@ -96,6 +97,7 @@ export function registerTripTools(server: McpServer, client: UntappdClient, cach
         idempotent: true,
         openWorld: true,
       }),
+      _meta: foodMeta('lookup', { aliases: ['brewery crawl', 'bar crawl', 'beer trip'] }),
       inputSchema: z.object({
         username: UsernameArg,
         usernames: z

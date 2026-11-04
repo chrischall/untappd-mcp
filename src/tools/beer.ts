@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
+import { foodMeta } from './hints.js';
 import { resolveView, toolAnnotations, viewParam, viewResult } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 import { compactBeerSearch, compactCheckins, UNTAPPD_VIEWS, upstreamCompact } from '../compact.js';
@@ -41,6 +42,7 @@ export function registerBeerTools(server: McpServer, client: UntappdClient, cach
         'beer id (bid), brewery, style, ABV, IBU, and global rating. Feed a bid into untappd_beer_info for full ' +
         'detail. Read-only.',
       annotations: toolAnnotations({ title: 'Search Untappd beers', readOnly: true, idempotent: true, openWorld: true }),
+      _meta: foodMeta('lookup', { aliases: ['beer', 'ipa', 'stout', 'brew'] }),
       inputSchema: z.object({
         query: z.string().min(1).describe('Beer name to search for'),
         limit: z.number().int().min(1).max(50).optional().describe('Max results (1–50, default 25)'),
@@ -71,6 +73,7 @@ export function registerBeerTools(server: McpServer, client: UntappdClient, cach
         'Get full detail for a beer by its Untappd beer id (bid): description, style, ABV, IBU, brewery, rating, ' +
         'total check-in count, and — on view:"full" — recent activity. Get a bid from untappd_search_beer. Read-only.',
       annotations: toolAnnotations({ title: 'Get Untappd beer detail', readOnly: true, idempotent: true, openWorld: true }),
+      _meta: foodMeta('lookup'),
       inputSchema: z.object({
         bid: BidSchema,
         // No local projection here: compact is forwarded to Untappd as its OWN
@@ -95,6 +98,7 @@ export function registerBeerTools(server: McpServer, client: UntappdClient, cach
         'Get the recent public check-ins for a beer by its bid — who drank it, their rating, comment, and venue. ' +
         'Page backwards with max_id (the pagination.max_id from a prior call). Read-only.',
       annotations: toolAnnotations({ title: 'Get recent check-ins for a beer', readOnly: true, idempotent: false, openWorld: true }),
+      _meta: foodMeta('lookup'),
       inputSchema: z.object({
         bid: BidSchema,
         limit: z.number().int().min(1).max(50).optional().describe('Max check-ins (1–50, default 25)'),

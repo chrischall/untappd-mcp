@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { delimiter, extname, join } from 'node:path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
+import { foodMeta } from './hints.js';
 import {
   confirmTokenParam,
   McpToolError,
@@ -227,6 +228,7 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
         `already toasted removes the toast. Writes to your Untappd account and is visible to others. ${CONFIRM_FLOW}`,
       // Destructive: a toast lands in the check-in owner's notifications, and toggling it back off cannot un-notify them.
       annotations: toolAnnotations({ title: 'Toast an Untappd check-in', readOnly: false, idempotent: false, openWorld: true, destructive: true }),
+      _meta: foodMeta('send', { aliases: ['toast', 'cheers'] }),
       inputSchema: z.object({
         checkin_id: CheckinIdSchema,
         confirmToken: confirmTokenParam,
@@ -270,6 +272,7 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
         CONFIRM_FLOW,
       // Destructive: the comment reaches the check-in owner (and other readers); untappd_delete_comment removes it but cannot un-notify anyone.
       annotations: toolAnnotations({ title: 'Comment on an Untappd check-in', readOnly: false, idempotent: false, openWorld: true, destructive: true }),
+      _meta: foodMeta('send', { aliases: ['comment'] }),
       inputSchema: z.object({
         checkin_id: CheckinIdSchema,
         comment: z.string().min(1).max(2000).describe('Comment text to post'),
@@ -312,6 +315,7 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
       description:
         `Delete one of YOUR comments by its comment id (the id from a check-in's comments list). ${CONFIRM_FLOW}`,
       annotations: toolAnnotations({ title: 'Delete a comment from an Untappd check-in', readOnly: false, idempotent: true, openWorld: true, destructive: true }),
+      _meta: foodMeta('change'),
       inputSchema: z.object({
         comment_id: z.number().int().positive().describe('Untappd comment id (from a check-in\'s comments.items)'),
         confirmToken: confirmTokenParam,
@@ -343,6 +347,7 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
       description:
         `Permanently delete one of YOUR check-ins by its id. This is destructive and cannot be undone. ${CONFIRM_FLOW}`,
       annotations: toolAnnotations({ title: 'Delete an Untappd check-in', readOnly: false, idempotent: true, openWorld: true, destructive: true }),
+      _meta: foodMeta('change'),
       inputSchema: z.object({
         checkin_id: CheckinIdSchema,
         confirmToken: confirmTokenParam,
@@ -383,6 +388,7 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
         `that will be posted. ${CONFIRM_FLOW}`,
       // Destructive: it publishes to your public feed, where friends see it; untappd_delete_checkin cannot unpublish what they saw.
       annotations: toolAnnotations({ title: 'Check in a beer on Untappd', readOnly: false, idempotent: false, openWorld: true, destructive: true }),
+      _meta: foodMeta('change', { aliases: ['check in', 'log a beer', 'rate a beer', 'drinking'] }),
       inputSchema: z.object({
         bid: z.number().int().positive().describe('Untappd beer id to check in (from untappd_search_beer)'),
         rating: RatingSchema.optional().describe('Rating 0–5 in 0.25 increments (omit for no rating)'),

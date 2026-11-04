@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
+import { foodMeta } from './hints.js';
 import { minifiedResult, resolveView, toolAnnotations, viewParam, viewResult } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 import { UNTAPPD_VIEWS, compactBreweryBeerList, upstreamCompact } from '../compact.js';
@@ -22,6 +23,7 @@ export function registerBreweryTools(
         'Search Untappd for breweries by name. Returns matches with their brewery id, location, type, and beer ' +
         'count. Feed a brewery id into untappd_brewery_info for full detail. Read-only.',
       annotations: toolAnnotations({ title: 'Search Untappd breweries', readOnly: true, idempotent: true, openWorld: true }),
+      _meta: foodMeta('lookup', { aliases: ['brewery', 'brewer'] }),
       inputSchema: z.object({
         query: z.string().min(1).describe('Brewery name to search for'),
         limit: z.number().int().min(1).max(50).optional().describe('Max results (1–50, default 25)'),
@@ -44,6 +46,7 @@ export function registerBreweryTools(
         'claimed_status.follow_status is whether the SIGNED-IN account follows/likes the brewery — never another ' +
         "user's; for theirs, run untappd_sync_brewery_likes and read untappd_favorites_list (source \"untappd\").",
       annotations: toolAnnotations({ title: 'Get Untappd brewery detail', readOnly: true, idempotent: true, openWorld: true }),
+      _meta: foodMeta('lookup'),
       inputSchema: z.object({
         brewery_id: z.number().int().positive().describe('Untappd brewery id'),
         view: viewParam(UNTAPPD_VIEWS, { note: 'compact also asks Untappd for its own slim record, dropping the embedded activity/list blocks; "full" returns everything.' }),
@@ -73,6 +76,7 @@ export function registerBreweryTools(
         'reason} for the brewery and on each favorite beer (derived from username\'s history or added with ' +
         'untappd_favorite_add; default your account). view:"full" always calls Untappd and returns its raw page. Read-only.',
       annotations: toolAnnotations({ title: "Get a brewery's beer list", readOnly: true, idempotent: true, openWorld: true }),
+      _meta: foodMeta('lookup'),
       inputSchema: z.object({
         brewery_id: z.number().int().positive().describe('Untappd brewery id'),
         limit: z.number().int().min(1).max(50).optional().describe('Max beers (1–50, default 25)'),

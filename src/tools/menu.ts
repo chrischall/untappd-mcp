@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
+import { foodMeta } from './hints.js';
 import { createHelpfulError, minifiedResult, toolAnnotations } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 import { menuPick, venuePick, type PickDeps } from '../menu/pick.js';
@@ -59,6 +60,7 @@ export function registerMenuTools(
         'a false negative and another_run_needed is true. api_budget is also capped to the quota Untappd reports, ' +
         'when it reports one. Omit username for your own account.',
       annotations: toolAnnotations({ title: "Pick beers off a tap list that a user hasn't had", readOnly: false, idempotent: false, openWorld: true, destructive: false }),
+      _meta: foodMeta('other', { aliases: ['what should i order', 'tap list', 'beer menu'] }),
       inputSchema: z.object({
         username: UsernameArg,
         items: z
@@ -107,6 +109,7 @@ export function registerMenuTools(
         '(menu_complete is false only if the budget ran out mid-menu). A venue with no verified menu comes back ' +
         'unresolved — use untappd_menu_pick with the tap list instead. Omit username for your own account.',
       annotations: toolAnnotations({ title: "Pick beers off a venue's Untappd menu that a user hasn't had", readOnly: false, idempotent: false, openWorld: true, destructive: false }),
+      _meta: foodMeta('other', { aliases: ['what should i order', 'on tap'] }),
       inputSchema: z.object({
         venue: z
           .union([z.string().min(1), z.number().int().positive()])

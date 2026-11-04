@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import { confirmTokenParam, minifiedResult, toolAnnotations } from '@chrischall/mcp-utils';
 import type { UntappdClient } from '../client.js';
 import { CONFIRM_FLOW, confirmWrite } from './confirm.js';
+import { foodMeta, type MintIntent } from './hints.js';
 
 // The endpoint PATHS below are confirmed from the Untappd app's own JS bundle
 // (`friend/request`, `friend/accept`, `friend/reject`, `friend/remove`). The
@@ -24,6 +25,8 @@ interface FriendAction {
   title: string;
   verb: string;
   detail: string;
+  /** The context-group intent: a request reaches another person; the rest change your own friend list. */
+  intent: MintIntent;
 }
 
 const ACTIONS: FriendAction[] = [
@@ -33,6 +36,7 @@ const ACTIONS: FriendAction[] = [
     title: 'Send an Untappd friend request',
     verb: 'send a friend request to',
     detail: 'Sends a friend request to another user, who will be notified.',
+    intent: 'send',
   },
   {
     tool: 'untappd_accept_friend',
@@ -40,6 +44,7 @@ const ACTIONS: FriendAction[] = [
     title: 'Accept an Untappd friend request',
     verb: 'accept the incoming friend request from',
     detail: 'Accepts an incoming friend request (see untappd_pending_friends for pending uids).',
+    intent: 'change',
   },
   {
     tool: 'untappd_reject_friend',
@@ -47,6 +52,7 @@ const ACTIONS: FriendAction[] = [
     title: 'Reject an Untappd friend request',
     verb: 'reject the incoming friend request from',
     detail: 'Rejects/ignores an incoming friend request (see untappd_pending_friends for pending uids).',
+    intent: 'change',
   },
   {
     tool: 'untappd_remove_friend',
@@ -54,6 +60,7 @@ const ACTIONS: FriendAction[] = [
     title: 'Remove an Untappd friend',
     verb: 'remove your friendship with',
     detail: 'Removes an existing friend, or cancels a friend request you sent.',
+    intent: 'change',
   },
 ];
 
@@ -72,6 +79,7 @@ export function registerFriendActionTools(server: McpServer, client: UntappdClie
         // un-sent, and a rejection cannot be un-rejected, so none of them has an
         // inverse in this tool set.
         annotations: toolAnnotations({ title: action.title, readOnly: false, idempotent: true, openWorld: true, destructive: true }),
+        _meta: foodMeta(action.intent, action.intent === 'send' ? { aliases: ['friend request', 'add a friend'] } : {}),
         inputSchema: z.object({
           target_uid: TargetUidSchema,
           confirmToken: confirmTokenParam,
