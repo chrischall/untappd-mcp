@@ -107,6 +107,7 @@ const EXPECTED_INTENT: Record<string, string> = {
   untappd_cache_has_had_many: 'lookup',
   untappd_cache_not_had: 'lookup',
   untappd_cache_query: 'lookup',
+  untappd_upload_slots: 'lookup',
 
   // Reads that refresh the local cache as they go: not readOnlyHint, so they take a write intent.
   untappd_top_not_had: 'other',

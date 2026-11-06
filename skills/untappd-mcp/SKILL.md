@@ -25,9 +25,13 @@ client credentials):
 
 Two things the server enforces that you should plan around:
 
-- **Photos:** `untappd_checkin`'s `photo_path` must be a file inside
-  `UNTAPPD_PHOTO_DIR` (default `~/Downloads/untappd-mcp`); anything else (e.g.
-  `~/Pictures/beer.jpg`) is refused. Ask the user to move the photo there first.
+- **Photos:** pass exactly one of `photo_path`, `photo_inline` or
+  `photo_blob_key` (JPEG/PNG, max 15 MB). Locally, `photo_path` must be a file
+  inside `UNTAPPD_PHOTO_DIR` (default `~/Downloads/untappd-mcp`); anything else
+  (e.g. `~/Pictures/beer.jpg`) is refused — ask the user to move the photo there
+  first. On the **hosted connector** a path cannot work: call
+  `untappd_upload_slots`, PUT the photo with the returned `curl`, then pass its
+  `blobKey` as `photo_blob_key` (or, for a small photo, `photo_inline` base64).
 - **Time zone:** on a hosted connector the server usually runs in UTC, so pass
   `timezone` (the drinker's IANA zone, e.g. `America/New_York`) on
   `untappd_checkin` unless `UNTAPPD_TIMEZONE` is set — otherwise the check-in is
@@ -179,9 +183,8 @@ preview). `MCP_CONFIRM_MODE` on the server can make this `auto` or `refuse`.
 - `untappd_toast` — toast/like a check-in (this endpoint is a toggle).
 - `untappd_add_comment` — comment on a check-in.
 - `untappd_checkin` — post a new beer check-in to your feed (needs a `bid` from
-  `untappd_search_beer`; optional `rating` 0–5 in 0.25 steps, `shout`, venue).
-
-Photo attachment and wishlist add/remove are not yet supported.
+  `untappd_search_beer`; optional `rating` 0–5 in 0.25 steps, `shout`, venue,
+  one photo — see **Photos** above).
 
 ## Check-in cache
 

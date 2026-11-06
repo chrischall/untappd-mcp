@@ -310,6 +310,19 @@ bump doesn't need a code change. Where credentials arrive through
 - `untappd_checkin` opens the photo blob *before* POSTing the check-in (so a bad
   path can't orphan a photo-less check-in), and a failed S3 photo upload is
   surfaced as `photo_error` rather than thrown — the check-in already exists.
+- **Check-in photos have three routes, exactly one per call** — `photo_path`,
+  `photo_inline`, `photo_blob_key` (+ the read-only `untappd_upload_slots`).
+  A lone LOCAL `photo_path` keeps `checkPhoto` (photo-dir confinement, streamed
+  `fileBlob`); everything else goes through `resolveUploadSource`
+  (`@chrischall/mcp-utils/export`), which owns the exactly-one check, the
+  image-type/cap/magic-byte checks, and the hosted refusal of a path (hosted =
+  `isHostedEnv()`: `MCP_DATA_DIR` or `MCP_BLOB_BASE_URL` set). Both routes bind
+  the photo's sha256 into the confirm payload, re-resolved on the confirmed call.
+  An uploaded blob is `release()`d ONLY once the check-in AND the photo upload
+  succeed; every other outcome (photo_error, timed-out recovery, a thrown POST)
+  keeps it and says so (`photo_blob.kept`). A failed delete is reported, never
+  thrown — the check-in already exists. The blob store's host is the per-deployment
+  mcp-host gateway, so it is not (and cannot be) in `mint.yaml` egress.
 - **AI-maintained**: the README says so and `src/index.ts` prints the same
   notice to stderr at startup.
 

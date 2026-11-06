@@ -235,6 +235,10 @@
       "description": "Post a new beer check-in, optionally with a photo (asks you to confirm first)"
     },
     {
+      "name": "untappd_upload_slots",
+      "description": "Get upload URLs for check-in photos on the hosted connector"
+    },
+    {
       "name": "untappd_delete_checkin",
       "description": "Delete one of your check-ins (asks you to confirm first)"
     },

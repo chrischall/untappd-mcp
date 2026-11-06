@@ -92,3 +92,8 @@ egress:
     #   - a signed upload URL returned by the API (often storage.googleapis.com / s3)
     # Confirm the concrete host(s) against a live run and add them, or
     # the isolated tier will block the call.
+    #
+    # Not listed: mcp-host's own blob store (MCP_BLOB_BASE_URL, the gateway
+    # serving this connector — its host differs per deployment). The server
+    # GETs + DELETEs check-in photos the caller uploaded through
+    # untappd_upload_slots. Signed requests only; no Untappd credential is sent.

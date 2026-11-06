@@ -75,6 +75,7 @@ describe('tool registry', () => {
       'untappd_add_comment',
       'untappd_delete_comment',
       'untappd_checkin',
+      'untappd_upload_slots',
       'untappd_delete_checkin',
       'untappd_wishlist_add',
       'untappd_wishlist_remove',
@@ -82,6 +83,6 @@ describe('tool registry', () => {
     ].sort();
 
     expect(allNames).toEqual(expected);
-    expect(tools).toHaveLength(38);
+    expect(tools).toHaveLength(39);
   });
 });
