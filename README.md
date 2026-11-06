@@ -82,11 +82,29 @@ Reads: `untappd_search_beer`, `untappd_beer_info`, `untappd_beer_activity`,
 `untappd_user_info`, `untappd_user_checkins`, `untappd_user_wishlist`,
 `untappd_user_beers`, `untappd_user_badges`, `untappd_user_friends`, `untappd_pending_friends`,
 `untappd_activity_feed`, `untappd_checkin_info`, `untappd_resolve`, `untappd_open_url`, `untappd_user_venues`, `untappd_venue_by_foursquare`, `untappd_trending`,
-`untappd_notifications`, `untappd_local_checkins`, `untappd_healthcheck`.
+`untappd_notifications`, `untappd_local_checkins`, `untappd_upload_slots`, `untappd_healthcheck`.
 
 Writes (each asks you to confirm first — see [Confirmations](#confirmations)): `untappd_toast`, `untappd_add_comment`, `untappd_delete_comment`, `untappd_checkin`,
 `untappd_wishlist_add`, `untappd_wishlist_remove`, `untappd_delete_checkin`,
 `untappd_add_friend`, `untappd_accept_friend`, `untappd_reject_friend`, `untappd_remove_friend`.
+
+### Check-in photos
+
+`untappd_checkin` takes **one** photo (JPEG or PNG, max 15 MB) through exactly one of:
+
+- **`photo_path`** — a file on the machine the server runs on, inside `UNTAPPD_PHOTO_DIR`. Local installs
+  only: on the hosted connector the server can't see your files, so a path is refused with directions to
+  the slot flow below.
+- **`photo_inline`** — `{filename, contentBase64, mimeType?}`. Works anywhere; fine for a small photo, but
+  every byte rides inside the tool call.
+- **`photo_blob_key`** — the hosted connector's route. `untappd_upload_slots` (`slots: [{filename}]`) returns a
+  signed upload URL and a ready `curl` per photo; PUT the photo with it, then pass the slot's `blobKey`. It
+  refuses on a deployment with no blob store.
+
+Every route is checked the same way (image type, size cap, bytes that really are a JPEG/PNG), and the
+confirmation preview names the photo and its SHA-256 — a blob that changes between the preview and the
+confirmed call is refused (`DRAFT_CHANGED`). An uploaded blob is deleted only after the check-in **and** its
+photo succeed (`photo_blob: {deleted: true}`); otherwise it is kept (`kept: true`) so you can retry.
 
 Check-in cache: `untappd_sync_checkins`, `untappd_sync_user_beers`,
 `untappd_cache_has_had`, `untappd_cache_has_had_many`, `untappd_cache_not_had`,

@@ -76,9 +76,9 @@ describe('healthcheck build diagnostics', () => {
 
     const tools = out.tools as string[];
     // The full toolset (incl. the 17 cache, favorites and trip tools) is registered — this is the
-    // 58-tool set the server must expose.
-    expect(tools.length).toBe(58);
-    expect(out.tool_count).toBe(58);
+    // 59-tool set the server must expose.
+    expect(tools.length).toBe(59);
+    expect(out.tool_count).toBe(59);
     for (const name of CACHE_TOOLS) expect(tools).toContain(name);
 
     // The hash is the FNV-1a of the sorted names — stable and self-consistent.

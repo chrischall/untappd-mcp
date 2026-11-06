@@ -20,6 +20,18 @@ import {
   toolAnnotations,
   UnreachableError,
 } from '@chrischall/mcp-utils';
+import {
+  blobStoreFromEnv,
+  inlineFileSchema,
+  isHostedEnv,
+  MAX_UPLOAD_FILES,
+  mintUploadSlot,
+  resolveUploadMime,
+  resolveUploadSource,
+  sanitizeUploadFilename,
+  uploadSlotRequestSchema,
+  type UploadSource,
+} from '@chrischall/mcp-utils/export';
 import type { UntappdClient } from '../client.js';
 import { CONFIRM_FLOW, confirmWrite } from './confirm.js';
 
@@ -127,6 +139,42 @@ async function photoSha256(path: string): Promise<string> {
   const hash = createHash('sha256');
   await pipeline(createReadStream(path), hash);
   return hash.digest('hex');
+}
+
+/** The parameter names the photo routes are spelled with here, for resolveUploadSource's messages. */
+const PHOTO_PARAM_NAMES = {
+  path: 'photo_path',
+  inline: 'photo_inline',
+  blobKey: 'photo_blob_key',
+  slotTool: 'untappd_upload_slots',
+} as const;
+
+/** The image types Untappd takes for a check-in photo, as bare MIME types. */
+const PHOTO_MIME_TYPES = Object.values(PHOTO_CONTENT_TYPES);
+
+/** Untappd's `photo_file_ext` for an accepted photo MIME type. */
+function extForMime(mime: string): string {
+  return Object.entries(PHOTO_CONTENT_TYPES).find(([, m]) => m === mime)![0];
+}
+
+/**
+ * A photo that arrived as bytes — inline base64 or an upload-slot blob —
+ * through {@link resolveUploadSource}: exactly one source, image types only,
+ * the same cap as a local path, the bytes sniffed against the type. Called on
+ * EVERY phase, so the confirmed call re-reads the blob and a changed one no
+ * longer matches the sha256 bound into the token. Reading never deletes.
+ *
+ * A local `photo_path` does NOT come through here (it keeps {@link checkPhoto}
+ * and its photo-directory rules) — except on a hosted deployment, where
+ * resolveUploadSource is what refuses it, and when it was combined with
+ * another source, which resolveUploadSource refuses as "exactly one".
+ */
+function resolvePhotoSource(input: { path?: string; inline?: z.infer<typeof inlineFileSchema>; blobKey?: string }): Promise<UploadSource> {
+  return resolveUploadSource(input, {
+    maxBytes: MAX_PHOTO_BYTES,
+    allowedMimeTypes: PHOTO_MIME_TYPES,
+    names: PHOTO_PARAM_NAMES,
+  });
 }
 
 // Untappd ratings are 0–5 in 0.25 increments; 0 (or omitted) means no rating.
@@ -378,14 +426,63 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
   );
 
   server.registerTool(
+    'untappd_upload_slots',
+    {
+      title: 'Get upload URLs for Untappd check-in photos',
+      description:
+        'Get signed upload URLs for check-in photos — the way to attach a photo on the HOSTED connector, which cannot ' +
+        'read files on your machine. For each photo (JPEG or PNG, max 15 MB) it returns a blobKey and a ready curl ' +
+        'command: run the curl with the path to the photo (it must send exactly the returned Content-Type), then pass ' +
+        'the blobKey to untappd_checkin as photo_blob_key. URLs expire after 30 minutes. Posts nothing to Untappd. ' +
+        'Only available where the deployment provides a blob store; on a local install use photo_path or photo_inline.',
+      annotations: toolAnnotations({ title: 'Get upload URLs for Untappd check-in photos', readOnly: true, openWorld: false }),
+      _meta: foodMeta('lookup', { aliases: ['upload photo', 'beer photo'] }),
+      inputSchema: z.object({
+        slots: z
+          .array(uploadSlotRequestSchema)
+          .min(1)
+          .max(MAX_UPLOAD_FILES)
+          .describe(`One entry per photo to upload (at most ${MAX_UPLOAD_FILES}): {filename, mimeType?}. JPEG or PNG only.`),
+      }),
+    },
+    async ({ slots }) => {
+      const store = blobStoreFromEnv();
+      if (!store) {
+        throw createHelpfulError('Upload slots need the blob store a hosted deployment provides, and this server has no blob store.', {
+          hint: 'On a local install attach the photo with untappd_checkin photo_path (a file in UNTAPPD_PHOTO_DIR) or photo_inline (base64).',
+        });
+      }
+      // Refuse a non-photo before minting a URL the check-in would only reject later.
+      for (const req of slots) {
+        const mime = resolveUploadMime(sanitizeUploadFilename(req.filename), req.mimeType);
+        if (!PHOTO_MIME_TYPES.includes(mime)) {
+          throw createHelpfulError(`${req.filename}: ${mime} is not a check-in photo type.`, {
+            hint: 'Untappd check-in photos must be JPEG or PNG (.jpg, .jpeg or .png).',
+          });
+        }
+      }
+      return minifiedResult({
+        slots: slots.map((req) => mintUploadSlot(store, req)),
+        next:
+          'PUT each photo to its uploadUrl (the curl command, with the placeholder replaced by the file path), then ' +
+          'call untappd_checkin with photo_blob_key set to that slot\'s blobKey. The upload is deleted once the ' +
+          'check-in and its photo succeed.',
+      });
+    },
+  );
+
+  server.registerTool(
     'untappd_checkin',
     {
       title: 'Check in a beer on Untappd',
       description:
         'Post a NEW beer check-in to YOUR Untappd account — this publishes to your public feed. Provide the beer id ' +
         '(bid) from untappd_search_beer; optionally a rating (0–5 in 0.25 steps), a shout (comment), a venue via ' +
-        'foursquare_id, and a local photo via photo_path (JPEG/PNG). The preview shows the exact fields and photo ' +
-        `that will be posted. ${CONFIRM_FLOW}`,
+        'foursquare_id, and ONE photo (JPEG/PNG, max 15 MB) via exactly one of photo_path (a local file), ' +
+        'photo_inline (base64, for a small photo) or photo_blob_key. On the hosted connector, use the slot flow: call ' +
+        'untappd_upload_slots, PUT the photo with the returned curl, then pass its blobKey as photo_blob_key (a path ' +
+        'cannot work there). The preview shows the exact fields and photo that will be posted. ' +
+        `${CONFIRM_FLOW}`,
       // Destructive: it publishes to your public feed, where friends see it; untappd_delete_checkin cannot unpublish what they saw.
       annotations: toolAnnotations({ title: 'Check in a beer on Untappd', readOnly: false, idempotent: false, openWorld: true, destructive: true }),
       _meta: foodMeta('change', { aliases: ['check in', 'log a beer', 'rate a beer', 'drinking'] }),
@@ -400,7 +497,22 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
           .describe(
             'Optional path to a local JPEG/PNG photo (max 15 MB) to attach — it is published publicly. It must be ' +
               'inside the photo directory (UNTAPPD_PHOTO_DIR, default ~/Downloads/untappd-mcp). Only use a file the ' +
-              'user explicitly chose; the preview shows the resolved path and size for them to confirm.',
+              'user explicitly chose; the preview shows the resolved path and size for them to confirm. Local installs ' +
+              'only — refused on the hosted connector (use photo_blob_key).',
+          ),
+        photo_inline: inlineFileSchema
+          .optional()
+          .describe(
+            'Optional photo as base64: {filename, contentBase64, mimeType?}, JPEG or PNG, max 15 MB — it is published ' +
+              'publicly. Works on any deployment; for anything but a small photo prefer the upload slot flow ' +
+              '(photo_blob_key). Only use a photo the user explicitly chose.',
+          ),
+        photo_blob_key: z
+          .string()
+          .optional()
+          .describe(
+            'Optional blobKey of a photo PUT to a slot from untappd_upload_slots (hosted connector) — it is published ' +
+              'publicly. Deleted from the upload store once the check-in and its photo succeed; kept if they fail.',
           ),
         geolat: z.number().optional().describe('Optional latitude of the check-in'),
         geolng: z.number().optional().describe('Optional longitude of the check-in'),
@@ -422,13 +534,41 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
       }),
     },
     async (args, ctx) => {
-      const { bid, rating, shout, foursquare_id, photo_path, geolat, geolng, container_id, timezone: requestedTz, confirmToken } = args;
+      const {
+        bid, rating, shout, foursquare_id, photo_path, photo_inline, photo_blob_key, geolat, geolng, container_id,
+        timezone: requestedTz, confirmToken,
+      } = args;
       const { timezone, gmt_offset } = checkinTimezone(requestedTz);
-      // Vetted on every call, so the preview names the exact file (resolved path
-      // + size) that will be published — and a file whose bytes change between
-      // the preview and the confirmed call no longer matches the token.
-      const photo = photo_path !== undefined ? await checkPhoto(photo_path) : undefined;
-      const photo_sha256 = photo ? await photoSha256(photo.path) : undefined;
+      // Vetted on every call, so the preview names the exact photo that will be
+      // published — and one whose bytes change between the preview and the
+      // confirmed call no longer matches the token. A lone local photo_path keeps
+      // its own checks; every other route (and a path on a hosted deployment,
+      // which is refused there) goes through resolveUploadSource.
+      const localPath = photo_path !== undefined && photo_inline === undefined && photo_blob_key === undefined && !isHostedEnv();
+      const anyPhoto = photo_path !== undefined || photo_inline !== undefined || photo_blob_key !== undefined;
+      const source =
+        anyPhoto && !localPath
+          ? await resolvePhotoSource({ path: photo_path, inline: photo_inline, blobKey: photo_blob_key })
+          : undefined;
+      const photo: CheckedPhoto | undefined = localPath ? await checkPhoto(photo_path!) : undefined;
+      const photo_sha256 = photo ? await photoSha256(photo.path) : source?.sha256;
+      const photo_ext = photo?.ext ?? (source ? extForMime(source.mimeType) : undefined);
+      const photo_content_type = photo?.content_type ?? source?.mimeType;
+      const hasPhoto = photo !== undefined || source !== undefined;
+      // What the preview (and the token) names: a local file by its resolved
+      // path; bytes by name, type, size and hash (never the signed URL).
+      const photoPreview = photo
+        ? photo
+        : source
+          ? {
+              origin: source.origin,
+              file_name: source.fileName,
+              content_type: source.mimeType,
+              size_bytes: source.sizeBytes,
+              sha256: source.sha256,
+              ...(source.blobKey !== undefined ? { blob_key: source.blobKey } : {}),
+            }
+          : undefined;
       const form: Record<string, string | number | undefined> = {
         bid,
         rating: rating !== undefined ? rating.toFixed(2) : undefined,
@@ -439,8 +579,8 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
         container_id,
         timezone,
         gmt_offset,
-        is_photo: photo ? 'true' : 'false',
-        photo_file_ext: photo?.ext,
+        is_photo: hasPhoto ? 'true' : 'false',
+        photo_file_ext: photo_ext,
         platform: 'ios',
       };
       const request = { method: 'POST', path: '/checkin/add', form };
@@ -451,11 +591,13 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
         confirmToken,
         args,
         target: bid,
-        payload: { ...request, photo, photo_sha256 },
+        payload: { ...request, photo: photoPreview, photo_sha256 },
         preview: {
           action: 'checkin',
           ...request,
-          photo: photo ? { ...photo, note: 'this exact file will be uploaded PUBLICLY after the check-in is created' } : undefined,
+          photo: photoPreview
+            ? { ...photoPreview, note: 'this exact photo will be uploaded PUBLICLY after the check-in is created' }
+            : undefined,
           note: 'POSTs this check-in to your public Untappd feed.',
         },
       });
@@ -466,7 +608,17 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
       if (photo) {
         // file-backed, streamed — not heap-buffered; re-checks the size cap/roots at open.
         blob = await fileBlob(photo.path, { maxBytes: MAX_PHOTO_BYTES, label: 'Photo', allowedRoots: photoRoots() });
+      } else if (source) {
+        // Already read and hashed above; copied so the Blob owns a plain ArrayBuffer.
+        blob = new Blob([new Uint8Array(source.bytes)], { type: source.mimeType });
       }
+      // An uploaded blob is deleted only after the check-in AND its photo
+      // succeed; on any other outcome it is kept (and said so), so the caller
+      // can delete the check-in and retry with the same photo_blob_key. The
+      // blob store's retention prune reclaims it otherwise.
+      const keptBlob = source?.origin === 'blob'
+        ? { photo_blob: { deleted: false, kept: true, blob_key: source.blobKey, note: 'The uploaded photo was kept because it was not attached.' } }
+        : {};
 
       type AddResponse = { checkin_id?: number; photo_upload?: { url?: string; destination_url?: string } };
       const sentAt = Date.now();
@@ -491,8 +643,8 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
           checkin_id: found,
           recovered: true,
           photo_attached: false,
-          ...(photo
-            ? { photo_error: `Check-in ${found} was created, but its photo upload URL was lost with the timed-out response, so no photo was attached.` }
+          ...(hasPhoto
+            ? { photo_error: `Check-in ${found} was created, but its photo upload URL was lost with the timed-out response, so no photo was attached.`, ...keptBlob }
             : {}),
           note: 'Untappd did not answer in time, but the check-in was found on your account — it was created. Do not retry.',
         });
@@ -504,10 +656,10 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
       // never silently dropped.
       let photo_attached = false;
       let photo_error: string | undefined;
-      if (photo) {
+      if (hasPhoto) {
         if (data?.photo_upload?.url && data.checkin_id) {
           try {
-            await client.putBinary(data.photo_upload.url, blob!, photo.content_type);
+            await client.putBinary(data.photo_upload.url, blob!, photo_content_type!);
             await client.write('POST', '/photo/uploadComplete', {
               form: { checkin_id: data.checkin_id, destination_url: data.photo_upload.destination_url },
             });
@@ -519,11 +671,16 @@ export function registerCheckinTools(server: McpServer, client: UntappdClient): 
           photo_error = `Check-in ${data?.checkin_id} was created, but Untappd returned no photo upload URL, so no photo was attached.`;
         }
       }
+      // Release (delete) an uploaded blob only now that the photo is attached; a
+      // failed delete is reported, never thrown — the check-in already exists.
+      const blobOutcome =
+        source?.origin === 'blob' ? (photo_attached ? { photo_blob: await source.release() } : keptBlob) : {};
       return minifiedResult({
         checked_in: true,
         checkin_id: data?.checkin_id,
         photo_attached,
         ...(photo_error ? { photo_error } : {}),
+        ...blobOutcome,
         response: data,
       });
     },
