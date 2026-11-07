@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.7.0](https://github.com/chrischall/untappd-mcp/compare/v2.6.1...v2.7.0) (2026-11-07)
+
+
+### Features
+
+* **checkin:** attach check-in photos on the hosted connector ([#266](https://github.com/chrischall/untappd-mcp/issues/266)) ([88a2eff](https://github.com/chrischall/untappd-mcp/commit/88a2eff95b57f12cd0b6bb851ffd247d37283813))
+
+
+### Bug Fixes
+
+* **deps:** upgrade @chrischall/mcp-utils to 3.7.2 so uploads carry only the file's bytes ([#268](https://github.com/chrischall/untappd-mcp/issues/268)) ([a75d1c1](https://github.com/chrischall/untappd-mcp/commit/a75d1c1eb9f08dbd6ef441118b0885472f872e0b))
+
 ## [2.6.1](https://github.com/chrischall/untappd-mcp/compare/v2.6.0...v2.6.1) (2026-11-04)
 
 
