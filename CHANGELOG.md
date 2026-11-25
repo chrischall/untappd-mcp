@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.7.1](https://github.com/chrischall/untappd-mcp/compare/v2.7.0...v2.7.1) (2026-11-25)
+
+
+### Bug Fixes
+
+* **deps:** bump the production-dependencies group with 2 updates ([#272](https://github.com/chrischall/untappd-mcp/issues/272)) ([1fcef79](https://github.com/chrischall/untappd-mcp/commit/1fcef79fd010666fbbd82a255353fb6d157ade22))
+
 ## [2.7.0](https://github.com/chrischall/untappd-mcp/compare/v2.6.1...v2.7.0) (2026-11-07)
 
 
